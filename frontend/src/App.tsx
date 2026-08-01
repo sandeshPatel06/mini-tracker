@@ -1,10 +1,11 @@
 import { useState, useEffect, useCallback } from 'react';
-import { LogEntry, ProductivityStats, AppConfig, Page } from './types';
+import { LogEntry, ProductivityStats, AppConfig, Page, User } from './types';
 import Dashboard from './pages/Dashboard';
 import Timeline from './pages/Timeline';
 import Analytics from './pages/Analytics';
 import { OrganizationPage } from './pages/Organization';
 import { AcceptInvitePage } from './pages/AcceptInvite';
+import { AuthPage } from './pages/Auth';
 import './style.css';
 
 // Wails runtime bindings
@@ -38,9 +39,38 @@ export default function App() {
   const [config, setConfig] = useState<AppConfig | null>(null);
   const [loading, setLoading] = useState(true);
 
+  // User Auth & Session state
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [authChecked, setAuthChecked] = useState<boolean>(false);
+  const [isGuestMode, setIsGuestMode] = useState<boolean>(false);
+
   // Tracker Work Clock State
   const [isTrackingActive, setIsTrackingActive] = useState<boolean>(true);
   const [elapsedSeconds, setElapsedSeconds] = useState<number>(0);
+
+  // Verify active user session on startup
+  useEffect(() => {
+    fetch('/api/auth/me')
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (data && data.authenticated && data.user) {
+          setCurrentUser(data.user);
+        }
+      })
+      .catch(() => {})
+      .finally(() => {
+        setAuthChecked(true);
+      });
+  }, []);
+
+  const handleLogout = async () => {
+    try {
+      await fetch('/api/auth/logout', { method: 'POST' });
+    } catch {}
+    setCurrentUser(null);
+    setIsGuestMode(false);
+    setPage('dashboard');
+  };
 
   // Fetch initial tracker status
   useEffect(() => {
@@ -166,6 +196,19 @@ export default function App() {
   const isTracking = isTrackingActive;
   const isAIReady = config?.ai_configured ?? false;
 
+  // Show Auth Page if user is not authenticated and has not chosen guest mode
+  if (authChecked && !currentUser && !isGuestMode) {
+    return (
+      <AuthPage
+        onAuthSuccess={(user) => {
+          setCurrentUser(user);
+          setPage('dashboard');
+        }}
+        onSkip={() => setIsGuestMode(true)}
+      />
+    );
+  }
+
   return (
     <div className="app-shell">
       {/* Sidebar */}
@@ -236,6 +279,50 @@ export default function App() {
         ))}
 
         <div className="sidebar-footer">
+          {currentUser ? (
+            <div style={{ marginBottom: 12, paddingBottom: 10, borderBottom: '1px solid var(--border-subtle)' }}>
+              <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                👤 {currentUser.full_name || currentUser.email}
+              </div>
+              <div style={{ fontSize: 10, color: 'var(--text-muted)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 4 }}>
+                <span style={{ textTransform: 'capitalize' }}>Role: {currentUser.role}</span>
+                <button
+                  onClick={handleLogout}
+                  style={{
+                    background: 'transparent',
+                    border: 'none',
+                    color: 'var(--accent-red)',
+                    fontSize: 10,
+                    fontWeight: 700,
+                    cursor: 'pointer',
+                  }}
+                >
+                  Logout 🚪
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div style={{ marginBottom: 10 }}>
+              <button
+                onClick={() => setIsGuestMode(false)}
+                style={{
+                  width: '100%',
+                  padding: '4px 8px',
+                  background: 'var(--bg-elevated)',
+                  border: '1px solid var(--border-medium)',
+                  borderRadius: 'var(--radius-sm)',
+                  color: 'var(--accent-purple)',
+                  fontSize: 11,
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  marginBottom: 8,
+                }}
+              >
+                🔐 Sign In / Sign Up
+              </button>
+            </div>
+          )}
+
           <div className="status-badge" style={{ marginBottom: 8 }}>
             <div className={`status-dot ${isTracking ? '' : 'inactive'}`} />
             <span>{isTracking ? 'Tracking active' : 'Tracker paused'}</span>
@@ -294,3 +381,4 @@ export default function App() {
     </div>
   );
 }
+

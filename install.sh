@@ -103,6 +103,12 @@ elif [ -n "${DOWNLOAD_URL:-}" ]; then
     chmod +x bin/mini-tracker-server
     BINARY_SOURCE="bin/mini-tracker-server"
     log "✅ Downloaded release binary to: ${BINARY_SOURCE}"
+elif [ -f "build/bin/mini-tracker-tmp" ]; then
+    BINARY_SOURCE="build/bin/mini-tracker-tmp"
+    log "✅ Found build binary: ${BINARY_SOURCE}"
+elif [ -f "build/bin/mini-tracker" ]; then
+    BINARY_SOURCE="build/bin/mini-tracker"
+    log "✅ Found build binary: ${BINARY_SOURCE}"
 elif [ -f "bin/mini-tracker-server" ]; then
     BINARY_SOURCE="bin/mini-tracker-server"
     log "✅ Found local pre-built application binary: ${BINARY_SOURCE}"
@@ -141,7 +147,7 @@ chmod 755 "${INSTALL_DIR}/mini-tracker-server"
 ln -sf "${INSTALL_DIR}/mini-tracker-server" "${BIN_DIR}/mini-tracker-server"
 
 # ==============================================================================
-# 6. GUI LAUNCHER SCRIPT SETUP
+# 6. GUI LAUNCHER SCRIPT SETUP (Standalone Desktop App Window)
 # ==============================================================================
 GUI_LAUNCHER="${INSTALL_DIR}/mini-tracker-gui"
 cat << 'EOF' > "${GUI_LAUNCHER}"
@@ -152,6 +158,8 @@ if [ -f "$ENV_PATH" ]; then
 fi
 
 ENDPOINT="http://localhost:8080"
+PROFILE_DIR="$HOME/.config/mini-tracker/browser-profile"
+mkdir -p "$PROFILE_DIR"
 
 # Check if server is reachable or process is running before starting background server
 if ! curl -s --head "${ENDPOINT}" >/dev/null 2>&1 && ! pgrep -x "mini-tracker-server" >/dev/null 2>&1; then
@@ -167,18 +175,20 @@ if ! curl -s --head "${ENDPOINT}" >/dev/null 2>&1 && ! pgrep -x "mini-tracker-se
     sleep 1
 fi
 
+FLAGS="--user-data-dir=${PROFILE_DIR} --app=${ENDPOINT} --class=mini-tracker --name=MiniTracker --no-first-run --no-default-browser-check"
+
 if command -v google-chrome >/dev/null 2>&1; then
-    exec google-chrome --app="${ENDPOINT}" --class="mini-tracker" --name="Mini Tracker" "$@"
+    exec google-chrome ${FLAGS} "$@"
 elif command -v google-chrome-stable >/dev/null 2>&1; then
-    exec google-chrome-stable --app="${ENDPOINT}" --class="mini-tracker" --name="Mini Tracker" "$@"
+    exec google-chrome-stable ${FLAGS} "$@"
 elif command -v chromium >/dev/null 2>&1; then
-    exec chromium --app="${ENDPOINT}" --class="mini-tracker" --name="Mini Tracker" "$@"
+    exec chromium ${FLAGS} "$@"
 elif command -v chromium-browser >/dev/null 2>&1; then
-    exec chromium-browser --app="${ENDPOINT}" --class="mini-tracker" --name="Mini Tracker" "$@"
+    exec chromium-browser ${FLAGS} "$@"
 elif command -v brave-browser >/dev/null 2>&1; then
-    exec brave-browser --app="${ENDPOINT}" --class="mini-tracker" --name="Mini Tracker" "$@"
+    exec brave-browser ${FLAGS} "$@"
 elif command -v microsoft-edge >/dev/null 2>&1; then
-    exec microsoft-edge --app="${ENDPOINT}" --class="mini-tracker" --name="Mini Tracker" "$@"
+    exec microsoft-edge ${FLAGS} "$@"
 else
     exec xdg-open "${ENDPOINT}"
 fi

@@ -54,7 +54,7 @@ log "🚀 Starting installation of ${APP_NAME}..."
 log "Target User: ${REAL_USER} (Home: ${REAL_HOME}, Install Dir: ${INSTALL_DIR})"
 
 # ==============================================================================
-# 2. PREREQUISITE & PACKAGE MANAGER CHECKS
+# 2. PREREQUISITE CHECKS
 # ==============================================================================
 if ! command -v curl >/dev/null 2>&1; then
     log "Installing missing prerequisite: curl..."
@@ -88,7 +88,7 @@ fi
 pkill -9 -x "${APP_NAME_LOWER}-server" 2>/dev/null || true
 
 # ==============================================================================
-# 4. LOCATE OR BUILD APPLICATION BINARY (Supports Local Build Paths)
+# 4. RETRIEVE OR BUILD APPLICATION BINARY
 # ==============================================================================
 BINARY_SOURCE=""
 CUSTOM_BUILD_PATH="${LOCAL_BUILD_PATH:-${1:-}}"
@@ -96,6 +96,13 @@ CUSTOM_BUILD_PATH="${LOCAL_BUILD_PATH:-${1:-}}"
 if [ -n "${CUSTOM_BUILD_PATH}" ] && [ -f "${CUSTOM_BUILD_PATH}" ]; then
     BINARY_SOURCE="${CUSTOM_BUILD_PATH}"
     log "✅ Using specified custom local build binary: ${BINARY_SOURCE}"
+elif [ -n "${DOWNLOAD_URL:-}" ]; then
+    log "📥 Downloading binary from release URL: ${DOWNLOAD_URL}..."
+    mkdir -p bin
+    curl -sSL "${DOWNLOAD_URL}" -o bin/mini-tracker-server
+    chmod +x bin/mini-tracker-server
+    BINARY_SOURCE="bin/mini-tracker-server"
+    log "✅ Downloaded release binary to: ${BINARY_SOURCE}"
 elif [ -f "bin/mini-tracker-server" ]; then
     BINARY_SOURCE="bin/mini-tracker-server"
     log "✅ Found local pre-built application binary: ${BINARY_SOURCE}"
@@ -207,7 +214,7 @@ fi
 # ==============================================================================
 # 8. CONFIGURATION & DATA DIRECTORIES
 # ==============================================================================
-log "Provisioning configuration files..."
+log "Provisioning directories..."
 mkdir -p "${CONFIG_DIR}"
 mkdir -p "${DATA_DIR}"
 
@@ -220,19 +227,6 @@ SCREENSHOT_INTERVAL_SECONDS=30
 AI_ANALYSIS_INTERVAL=3h
 EOF
     log "✅ Created environment config file: ${ENV_FILE}"
-fi
-
-CONFIG_FILE="${CONFIG_DIR}/config.json"
-if [ ! -f "${CONFIG_FILE}" ]; then
-    cat << EOF > "${CONFIG_FILE}"
-{
-  "gemini_api_key": "${GEMINI_API_KEY:-}",
-  "ai_analysis_interval_seconds": 10800,
-  "screenshot_interval_seconds": 30,
-  "data_dir": "${DATA_DIR}"
-}
-EOF
-    log "✅ Created configuration file: ${CONFIG_FILE}"
 fi
 
 # ==============================================================================

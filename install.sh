@@ -130,9 +130,8 @@ mkdir -p "${BIN_DIR}"
 cp -f "${BINARY_SOURCE}" "${INSTALL_DIR}/mini-tracker-server"
 chmod 755 "${INSTALL_DIR}/mini-tracker-server"
 
-# Create symlinks in system/user BIN_DIR
+# Create symlink for backend server binary
 ln -sf "${INSTALL_DIR}/mini-tracker-server" "${BIN_DIR}/mini-tracker-server"
-ln -sf "${INSTALL_DIR}/mini-tracker-server" "${BIN_DIR}/mini-tracker"
 
 # ==============================================================================
 # 6. GUI LAUNCHER SCRIPT SETUP
@@ -147,7 +146,8 @@ fi
 
 ENDPOINT="http://localhost:8080"
 
-if ! pgrep -x "mini-tracker-server" >/dev/null 2>&1; then
+# Check if server is reachable or process is running before starting background server
+if ! curl -s --head "${ENDPOINT}" >/dev/null 2>&1 && ! pgrep -x "mini-tracker-server" >/dev/null 2>&1; then
     if command -v mini-tracker-server >/dev/null 2>&1; then
         mini-tracker-server &
     elif [ -f "$HOME/.local/bin/mini-tracker-server" ]; then
@@ -177,6 +177,9 @@ else
 fi
 EOF
 chmod 755 "${GUI_LAUNCHER}"
+
+# Symlink GUI launcher to both 'mini-tracker' and 'mini-tracker-gui'
+ln -sf "${GUI_LAUNCHER}" "${BIN_DIR}/mini-tracker"
 ln -sf "${GUI_LAUNCHER}" "${BIN_DIR}/mini-tracker-gui"
 log "✅ Installed launcher scripts."
 

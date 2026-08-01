@@ -15,7 +15,7 @@ HAS_PKG_CONFIG := $(shell which pkg-config 2>/dev/null)
 
 .DEFAULT_GOAL := help
 
-.PHONY: help default all dev build run-server build-server clean doctor setup-input setup-debs docker-up docker-down docker-logs vet tidy clean-bin
+.PHONY: help default all dev build run-server build-server clean doctor setup-input setup-debs docker-up docker-down docker-logs vet tidy clean-bin install
 
 default: help
 all: help
@@ -25,6 +25,9 @@ help: ## Show this help message
 	@echo ""
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}'
 	@echo ""
+
+install: ## Run automated Linux installer (builds app & configures systemd daemon)
+	./install.sh
 
 setup-debs: ## Install GTK3/WebKit2GTK dependencies without sudo into ~/.local
 	./scripts/install-debs-user.sh

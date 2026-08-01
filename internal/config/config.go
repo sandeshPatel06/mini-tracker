@@ -2,8 +2,10 @@ package config
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"time"
 )
 
@@ -14,6 +16,7 @@ type Config struct {
 	AIAnalysisInterval time.Duration `json:"ai_analysis_interval_seconds"`
 	DataDir            string        `json:"data_dir"`
 	BackendPort        int           `json:"backend_port"`
+	BackendEndpoint    string        `json:"backend_endpoint"`
 }
 
 // Load reads config from env vars first, then falls back to
@@ -23,6 +26,7 @@ func Load() (*Config, error) {
 		ScreenshotInterval: 30 * time.Second,
 		AIAnalysisInterval: 3 * time.Hour,
 		BackendPort:        8080,
+		BackendEndpoint:    "http://localhost:8080",
 	}
 
 	// Config file path
@@ -48,6 +52,17 @@ func Load() (*Config, error) {
 	if v := os.Getenv("AI_ANALYSIS_INTERVAL"); v != "" {
 		if dur, err := time.ParseDuration(v); err == nil {
 			cfg.AIAnalysisInterval = dur
+		}
+	}
+	if v := os.Getenv("BACKEND_ENDPOINT"); v != "" {
+		cfg.BackendEndpoint = v
+	}
+	if v := os.Getenv("PORT"); v != "" {
+		if p, err := strconv.Atoi(v); err == nil && p > 0 {
+			cfg.BackendPort = p
+			if os.Getenv("BACKEND_ENDPOINT") == "" {
+				cfg.BackendEndpoint = fmt.Sprintf("http://localhost:%d", p)
+			}
 		}
 	}
 

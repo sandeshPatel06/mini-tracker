@@ -25,6 +25,8 @@ if [ "${EUID:-$(id -u)}" -eq 0 ]; then
     INSTALL_DIR="/opt/${APP_NAME_LOWER}"
     BIN_DIR="/usr/local/bin"
     APPLICATIONS_DIR="/usr/share/applications"
+    ICON_DIR="/usr/share/icons/hicolor/512x512/apps"
+    PIXMAP_DIR="/usr/share/pixmaps"
     LOG_FILE="/var/log/${APP_NAME_LOWER}_install.log"
 else
     IS_SUDO=false
@@ -35,6 +37,8 @@ else
     INSTALL_DIR="${REAL_HOME}/.local/share/${APP_NAME_LOWER}/app"
     BIN_DIR="${REAL_HOME}/.local/bin"
     APPLICATIONS_DIR="${REAL_HOME}/.local/share/applications"
+    ICON_DIR="${REAL_HOME}/.local/share/icons/hicolor/512x512/apps"
+    PIXMAP_DIR="${REAL_HOME}/.local/share/pixmaps"
     LOG_FILE="${REAL_HOME}/.local/share/${APP_NAME_LOWER}/install.log"
 fi
 
@@ -240,11 +244,28 @@ EOF
 fi
 
 # ==============================================================================
-# 9. DESKTOP SHORTCUTS & AUTOSTART
+# 9. DESKTOP SHORTCUTS & APP ICON INTEGRATION
 # ==============================================================================
-log "Creating Desktop launcher shortcuts..."
+log "Creating Desktop launcher shortcuts & app icons..."
 mkdir -p "${APPLICATIONS_DIR}"
 mkdir -p "${AUTOSTART_DIR}"
+mkdir -p "${ICON_DIR}"
+mkdir -p "${PIXMAP_DIR}"
+
+# Install application icon
+ICON_SOURCE=""
+if [ -f "build/appicon.png" ]; then
+    ICON_SOURCE="build/appicon.png"
+elif [ -f "frontend/src/assets/images/logo-universal.png" ]; then
+    ICON_SOURCE="frontend/src/assets/images/logo-universal.png"
+fi
+
+if [ -n "${ICON_SOURCE}" ]; then
+    cp -f "${ICON_SOURCE}" "${ICON_DIR}/mini-tracker.png"
+    cp -f "${ICON_SOURCE}" "${PIXMAP_DIR}/mini-tracker.png"
+    cp -f "${ICON_SOURCE}" "${INSTALL_DIR}/mini-tracker.png"
+    log "✅ Installed custom app icon to ${ICON_DIR}/mini-tracker.png"
+fi
 
 DESKTOP_ENTRY_FILE="${APPLICATIONS_DIR}/mini-tracker.desktop"
 cat << EOF > "${DESKTOP_ENTRY_FILE}"
@@ -254,7 +275,7 @@ Name=Mini Tracker
 GenericName=Productivity Tracker Desktop App
 Comment=Privacy-first Linux Productivity Tracker & AI Analyzer
 Exec=${BIN_DIR}/mini-tracker-gui
-Icon=utilities-system-monitor
+Icon=mini-tracker
 Terminal=false
 Categories=Utility;Development;Office;
 Keywords=productivity;tracker;time;analytics;
@@ -270,7 +291,11 @@ chmod 755 "${AUTOSTART_FILE}"
 if command -v update-desktop-database >/dev/null 2>&1; then
     update-desktop-database "${APPLICATIONS_DIR}" 2>/dev/null || true
 fi
-log "✅ Created Desktop & Autostart launchers."
+
+if command -v gtk-update-icon-cache >/dev/null 2>&1; then
+    gtk-update-icon-cache -f -t "$(dirname "${ICON_DIR}")" 2>/dev/null || true
+fi
+log "✅ Created Desktop & Autostart launchers with custom icon."
 
 # ==============================================================================
 # 10. SYSTEMD USER DAEMON REGISTRATION
@@ -310,7 +335,7 @@ fi
 # 11. HARDWARE PERMISSIONS & CHOWN FIXES
 # ==============================================================================
 if [ "${IS_SUDO}" = true ] && [ "${REAL_USER}" != "root" ]; then
-    chown -R "${REAL_USER}:${REAL_GROUP}" "${INSTALL_DIR}" "${CONFIG_DIR}" "${DATA_DIR}" "${SYSTEMD_USER_DIR}" "${AUTOSTART_FILE}" 2>/dev/null || true
+    chown -R "${REAL_USER}:${REAL_GROUP}" "${INSTALL_DIR}" "${CONFIG_DIR}" "${DATA_DIR}" "${SYSTEMD_USER_DIR}" "${AUTOSTART_FILE}" "${ICON_DIR}/mini-tracker.png" "${PIXMAP_DIR}/mini-tracker.png" 2>/dev/null || true
     if [ "${APPLICATIONS_DIR}" = "${REAL_HOME}/.local/share/applications" ]; then
         chown -R "${REAL_USER}:${REAL_GROUP}" "${APPLICATIONS_DIR}" 2>/dev/null || true
     fi

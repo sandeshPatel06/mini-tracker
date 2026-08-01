@@ -179,7 +179,7 @@ if ! curl -s --head "${ENDPOINT}" >/dev/null 2>&1 && ! pgrep -x "mini-tracker-se
     sleep 1
 fi
 
-FLAGS="--user-data-dir=${PROFILE_DIR} --app=${ENDPOINT} --class=mini-tracker --name=MiniTracker --no-first-run --no-default-browser-check"
+FLAGS="--user-data-dir=${PROFILE_DIR} --app=${ENDPOINT} --class=mini-tracker --name=mini-tracker --no-first-run --no-default-browser-check"
 
 if command -v google-chrome >/dev/null 2>&1; then
     exec google-chrome ${FLAGS} "$@"
@@ -252,7 +252,7 @@ mkdir -p "${AUTOSTART_DIR}"
 mkdir -p "${ICON_DIR}"
 mkdir -p "${PIXMAP_DIR}"
 
-# Install application icon
+# Install application icon across all system & user icon paths
 ICON_SOURCE=""
 if [ -f "build/appicon.png" ]; then
     ICON_SOURCE="build/appicon.png"
@@ -260,13 +260,22 @@ elif [ -f "frontend/src/assets/images/logo-universal.png" ]; then
     ICON_SOURCE="frontend/src/assets/images/logo-universal.png"
 fi
 
+INSTALLED_ICON_PATH="${INSTALL_DIR}/mini-tracker.png"
 if [ -n "${ICON_SOURCE}" ]; then
+    cp -f "${ICON_SOURCE}" "${INSTALLED_ICON_PATH}"
     cp -f "${ICON_SOURCE}" "${ICON_DIR}/mini-tracker.png"
+    cp -f "${ICON_SOURCE}" "${ICON_DIR}/mini-tracker-server.png"
+    cp -f "${ICON_SOURCE}" "${ICON_DIR}/mini-tracker-tmp.png"
+    cp -f "${ICON_SOURCE}" "${ICON_DIR}/localhost.png"
+
     cp -f "${ICON_SOURCE}" "${PIXMAP_DIR}/mini-tracker.png"
-    cp -f "${ICON_SOURCE}" "${INSTALL_DIR}/mini-tracker.png"
-    log "✅ Installed custom app icon to ${ICON_DIR}/mini-tracker.png"
+    cp -f "${ICON_SOURCE}" "${PIXMAP_DIR}/mini-tracker-server.png"
+    cp -f "${ICON_SOURCE}" "${PIXMAP_DIR}/mini-tracker-tmp.png"
+    cp -f "${ICON_SOURCE}" "${PIXMAP_DIR}/localhost.png"
+    log "✅ Installed custom app icon across system icon directories."
 fi
 
+# Create Primary .desktop entry
 DESKTOP_ENTRY_FILE="${APPLICATIONS_DIR}/mini-tracker.desktop"
 cat << EOF > "${DESKTOP_ENTRY_FILE}"
 [Desktop Entry]
@@ -274,15 +283,31 @@ Type=Application
 Name=Mini Tracker
 GenericName=Productivity Tracker Desktop App
 Comment=Privacy-first Linux Productivity Tracker & AI Analyzer
-Exec=${BIN_DIR}/mini-tracker-gui
-Icon=mini-tracker
+Exec=${BIN_DIR}/mini-tracker-gui %u
+Icon=${INSTALLED_ICON_PATH}
 Terminal=false
 Categories=Utility;Development;Office;
 Keywords=productivity;tracker;time;analytics;
 StartupNotify=true
 StartupWMClass=mini-tracker
+WMClass=mini-tracker
 EOF
 chmod 755 "${DESKTOP_ENTRY_FILE}"
+
+# Create secondary .desktop aliases to match all potential WM_CLASS window identifiers
+for alias_name in mini-tracker-server mini-tracker-tmp localhost; do
+    cat << EOF > "${APPLICATIONS_DIR}/${alias_name}.desktop"
+[Desktop Entry]
+Type=Application
+Name=Mini Tracker
+Exec=${BIN_DIR}/mini-tracker-gui %u
+Icon=${INSTALLED_ICON_PATH}
+Terminal=false
+NoDisplay=true
+StartupWMClass=${alias_name}
+EOF
+    chmod 755 "${APPLICATIONS_DIR}/${alias_name}.desktop"
+done
 
 AUTOSTART_FILE="${AUTOSTART_DIR}/mini-tracker.desktop"
 cp -f "${DESKTOP_ENTRY_FILE}" "${AUTOSTART_FILE}"
@@ -294,6 +319,7 @@ fi
 
 if command -v gtk-update-icon-cache >/dev/null 2>&1; then
     gtk-update-icon-cache -f -t "$(dirname "${ICON_DIR}")" 2>/dev/null || true
+    gtk-update-icon-cache -f -t "${REAL_HOME}/.local/share/icons/hicolor" 2>/dev/null || true
 fi
 log "✅ Created Desktop & Autostart launchers with custom icon."
 
@@ -335,7 +361,7 @@ fi
 # 11. HARDWARE PERMISSIONS & CHOWN FIXES
 # ==============================================================================
 if [ "${IS_SUDO}" = true ] && [ "${REAL_USER}" != "root" ]; then
-    chown -R "${REAL_USER}:${REAL_GROUP}" "${INSTALL_DIR}" "${CONFIG_DIR}" "${DATA_DIR}" "${SYSTEMD_USER_DIR}" "${AUTOSTART_FILE}" "${ICON_DIR}/mini-tracker.png" "${PIXMAP_DIR}/mini-tracker.png" 2>/dev/null || true
+    chown -R "${REAL_USER}:${REAL_GROUP}" "${INSTALL_DIR}" "${CONFIG_DIR}" "${DATA_DIR}" "${SYSTEMD_USER_DIR}" "${AUTOSTART_FILE}" "${ICON_DIR}" "${PIXMAP_DIR}" 2>/dev/null || true
     if [ "${APPLICATIONS_DIR}" = "${REAL_HOME}/.local/share/applications" ]; then
         chown -R "${REAL_USER}:${REAL_GROUP}" "${APPLICATIONS_DIR}" 2>/dev/null || true
     fi

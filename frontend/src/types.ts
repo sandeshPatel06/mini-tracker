@@ -54,4 +54,4 @@ export interface Invitation {
   created_at: string;
 }
 
-export type Page = 'dashboard' | 'timeline' | 'analytics' | 'organization' | 'accept-invite';
+export type Page = 'dashboard' | 'timeline' | 'analytics' | 'organization' | 'accept-invite' | 'auth';

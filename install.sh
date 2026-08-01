@@ -2,7 +2,7 @@
 set -e
 
 # ==============================================================================
-# Mini Tracker — Desktop Linux Installer
+# Mini Tracker — Universal Linux Desktop Installer (Sudo & Non-Sudo Support)
 # ==============================================================================
 
 BOLD="\033[1m"
@@ -19,16 +19,40 @@ error()   { echo -e "${RED}✖${NC} $1"; exit 1; }
 
 echo -e "${BOLD}"
 echo "================================================================="
-echo "        📍 Mini Tracker — Desktop Linux Installer                "
+echo "        📍 Mini Tracker — Universal Linux Desktop Installer       "
 echo "================================================================="
 echo -e "${NC}"
 
-INSTALL_BIN_DIR="${HOME}/.local/bin"
-CONFIG_DIR="${HOME}/.config/mini-tracker"
-DATA_DIR="${HOME}/.local/share/mini-tracker"
-APPLICATIONS_DIR="${HOME}/.local/share/applications"
-AUTOSTART_DIR="${HOME}/.config/autostart"
-SYSTEMD_USER_DIR="${HOME}/.config/systemd/user"
+# Detect execution context (sudo vs non-sudo)
+if [ -n "${SUDO_USER}" ] && [ "${SUDO_USER}" != "root" ]; then
+    IS_SUDO=true
+    REAL_USER="${SUDO_USER}"
+    REAL_HOME=$(getent passwd "${SUDO_USER}" | cut -d: -f6)
+    REAL_UID=$(id -u "${SUDO_USER}")
+    REAL_GROUP=$(id -gn "${SUDO_USER}")
+    info "Running with sudo/root privileges for target user: ${BOLD}${REAL_USER}${NC}"
+else
+    IS_SUDO=false
+    REAL_USER="${USER}"
+    REAL_HOME="${HOME}"
+    REAL_UID=$(id -u)
+    REAL_GROUP=$(id -gn "${USER}" 2>/dev/null || echo "${USER}")
+    info "Running in user space for target user: ${BOLD}${REAL_USER}${NC}"
+fi
+
+# Define paths based on execution mode
+if [ "${IS_SUDO}" = true ]; then
+    INSTALL_BIN_DIR="/usr/local/bin"
+    APPLICATIONS_DIR="/usr/share/applications"
+else
+    INSTALL_BIN_DIR="${REAL_HOME}/.local/bin"
+    APPLICATIONS_DIR="${REAL_HOME}/.local/share/applications"
+fi
+
+CONFIG_DIR="${REAL_HOME}/.config/mini-tracker"
+DATA_DIR="${REAL_HOME}/.local/share/mini-tracker"
+AUTOSTART_DIR="${REAL_HOME}/.config/autostart"
+SYSTEMD_USER_DIR="${REAL_HOME}/.config/systemd/user"
 SERVICE_FILE="${SYSTEMD_USER_DIR}/mini-tracker.service"
 
 BACKEND_PORT="${PORT:-8080}"
@@ -52,41 +76,93 @@ else
     error "Frontend directory not found. Please run install.sh from the root of mini-tracker repository."
 fi
 
-# 3. Build Go Server Binary
+# 3. Build Go Application Binary
 info "Building zero-dependency Go application binary..."
 mkdir -p bin
 go build -o bin/mini-tracker-server ./cmd/server || error "Failed to compile Go application binary."
 success "Application binary compiled: bin/mini-tracker-server"
 
-# 4. Install Binary to User Path
-info "Installing binary to ${INSTALL_BIN_DIR}..."
+# 4. Install Binary & GUI App Launcher Script
+info "Installing application binaries to ${INSTALL_BIN_DIR}..."
 mkdir -p "${INSTALL_BIN_DIR}"
-if systemctl --user is-active --quiet mini-tracker.service 2>/dev/null; then
+
+# Stop systemd user service if active before replacing binary
+if [ "${IS_SUDO}" = true ]; then
+    sudo -u "${REAL_USER}" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/${REAL_UID}/bus" systemctl --user stop mini-tracker.service 2>/dev/null || true
+else
     systemctl --user stop mini-tracker.service 2>/dev/null || true
 fi
+
 install -m 755 bin/mini-tracker-server "${INSTALL_BIN_DIR}/mini-tracker-server"
 ln -sf "${INSTALL_BIN_DIR}/mini-tracker-server" "${INSTALL_BIN_DIR}/mini-tracker"
-success "Installed mini-tracker-server & symlink 'mini-tracker' in ${INSTALL_BIN_DIR}"
 
-# 5. Ensure PATH includes ~/.local/bin
-SHELL_RC=""
-if [ -f "${HOME}/.zshrc" ]; then
-    SHELL_RC="${HOME}/.zshrc"
-elif [ -f "${HOME}/.bashrc" ]; then
-    SHELL_RC="${HOME}/.bashrc"
+# Create Desktop App Launcher script (mini-tracker-gui)
+GUI_LAUNCHER="${INSTALL_BIN_DIR}/mini-tracker-gui"
+cat << 'EOF' > "${GUI_LAUNCHER}"
+#!/usr/bin/env bash
+# Load environment config if available
+ENV_PATH="$HOME/.config/mini-tracker/.env"
+if [ -f "$ENV_PATH" ]; then
+    set -a
+    source "$ENV_PATH"
+    set +a
 fi
 
-if [ -n "${SHELL_RC}" ]; then
-    if ! grep -q 'PATH.*\.local/bin' "${SHELL_RC}"; then
-        info "Adding ${INSTALL_BIN_DIR} to PATH in ${SHELL_RC}..."
-        echo '' >> "${SHELL_RC}"
-        echo '# Mini Tracker PATH' >> "${SHELL_RC}"
-        echo 'export PATH="$HOME/.local/bin:$PATH"' >> "${SHELL_RC}"
-        success "Updated ${SHELL_RC}"
+ENDPOINT="${BACKEND_ENDPOINT:-http://localhost:8080}"
+
+# Ensure mini-tracker-server is running
+if ! pgrep -f "mini-tracker-server" >/dev/null 2>&1; then
+    if command -v mini-tracker-server >/dev/null 2>&1; then
+        mini-tracker-server &
+    elif [ -f "$HOME/.local/bin/mini-tracker-server" ]; then
+        "$HOME/.local/bin/mini-tracker-server" &
+    elif [ -f "/usr/local/bin/mini-tracker-server" ]; then
+        "/usr/local/bin/mini-tracker-server" &
+    fi
+    sleep 1
+fi
+
+# Launch standalone Desktop App window in app mode
+if command -v google-chrome >/dev/null 2>&1; then
+    exec google-chrome --app="${ENDPOINT}" --class="mini-tracker" --name="Mini Tracker" "$@"
+elif command -v google-chrome-stable >/dev/null 2>&1; then
+    exec google-chrome-stable --app="${ENDPOINT}" --class="mini-tracker" --name="Mini Tracker" "$@"
+elif command -v chromium >/dev/null 2>&1; then
+    exec chromium --app="${ENDPOINT}" --class="mini-tracker" --name="Mini Tracker" "$@"
+elif command -v chromium-browser >/dev/null 2>&1; then
+    exec chromium-browser --app="${ENDPOINT}" --class="mini-tracker" --name="Mini Tracker" "$@"
+elif command -v brave-browser >/dev/null 2>&1; then
+    exec brave-browser --app="${ENDPOINT}" --class="mini-tracker" --name="Mini Tracker" "$@"
+elif command -v microsoft-edge >/dev/null 2>&1; then
+    exec microsoft-edge --app="${ENDPOINT}" --class="mini-tracker" --name="Mini Tracker" "$@"
+else
+    exec xdg-open "${ENDPOINT}"
+fi
+EOF
+chmod +x "${GUI_LAUNCHER}"
+success "Installed binaries: mini-tracker-server, mini-tracker, and mini-tracker-gui"
+
+# 5. Ensure PATH includes ~/.local/bin if installed in user space
+if [ "${IS_SUDO}" = false ]; then
+    SHELL_RC=""
+    if [ -f "${REAL_HOME}/.zshrc" ]; then
+        SHELL_RC="${REAL_HOME}/.zshrc"
+    elif [ -f "${REAL_HOME}/.bashrc" ]; then
+        SHELL_RC="${REAL_HOME}/.bashrc"
+    fi
+
+    if [ -n "${SHELL_RC}" ]; then
+        if ! grep -q 'PATH.*\.local/bin' "${SHELL_RC}"; then
+            info "Adding ${INSTALL_BIN_DIR} to PATH in ${SHELL_RC}..."
+            echo '' >> "${SHELL_RC}"
+            echo '# Mini Tracker PATH' >> "${SHELL_RC}"
+            echo 'export PATH="$HOME/.local/bin:$PATH"' >> "${SHELL_RC}"
+            success "Updated ${SHELL_RC}"
+        fi
     fi
 fi
 
-# 6. Initialize Config, Storage, and Environment Files
+# 6. Initialize Config & Data Directories
 info "Initializing configuration, environment, and storage..."
 mkdir -p "${CONFIG_DIR}"
 mkdir -p "${DATA_DIR}"
@@ -123,7 +199,11 @@ else
     success "Preserved existing configuration: ${CONFIG_FILE}"
 fi
 
-# 7. Create Desktop Application Launcher Entry (.desktop file)
+if [ "${IS_SUDO}" = true ]; then
+    chown -R "${REAL_USER}:${REAL_GROUP}" "${CONFIG_DIR}" "${DATA_DIR}"
+fi
+
+# 7. Create Standalone Linux Desktop Application Entry (.desktop file)
 info "Creating Linux Desktop Application shortcut..."
 mkdir -p "${APPLICATIONS_DIR}"
 mkdir -p "${AUTOSTART_DIR}"
@@ -133,14 +213,15 @@ cat << EOF > "${DESKTOP_ENTRY_FILE}"
 [Desktop Entry]
 Type=Application
 Name=Mini Tracker
-GenericName=Productivity Tracker
+GenericName=Productivity Tracker Desktop App
 Comment=Privacy-first Linux Productivity Tracker & AI Analyzer
-Exec=sh -c "${INSTALL_BIN_DIR}/mini-tracker-server & sleep 1 && xdg-open ${BACKEND_ENDPOINT}"
+Exec=${GUI_LAUNCHER}
 Icon=utilities-system-monitor
 Terminal=false
 Categories=Utility;Development;Office;
 Keywords=productivity;tracker;time;analytics;
 StartupNotify=true
+StartupWMClass=mini-tracker
 EOF
 chmod +x "${DESKTOP_ENTRY_FILE}"
 success "Installed Desktop Launcher: ${DESKTOP_ENTRY_FILE}"
@@ -150,12 +231,19 @@ AUTOSTART_FILE="${AUTOSTART_DIR}/mini-tracker.desktop"
 cp "${DESKTOP_ENTRY_FILE}" "${AUTOSTART_FILE}"
 success "Installed Desktop Autostart entry: ${AUTOSTART_FILE}"
 
+if [ "${IS_SUDO}" = true ]; then
+    chown "${REAL_USER}:${REAL_GROUP}" "${AUTOSTART_FILE}"
+    if [ "${APPLICATIONS_DIR}" = "${REAL_HOME}/.local/share/applications" ]; then
+        chown -R "${REAL_USER}:${REAL_GROUP}" "${APPLICATIONS_DIR}"
+    fi
+fi
+
 if command -v update-desktop-database >/dev/null 2>&1; then
     update-desktop-database "${APPLICATIONS_DIR}" 2>/dev/null || true
 fi
 
 # 8. Setup Systemd Background User Service
-info "Setting up systemd background user daemon..."
+info "Setting up systemd background user daemon for ${REAL_USER}..."
 mkdir -p "${SYSTEMD_USER_DIR}"
 
 cat << EOF > "${SERVICE_FILE}"
@@ -178,41 +266,57 @@ WantedBy=default.target
 EOF
 success "Created systemd service file: ${SERVICE_FILE}"
 
-if command -v systemctl >/dev/null 2>&1; then
-    info "Enabling & starting mini-tracker background service..."
-    systemctl --user daemon-reload
-    systemctl --user enable --now mini-tracker.service || warn "Could not start systemd service automatically."
-    success "Systemd background service is ACTIVE."
-else
-    warn "systemctl not found. You can launch the app from your application menu or run: mini-tracker"
+if [ "${IS_SUDO}" = true ]; then
+    chown -R "${REAL_USER}:${REAL_GROUP}" "${SYSTEMD_USER_DIR}"
 fi
 
-# 9. Check Keystroke Group Permissions
+# Enable systemd service
+if command -v systemctl >/dev/null 2>&1; then
+    info "Enabling & starting mini-tracker background service..."
+    if [ "${IS_SUDO}" = true ]; then
+        sudo -u "${REAL_USER}" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/${REAL_UID}/bus" systemctl --user daemon-reload 2>/dev/null || true
+        sudo -u "${REAL_USER}" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/${REAL_UID}/bus" systemctl --user enable --now mini-tracker.service 2>/dev/null || warn "Systemd user service enabled for ${REAL_USER}."
+    else
+        systemctl --user daemon-reload
+        systemctl --user enable --now mini-tracker.service || warn "Systemd user service enabled."
+    fi
+    success "Systemd background service is configured & active."
+fi
+
+# 9. Handle Keystroke Group Permissions
 info "Checking keyboard entropy tracking permissions..."
-if groups "$USER" | grep -q '\binput\b'; then
-    success "User '$USER' is in 'input' group. Keystroke entropy capture is active."
+if groups "${REAL_USER}" | grep -q '\binput\b'; then
+    success "User '${REAL_USER}' is in 'input' group. Keystroke entropy capture is active."
 else
-    warn "User '$USER' is not in the 'input' group."
-    warn "To enable hardware keystroke entropy tracking, run:"
-    echo -e "  ${BOLD}sudo usermod -aG input \$USER${NC}"
-    warn "(Requires logging out and back in after running)."
+    if [ "${IS_SUDO}" = true ]; then
+        info "Adding '${REAL_USER}' to the 'input' group automatically..."
+        usermod -aG input "${REAL_USER}"
+        success "Added '${REAL_USER}' to 'input' group. (Log out and log back in for group change to take effect)."
+    else
+        warn "User '${REAL_USER}' is not in the 'input' group."
+        warn "To enable hardware keystroke entropy tracking, run:"
+        echo -e "  ${BOLD}sudo usermod -aG input ${REAL_USER}${NC}"
+        warn "(Requires logging out and back in after running)."
+    fi
 fi
 
 # Final Summary
 echo ""
 echo -e "${BOLD}${GREEN}=================================================================${NC}"
-echo -e "${BOLD}${GREEN} 🎉 Mini Tracker Desktop Installation Complete!                  ${NC}"
+echo -e "${BOLD}${GREEN} 🎉 Mini Tracker Desktop App Installation Complete!              ${NC}"
 echo -e "${BOLD}${GREEN}=================================================================${NC}"
 echo ""
-echo -e "  • Desktop Launcher: Application Menu -> ${BOLD}Mini Tracker${NC}"
-echo -e "  • Backend Endpoint: ${BOLD}${BLUE}${BACKEND_ENDPOINT}${NC}"
-echo -e "  • Config Directory: ${CONFIG_DIR}"
+echo -e "  • Target User:       ${BOLD}${REAL_USER}${NC}"
+echo -e "  • Mode:              ${BOLD}$( [ "$IS_SUDO" = true ] && echo "Sudo System-Wide Install" || echo "User Space Install" )${NC}"
+echo -e "  • Desktop App:       Application Menu -> ${BOLD}Mini Tracker${NC}"
+echo -e "  • GUI Launcher:      ${GUI_LAUNCHER}"
+echo -e "  • Backend Endpoint:  ${BOLD}${BLUE}${BACKEND_ENDPOINT}${NC}"
+echo -e "  • Config Directory:  ${CONFIG_DIR}"
 echo -e "  • Storage Directory: ${DATA_DIR}"
-echo -e "  • Binary Installed: ${INSTALL_BIN_DIR}/mini-tracker-server"
 echo ""
 echo -e "Management Commands:"
-echo -e "  • Check service:   ${BOLD}systemctl --user status mini-tracker${NC}"
-echo -e "  • View logs:       ${BOLD}journalctl --user -u mini-tracker -f${NC}"
-echo -e "  • Stop daemon:    ${BOLD}systemctl --user stop mini-tracker${NC}"
-echo -e "  • Launch App:      Search ${BOLD}'Mini Tracker'${NC} in your desktop menu"
+echo -e "  • Launch Desktop App: ${BOLD}mini-tracker-gui${NC} (or click desktop icon)"
+echo -e "  • Check daemon:       ${BOLD}systemctl --user status mini-tracker${NC}"
+echo -e "  • View logs:           ${BOLD}journalctl --user -u mini-tracker -f${NC}"
+echo -e "  • Stop daemon:        ${BOLD}systemctl --user stop mini-tracker${NC}"
 echo ""

@@ -83,21 +83,28 @@ if [ "${IS_SUDO}" = true ] && [ "${REAL_USER}" != "root" ]; then
 else
     systemctl --user stop "${APP_NAME_LOWER}.service" 2>/dev/null || true
 fi
-pkill -9 -f "${APP_NAME_LOWER}-server" 2>/dev/null || true
+
+# Kill exact running binary process without matching installer arguments
+pkill -9 -x "${APP_NAME_LOWER}-server" 2>/dev/null || true
 
 # ==============================================================================
-# 4. LOCATE OR BUILD APPLICATION BINARY
+# 4. LOCATE OR BUILD APPLICATION BINARY (Supports Local Build Paths)
 # ==============================================================================
 BINARY_SOURCE=""
-if [ -f "bin/mini-tracker-server" ]; then
+CUSTOM_BUILD_PATH="${LOCAL_BUILD_PATH:-${1:-}}"
+
+if [ -n "${CUSTOM_BUILD_PATH}" ] && [ -f "${CUSTOM_BUILD_PATH}" ]; then
+    BINARY_SOURCE="${CUSTOM_BUILD_PATH}"
+    log "✅ Using specified custom local build binary: ${BINARY_SOURCE}"
+elif [ -f "bin/mini-tracker-server" ]; then
     BINARY_SOURCE="bin/mini-tracker-server"
-    log "✅ Found pre-built application binary: ${BINARY_SOURCE}"
+    log "✅ Found local pre-built application binary: ${BINARY_SOURCE}"
 elif [ -f "./mini-tracker-server" ]; then
     BINARY_SOURCE="./mini-tracker-server"
-    log "✅ Found pre-built application binary: ${BINARY_SOURCE}"
+    log "✅ Found local pre-built application binary: ${BINARY_SOURCE}"
 elif [ -f "./mini-tracker" ]; then
     BINARY_SOURCE="./mini-tracker"
-    log "✅ Found pre-built application binary: ${BINARY_SOURCE}"
+    log "✅ Found local pre-built application binary: ${BINARY_SOURCE}"
 else
     log "ℹ No pre-built binary found. Attempting build from source..."
     if ! command -v go >/dev/null 2>&1 || ! command -v npm >/dev/null 2>&1; then
@@ -140,7 +147,7 @@ fi
 
 ENDPOINT="http://localhost:8080"
 
-if ! pgrep -f "mini-tracker-server" >/dev/null 2>&1; then
+if ! pgrep -x "mini-tracker-server" >/dev/null 2>&1; then
     if command -v mini-tracker-server >/dev/null 2>&1; then
         mini-tracker-server &
     elif [ -f "$HOME/.local/bin/mini-tracker-server" ]; then

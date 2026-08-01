@@ -9,9 +9,6 @@ set -u
 APP_NAME="Mini Tracker"
 APP_NAME_LOWER="mini-tracker"
 
-BACKEND_PORT="${PORT:-8080}"
-BACKEND_ENDPOINT="${BACKEND_ENDPOINT:-http://localhost:${BACKEND_PORT}}"
-
 # Detect execution context (sudo vs non-sudo)
 if [ "${EUID:-$(id -u)}" -eq 0 ]; then
     IS_SUDO=true
@@ -141,7 +138,7 @@ if [ -f "$ENV_PATH" ]; then
     set -a; source "$ENV_PATH"; set +a
 fi
 
-ENDPOINT="${BACKEND_ENDPOINT:-http://localhost:8080}"
+ENDPOINT="http://localhost:8080"
 
 if ! pgrep -f "mini-tracker-server" >/dev/null 2>&1; then
     if command -v mini-tracker-server >/dev/null 2>&1; then
@@ -211,8 +208,6 @@ if [ ! -f "${ENV_FILE}" ]; then
 GEMINI_API_KEY=${GEMINI_API_KEY:-}
 SCREENSHOT_INTERVAL_SECONDS=30
 AI_ANALYSIS_INTERVAL=3h
-PORT=${BACKEND_PORT}
-BACKEND_ENDPOINT=${BACKEND_ENDPOINT}
 EOF
     log "✅ Created environment config file: ${ENV_FILE}"
 fi
@@ -224,8 +219,6 @@ if [ ! -f "${CONFIG_FILE}" ]; then
   "gemini_api_key": "${GEMINI_API_KEY:-}",
   "ai_analysis_interval_seconds": 10800,
   "screenshot_interval_seconds": 30,
-  "backend_port": ${BACKEND_PORT},
-  "backend_endpoint": "${BACKEND_ENDPOINT}",
   "data_dir": "${DATA_DIR}"
 }
 EOF
@@ -281,8 +274,6 @@ Type=simple
 ExecStart=${INSTALL_DIR}/mini-tracker-server
 Restart=always
 RestartSec=5s
-Environment="PORT=${BACKEND_PORT}"
-Environment="BACKEND_ENDPOINT=${BACKEND_ENDPOINT}"
 Environment="DATA_DIR=${DATA_DIR}"
 EnvironmentFile=-${ENV_FILE}
 

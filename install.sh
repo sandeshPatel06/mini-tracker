@@ -2,7 +2,7 @@
 set -e
 
 # ==============================================================================
-# Mini Tracker — Universal Linux Desktop Installer (Sudo & Non-Sudo Support)
+# Mini Tracker — Universal Linux Desktop Installer (Pre-built & Source Modes)
 # ==============================================================================
 
 BOLD="\033[1m"
@@ -58,42 +58,44 @@ SERVICE_FILE="${SYSTEMD_USER_DIR}/mini-tracker.service"
 BACKEND_PORT="${PORT:-8080}"
 BACKEND_ENDPOINT="${BACKEND_ENDPOINT:-http://localhost:${BACKEND_PORT}}"
 
-# 1. Check prerequisites
-info "Checking system prerequisites..."
-command -v go >/dev/null 2>&1 || error "Go 1.22+ is required but not found. Please install Go: https://go.dev/doc/install"
-command -v npm >/dev/null 2>&1 || error "Node.js & npm are required to build the frontend dashboard but not found."
-
-GO_VERSION=$(go version | awk '{print $3}')
-success "Found Go (${GO_VERSION})"
-success "Found npm ($(npm -v))"
-
-# 2. Build Frontend
-info "Building React Web Dashboard..."
-if [ -d "frontend" ]; then
-    (cd frontend && npm install --silent && npm run build) || error "Failed to build frontend dashboard."
-    success "Frontend compiled successfully."
+# 1. Locate Application Binary (Use Pre-built or Build from Source)
+BINARY_SOURCE=""
+if [ -f "bin/mini-tracker-server" ]; then
+    BINARY_SOURCE="bin/mini-tracker-server"
+    success "Found pre-built binary: ${BINARY_SOURCE} (Skipping Go/npm build)"
+elif [ -f "./mini-tracker-server" ]; then
+    BINARY_SOURCE="./mini-tracker-server"
+    success "Found pre-built binary: ${BINARY_SOURCE} (Skipping Go/npm build)"
+elif [ -f "./mini-tracker" ]; then
+    BINARY_SOURCE="./mini-tracker"
+    success "Found pre-built binary: ${BINARY_SOURCE} (Skipping Go/npm build)"
 else
-    error "Frontend directory not found. Please run install.sh from the root of mini-tracker repository."
+    info "No pre-built binary found. Verifying developer toolchain (Go & Node.js)..."
+    command -v go >/dev/null 2>&1 || error "No pre-built binary found and Go is not installed. Please download a release package or install Go."
+    command -v npm >/dev/null 2>&1 || error "No pre-built binary found and npm is not installed. Please download a release package or install Node.js."
+
+    info "Building React Web Dashboard..."
+    (cd frontend && npm install --silent && npm run build) || error "Failed to build frontend dashboard."
+    
+    info "Building zero-dependency Go application binary..."
+    mkdir -p bin
+    go build -o bin/mini-tracker-server ./cmd/server || error "Failed to compile Go application binary."
+    BINARY_SOURCE="bin/mini-tracker-server"
+    success "Application binary compiled: ${BINARY_SOURCE}"
 fi
 
-# 3. Build Go Application Binary
-info "Building zero-dependency Go application binary..."
-mkdir -p bin
-go build -o bin/mini-tracker-server ./cmd/server || error "Failed to compile Go application binary."
-success "Application binary compiled: bin/mini-tracker-server"
-
-# 4. Install Binary & GUI App Launcher Script
+# 2. Install Binary & GUI App Launcher Script
 info "Installing application binaries to ${INSTALL_BIN_DIR}..."
 mkdir -p "${INSTALL_BIN_DIR}"
 
-# Stop systemd user service if active before replacing binary
+# Stop active systemd user service before replacing binary
 if [ "${IS_SUDO}" = true ]; then
     sudo -u "${REAL_USER}" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/${REAL_UID}/bus" systemctl --user stop mini-tracker.service 2>/dev/null || true
 else
     systemctl --user stop mini-tracker.service 2>/dev/null || true
 fi
 
-install -m 755 bin/mini-tracker-server "${INSTALL_BIN_DIR}/mini-tracker-server"
+install -m 755 "${BINARY_SOURCE}" "${INSTALL_BIN_DIR}/mini-tracker-server"
 ln -sf "${INSTALL_BIN_DIR}/mini-tracker-server" "${INSTALL_BIN_DIR}/mini-tracker"
 
 # Create Desktop App Launcher script (mini-tracker-gui)
@@ -142,7 +144,7 @@ EOF
 chmod +x "${GUI_LAUNCHER}"
 success "Installed binaries: mini-tracker-server, mini-tracker, and mini-tracker-gui"
 
-# 5. Ensure PATH includes ~/.local/bin if installed in user space
+# 3. Ensure PATH includes ~/.local/bin if installed in user space
 if [ "${IS_SUDO}" = false ]; then
     SHELL_RC=""
     if [ -f "${REAL_HOME}/.zshrc" ]; then
@@ -162,7 +164,7 @@ if [ "${IS_SUDO}" = false ]; then
     fi
 fi
 
-# 6. Initialize Config & Data Directories
+# 4. Initialize Config & Data Directories
 info "Initializing configuration, environment, and storage..."
 mkdir -p "${CONFIG_DIR}"
 mkdir -p "${DATA_DIR}"
@@ -203,7 +205,7 @@ if [ "${IS_SUDO}" = true ]; then
     chown -R "${REAL_USER}:${REAL_GROUP}" "${CONFIG_DIR}" "${DATA_DIR}"
 fi
 
-# 7. Create Standalone Linux Desktop Application Entry (.desktop file)
+# 5. Create Standalone Linux Desktop Application Entry (.desktop file)
 info "Creating Linux Desktop Application shortcut..."
 mkdir -p "${APPLICATIONS_DIR}"
 mkdir -p "${AUTOSTART_DIR}"
@@ -242,7 +244,7 @@ if command -v update-desktop-database >/dev/null 2>&1; then
     update-desktop-database "${APPLICATIONS_DIR}" 2>/dev/null || true
 fi
 
-# 8. Setup Systemd Background User Service
+# 6. Setup Systemd Background User Service
 info "Setting up systemd background user daemon for ${REAL_USER}..."
 mkdir -p "${SYSTEMD_USER_DIR}"
 
@@ -283,7 +285,7 @@ if command -v systemctl >/dev/null 2>&1; then
     success "Systemd background service is configured & active."
 fi
 
-# 9. Handle Keystroke Group Permissions
+# 7. Handle Keystroke Group Permissions
 info "Checking keyboard entropy tracking permissions..."
 if groups "${REAL_USER}" | grep -q '\binput\b'; then
     success "User '${REAL_USER}' is in 'input' group. Keystroke entropy capture is active."

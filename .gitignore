@@ -1,0 +1,33 @@
+# Environment & secret files
+.env
+*.env
+!.env.example
+
+# Binaries & build artifacts
+bin/
+build/bin/
+frontend/dist/
+dist/
+server
+mini-tracker-tmp
+*.deb
+
+# Dependencies
+node_modules/
+frontend/node_modules/
+
+# Runtime data, scratch & databases
+*.db
+data/
+scratch/
+.playwright-mcp/
+
+# Images & Screenshots
+*.png
+*.jpg
+*.jpeg
+
+# Logs & temporary files
+*.log
+.tmp/
+

@@ -107,11 +107,11 @@ elif [ -n "${DOWNLOAD_URL:-}" ]; then
     chmod +x bin/mini-tracker-server
     BINARY_SOURCE="bin/mini-tracker-server"
     log "✅ Downloaded release binary to: ${BINARY_SOURCE}"
-elif [ -f "build/bin/mini-tracker-tmp" ]; then
-    BINARY_SOURCE="build/bin/mini-tracker-tmp"
-    log "✅ Found build binary: ${BINARY_SOURCE}"
 elif [ -f "build/bin/mini-tracker" ]; then
     BINARY_SOURCE="build/bin/mini-tracker"
+    log "✅ Found build binary: ${BINARY_SOURCE}"
+elif [ -f "build/bin/mini-tracker-tmp" ]; then
+    BINARY_SOURCE="build/bin/mini-tracker-tmp"
     log "✅ Found build binary: ${BINARY_SOURCE}"
 elif [ -f "bin/mini-tracker-server" ]; then
     BINARY_SOURCE="bin/mini-tracker-server"
@@ -146,6 +146,12 @@ mkdir -p "${BIN_DIR}"
 
 cp -f "${BINARY_SOURCE}" "${INSTALL_DIR}/mini-tracker-server"
 chmod 755 "${INSTALL_DIR}/mini-tracker-server"
+
+if [ -d "frontend/dist" ]; then
+    log "Copying frontend static assets to ${INSTALL_DIR}/frontend/dist..."
+    mkdir -p "${INSTALL_DIR}/frontend/dist"
+    cp -r frontend/dist/* "${INSTALL_DIR}/frontend/dist/"
+fi
 
 # Create symlink for backend server binary
 ln -sf "${INSTALL_DIR}/mini-tracker-server" "${BIN_DIR}/mini-tracker-server"

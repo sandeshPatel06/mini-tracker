@@ -25,6 +25,7 @@ export interface AppConfig {
   screenshot_interval_seconds: number;
   data_dir: string;
   ai_configured: boolean;
+  backend_endpoint?: string;
 }
 
 export interface Organization {

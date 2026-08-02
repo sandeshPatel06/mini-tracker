@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { apiFetch } from '../api';
 
 interface AcceptInviteProps {
   token: string;
@@ -17,7 +18,7 @@ export const AcceptInvitePage: React.FC<AcceptInviteProps> = ({ token, onSuccess
     const checkToken = async () => {
       setLoading(true);
       try {
-        const res = await fetch(`/api/org/invite-info?token=${token}`);
+        const res = await apiFetch(`/api/org/invite-info?token=${token}`);
         const data = await res.json();
         if (!res.ok || data.valid === false) {
           throw new Error(data.error || data.message || 'Invalid or expired invitation token');
@@ -45,7 +46,7 @@ export const AcceptInvitePage: React.FC<AcceptInviteProps> = ({ token, onSuccess
     setError(null);
 
     try {
-      const res = await fetch('/api/org/accept-invite', {
+      const res = await apiFetch('/api/org/accept-invite', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

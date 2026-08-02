@@ -1,6 +1,7 @@
 package db
 
 import (
+	"crypto/sha256"
 	"database/sql"
 	"fmt"
 	"os"
@@ -12,16 +13,16 @@ import (
 
 // LogEntry represents one minute of tracked activity.
 type LogEntry struct {
-	ID            int64     `json:"id"`
-	Timestamp     time.Time `json:"timestamp"`
-	ImagePath     string    `json:"image_path"`
-	TotalKeys     int       `json:"total_keys"`
-	UniqueKeys    int       `json:"unique_keys"`
-	EntropyScore  float64   `json:"entropy_score"`
-	AICategory    string    `json:"ai_category"`
-	IsProductive  bool      `json:"is_productive"`
-	AIConfidence  float64   `json:"ai_confidence"`
-	AIReason      string    `json:"ai_reason"`
+	ID           int64     `json:"id" ts_type:"number"`
+	Timestamp    time.Time `json:"timestamp" ts_type:"string"`
+	ImagePath    string    `json:"image_path" ts_type:"string"`
+	TotalKeys    int       `json:"total_keys" ts_type:"number"`
+	UniqueKeys   int       `json:"unique_keys" ts_type:"number"`
+	EntropyScore float64   `json:"entropy_score" ts_type:"number"`
+	AICategory   string    `json:"ai_category" ts_type:"string"`
+	IsProductive bool      `json:"is_productive" ts_type:"boolean"`
+	AIConfidence float64   `json:"ai_confidence" ts_type:"number"`
+	AIReason     string    `json:"ai_reason" ts_type:"string"`
 }
 
 // ProductivityStats holds aggregate stats for a day.
@@ -145,11 +146,18 @@ func (db *DB) migrate() error {
 	var orgCount int
 	_ = db.conn.QueryRow(`SELECT COUNT(*) FROM organizations`).Scan(&orgCount)
 	if orgCount == 0 {
+		adminHash := HashPassword("admin123")
 		_, _ = db.conn.Exec(`INSERT INTO organizations (id, name, slug) VALUES (1, 'Default Beta Org', 'default-beta')`)
-		_, _ = db.conn.Exec(`INSERT INTO users (id, org_id, email, password_hash, full_name, role) VALUES (1, 1, 'admin@company.com', '$2a$10$abcdefghijklmnopqrstuu', 'Beta Admin', 'owner')`)
+		_, _ = db.conn.Exec(`INSERT INTO users (id, org_id, email, password_hash, full_name, role) VALUES (1, 1, 'admin@company.com', ?, 'Beta Admin', 'owner')`, adminHash)
 	}
 
 	return nil
+}
+
+// HashPassword hashes a user password consistently using SHA-256 with a salt.
+func HashPassword(password string) string {
+	h := sha256.Sum256([]byte("mini-tracker-salt-" + password))
+	return fmt.Sprintf("%x", h)
 }
 
 // CreateOrganization creates a new corporate entity.
@@ -173,6 +181,19 @@ func (db *DB) GetOrganization(id int64) (*Organization, error) {
 	o.CreatedAt, _ = time.Parse(time.RFC3339, ts)
 	return &o, nil
 }
+
+// GetOrganizationBySlug returns an org by its unique slug.
+func (db *DB) GetOrganizationBySlug(slug string) (*Organization, error) {
+	var o Organization
+	var ts string
+	err := db.conn.QueryRow(`SELECT id, name, slug, created_at FROM organizations WHERE slug = ?`, slug).Scan(&o.ID, &o.Name, &o.Slug, &ts)
+	if err != nil {
+		return nil, err
+	}
+	o.CreatedAt, _ = time.Parse(time.RFC3339, ts)
+	return &o, nil
+}
+
 
 // CreateUser creates a team member account.
 func (db *DB) CreateUser(orgID int64, email, passwordHash, fullName, role string) (*User, error) {

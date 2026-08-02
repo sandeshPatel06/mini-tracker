@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Organization, User, Invitation } from '../types';
+import { apiFetch } from '../api';
 
 export const OrganizationPage: React.FC = () => {
   const [org, setOrg] = useState<Organization | null>(null);
@@ -19,7 +20,7 @@ export const OrganizationPage: React.FC = () => {
   const fetchTeamData = async () => {
     setLoading(true);
     try {
-      const res = await fetch('/api/org/members?org_id=1');
+      const res = await apiFetch('/api/org/members?org_id=1');
       if (res.ok) {
         const data = await res.json();
         setOrg(data.org);
@@ -46,7 +47,7 @@ export const OrganizationPage: React.FC = () => {
     setInviteUrl(null);
 
     try {
-      const res = await fetch('/api/org/invite', {
+      const res = await apiFetch('/api/org/invite', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

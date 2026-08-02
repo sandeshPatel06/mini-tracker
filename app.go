@@ -54,7 +54,7 @@ func (a *App) startup(ctx context.Context) {
 	}
 
 	// Gemini client
-	a.gemini = ai.NewGeminiClient(cfg.GeminiAPIKey)
+	a.gemini = ai.NewGeminiClient(cfg.GeminiAPIKey, cfg.GeminiModel)
 
 	// Start keystroke tracker
 	a.keyTracker = tracker.NewKeystrokeTracker(cfg.ScreenshotInterval)
@@ -202,6 +202,7 @@ func (a *App) GetConfig() map[string]interface{} {
 		"screenshot_interval_seconds": a.cfg.ScreenshotInterval.Seconds(),
 		"data_dir":                    a.cfg.DataDir,
 		"ai_configured":               a.gemini != nil && a.gemini.HasKey(),
+		"backend_endpoint":            a.cfg.BackendEndpoint,
 	}
 }
 

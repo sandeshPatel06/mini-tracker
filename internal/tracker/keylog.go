@@ -5,7 +5,6 @@
 package tracker
 
 import (
-	"fmt"
 	"log"
 	"math"
 	"os"
@@ -48,10 +47,10 @@ func NewKeystrokeTracker(interval time.Duration) *KeystrokeTracker {
 func (t *KeystrokeTracker) Start() (<-chan KeystrokeStats, error) {
 	devices, err := discoverKeyboards()
 	if err != nil || len(devices) == 0 {
-		return nil, fmt.Errorf("no keyboard devices found (are you in the 'input' group?): %w", err)
+		log.Printf("[tracker] no native evdev keyboard devices opened (%v). Enabling application & API key input tracking mode.", err)
+	} else {
+		log.Printf("[tracker] found %d native keyboard device(s)", len(devices))
 	}
-
-	log.Printf("[tracker] found %d keyboard device(s)", len(devices))
 
 	eventCh := make(chan evdev.EvCode, 256)
 
@@ -125,6 +124,30 @@ func (t *KeystrokeTracker) Start() (<-chan KeystrokeStats, error) {
 	return statsCh, nil
 }
 
+// RecordKeystrokes records keystroke activity submitted via API or desktop frontend.
+func (t *KeystrokeTracker) RecordKeystrokes(total, unique int) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.total += total
+	if t.unique == nil {
+		t.unique = make(map[evdev.EvCode]struct{})
+	}
+	for i := 0; i < unique; i++ {
+		t.unique[evdev.EvCode(100+i)] = struct{}{}
+	}
+}
+
+// RecordKeyCode records a single keypress event code.
+func (t *KeystrokeTracker) RecordKeyCode(code evdev.EvCode) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.total++
+	if t.unique == nil {
+		t.unique = make(map[evdev.EvCode]struct{})
+	}
+	t.unique[code] = struct{}{}
+}
+
 // Stop signals all goroutines to exit.
 func (t *KeystrokeTracker) Stop() {
 	close(t.stopCh)
@@ -139,7 +162,7 @@ func (t *KeystrokeTracker) flush() KeystrokeStats {
 	t.unique = make(map[evdev.EvCode]struct{})
 	t.mu.Unlock()
 
-	score := computeEntropyScore(total, unique)
+	score := ComputeEntropyScore(total, unique)
 	return KeystrokeStats{
 		TotalKeys:    total,
 		UniqueKeys:   unique,
@@ -147,9 +170,9 @@ func (t *KeystrokeTracker) flush() KeystrokeStats {
 	}
 }
 
-// computeEntropyScore returns a 0–100 score:
+// ComputeEntropyScore returns a 0–100 score:
 // high score = lots of distinct keys (real typing), low score = repetitive or idle.
-func computeEntropyScore(total, unique int) float64 {
+func ComputeEntropyScore(total, unique int) float64 {
 	if total == 0 {
 		return 0
 	}
@@ -163,32 +186,48 @@ func computeEntropyScore(total, unique int) float64 {
 	return math.Round(score*10) / 10
 }
 
-// discoverKeyboards returns all /dev/input/event* paths that support EV_KEY.
+// discoverKeyboards returns all /dev/input keyboard device paths.
 func discoverKeyboards() ([]string, error) {
-	entries, err := os.ReadDir("/dev/input")
-	if err != nil {
-		return nil, fmt.Errorf("read /dev/input: %w", err)
+	dirsToScan := []string{"/dev/input"}
+	if entries, err := os.ReadDir("/dev/input/by-id"); err == nil && len(entries) > 0 {
+		dirsToScan = append(dirsToScan, "/dev/input/by-id")
+	}
+	if entries, err := os.ReadDir("/dev/input/by-path"); err == nil && len(entries) > 0 {
+		dirsToScan = append(dirsToScan, "/dev/input/by-path")
 	}
 
+	seen := make(map[string]bool)
 	var keyboards []string
-	for _, e := range entries {
-		if !strings.HasPrefix(e.Name(), "event") {
-			continue
-		}
-		path := filepath.Join("/dev/input", e.Name())
-		dev, err := evdev.Open(path)
+
+	for _, dir := range dirsToScan {
+		entries, err := os.ReadDir(dir)
 		if err != nil {
 			continue
 		}
-		// Check if the device has keyboard keys
-		caps := dev.CapableTypes()
-		for _, t := range caps {
-			if t == evdev.EV_KEY {
-				keyboards = append(keyboards, path)
-				break
+		for _, e := range entries {
+			name := e.Name()
+			if !strings.Contains(name, "event") && !strings.Contains(name, "kbd") {
+				continue
 			}
+			path := filepath.Join(dir, name)
+			if seen[path] {
+				continue
+			}
+
+			dev, err := evdev.Open(path)
+			if err != nil {
+				continue
+			}
+			caps := dev.CapableTypes()
+			for _, t := range caps {
+				if t == evdev.EV_KEY {
+					keyboards = append(keyboards, path)
+					seen[path] = true
+					break
+				}
+			}
+			dev.Close()
 		}
-		dev.Close()
 	}
 	return keyboards, nil
 }

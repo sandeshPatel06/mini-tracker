@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { LogEntry, ProductivityStats, AppConfig } from '../types';
+import { apiFetch } from '../api';
 import { format } from 'date-fns';
 import { CategoryBadge } from '../components/CategoryBadge';
 import { ScreenshotThumb, ImageModal } from '../components/Screenshot';
@@ -83,7 +84,7 @@ export default function Dashboard({ logs, stats, config, loading, today, onRefre
       if (window.go?.main?.App?.UpdateGeminiAPIKey) {
         await window.go.main.App.UpdateGeminiAPIKey(apiKeyInput.trim());
       } else {
-        await fetch('/api/config', {
+        await apiFetch('/api/config', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ gemini_api_key: apiKeyInput.trim() }),

@@ -66,6 +66,8 @@ html, body, #root {
   grid-template-columns: 220px 1fr;
   grid-template-rows: 1fr;
   height: 100vh;
+  width: 100vw;
+  overflow: hidden;
   background: var(--bg-base);
 }
 
@@ -79,7 +81,8 @@ html, body, #root {
   flex-direction: column;
   padding: 24px 0;
   gap: 4px;
-  overflow: hidden;
+  overflow-y: auto;
+  max-height: 100vh;
 }
 
 .sidebar-logo {
@@ -89,6 +92,7 @@ html, body, #root {
   gap: 10px;
   border-bottom: 1px solid var(--border-subtle);
   margin-bottom: 12px;
+  flex-shrink: 0;
 }
 
 .sidebar-logo-icon {
@@ -124,6 +128,7 @@ html, body, #root {
   text-transform: uppercase;
   color: var(--text-muted);
   padding: 8px 20px 4px;
+  flex-shrink: 0;
 }
 
 .nav-item {
@@ -140,6 +145,7 @@ html, body, #root {
   transition: all var(--transition);
   border: 1px solid transparent;
   user-select: none;
+  flex-shrink: 0;
 }
 
 .nav-item:hover {
@@ -159,6 +165,7 @@ html, body, #root {
   margin-top: auto;
   padding: 16px 20px 0;
   border-top: 1px solid var(--border-subtle);
+  flex-shrink: 0;
 }
 
 .status-badge {
@@ -190,11 +197,23 @@ html, body, #root {
 }
 
 /* ============================================================
-   MAIN CONTENT
+   MAIN CONTENT & PAGE CONTAINER
    ============================================================ */
 .main-content {
+  height: 100vh;
+  min-height: 0;
   overflow-y: auto;
-  padding: 32px;
+  padding: 32px 32px 48px;
+  display: flex;
+  flex-direction: column;
+  scroll-behavior: smooth;
+  -webkit-overflow-scrolling: touch;
+}
+
+.page-container {
+  max-width: 1400px;
+  width: 100%;
+  margin: 0 auto;
   display: flex;
   flex-direction: column;
   gap: 24px;
@@ -897,47 +916,56 @@ html, body, #root {
    AUTHENTICATION PAGE STYLES
    ============================================================ */
 .auth-container {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
   display: flex;
+  flex-direction: column;
   align-items: center;
-  justify-content: center;
-  min-height: 100vh;
-  width: 100vw;
+  justify-content: flex-start;
+  overflow-y: auto;
+  overflow-x: hidden;
   background: radial-gradient(circle at 50% 30%, rgba(99, 102, 241, 0.15) 0%, rgba(10, 11, 18, 0.98) 70%);
-  padding: 24px;
+  padding: 32px 16px;
+  -webkit-overflow-scrolling: touch;
 }
 
 .auth-card {
   width: 100%;
   max-width: 440px;
+  margin: auto;
+  flex-shrink: 0;
   background: rgba(15, 17, 32, 0.85);
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
   border: 1px solid var(--border-medium);
   border-radius: var(--radius-xl);
   box-shadow: 0 20px 50px rgba(0, 0, 0, 0.6), 0 0 30px rgba(99, 102, 241, 0.15);
-  padding: 36px 32px;
+  padding: 28px 24px;
   animation: fade-in-up 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
 
 .auth-header {
   text-align: center;
-  margin-bottom: 24px;
+  margin-bottom: 16px;
 }
 
 .auth-logo-badge {
-  width: 52px;
-  height: 52px;
+  width: 44px;
+  height: 44px;
   border-radius: var(--radius-md);
   background: linear-gradient(135deg, var(--accent-purple), var(--accent-teal));
   display: inline-flex;
   align-items: center;
   justify-content: center;
   box-shadow: 0 6px 16px rgba(99, 102, 241, 0.35);
-  margin-bottom: 14px;
+  margin-bottom: 8px;
 }
 
 .auth-title {
-  font-size: 22px;
+  font-size: 20px;
   font-weight: 700;
   color: var(--text-primary);
   letter-spacing: -0.5px;
@@ -946,8 +974,8 @@ html, body, #root {
 .auth-subtitle {
   font-size: 12px;
   color: var(--text-secondary);
-  margin-top: 4px;
-  line-height: 1.5;
+  margin-top: 2px;
+  line-height: 1.4;
 }
 
 .auth-tabs {
@@ -955,19 +983,19 @@ html, body, #root {
   background: var(--bg-surface);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-md);
-  padding: 4px;
-  margin-bottom: 24px;
+  padding: 3px;
+  margin-bottom: 16px;
   gap: 4px;
 }
 
 .auth-tab {
   flex: 1;
-  padding: 8px 12px;
+  padding: 7px 10px;
   background: transparent;
   border: none;
   border-radius: var(--radius-sm);
   color: var(--text-muted);
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 600;
   cursor: pointer;
   transition: all var(--transition);
@@ -980,32 +1008,32 @@ html, body, #root {
 }
 
 .auth-error-alert {
-  padding: 10px 14px;
+  padding: 8px 12px;
   background: rgba(239, 68, 68, 0.12);
   border: 1px solid rgba(239, 68, 68, 0.3);
   border-radius: var(--radius-sm);
   color: var(--accent-red);
   font-size: 12px;
   font-weight: 500;
-  margin-bottom: 18px;
+  margin-bottom: 14px;
 }
 
 .oauth-button-group {
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  margin-bottom: 20px;
+  gap: 8px;
+  margin-bottom: 14px;
 }
 
 .btn-oauth {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 12px;
+  gap: 10px;
   width: 100%;
-  padding: 11px 16px;
+  padding: 9px 14px;
   border-radius: var(--radius-md);
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 600;
   cursor: pointer;
   transition: all var(--transition);
@@ -1030,7 +1058,7 @@ html, body, #root {
   display: flex;
   align-items: center;
   text-align: center;
-  margin: 20px 0;
+  margin: 14px 0;
   color: var(--text-muted);
   font-size: 11px;
   text-transform: uppercase;
@@ -1088,6 +1116,271 @@ html, body, #root {
 
 .btn-link-guest:hover {
   color: var(--accent-purple);
+}
+
+/* ============================================================
+   RESPONSIVENESS & SCROLL VIEW ENHANCEMENTS
+   ============================================================ */
+
+/* Scroll behavior improvements */
+.main-content {
+  scroll-behavior: smooth;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Custom styled scrollbars for main content & scroll views */
+.main-content::-webkit-scrollbar,
+.auth-card::-webkit-scrollbar,
+.card-body::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.main-content::-webkit-scrollbar-track,
+.auth-card::-webkit-scrollbar-track {
+  background: rgba(15, 17, 32, 0.4);
+}
+
+.main-content::-webkit-scrollbar-thumb,
+.auth-card::-webkit-scrollbar-thumb {
+  background: var(--border-medium);
+  border-radius: 99px;
+}
+
+.main-content::-webkit-scrollbar-thumb:hover,
+.auth-card::-webkit-scrollbar-thumb:hover {
+  background: var(--accent-purple);
+}
+
+/* Auto-wrapping responsive grid layouts */
+/* Auto-wrapping responsive grid layouts */
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 16px;
+}
+
+.charts-grid-2col {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 16px;
+}
+
+.mobile-header {
+  display: none;
+}
+
+.sidebar-backdrop {
+  display: none;
+}
+
+/* ============================================================
+   MEDIA QUERIES (ULTRA-WIDE, DESKTOP, TABLET & MOBILE)
+   ============================================================ */
+
+/* Ultra-wide Monitors (>= 1600px) */
+@media (min-width: 1600px) {
+  .app-shell {
+    grid-template-columns: 240px 1fr;
+  }
+
+  .main-content {
+    padding: 40px 48px 64px;
+  }
+
+  .page-container {
+    max-width: 1540px;
+  }
+
+  .stats-grid {
+    grid-template-columns: repeat(4, 1fr);
+  }
+}
+
+/* Desktop & Laptops (<= 1200px) */
+@media (max-width: 1200px) {
+  .timeline-item {
+    grid-template-columns: 50px 100px 1fr auto;
+    gap: 10px;
+    padding: 10px 14px;
+  }
+
+  .timeline-thumb, .timeline-thumb-img, .timeline-thumb-placeholder {
+    width: 100px;
+    height: 58px;
+  }
+}
+
+/* Tablet & Medium Displays (<= 1024px) */
+@media (max-width: 1024px) {
+  .main-content {
+    padding: 24px 20px 40px;
+    gap: 20px;
+  }
+
+  .page-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 12px;
+  }
+}
+
+/* Mobile & Small Tablets (<= 768px) */
+@media (max-width: 768px) {
+  .app-shell {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    overflow: hidden;
+  }
+
+  /* Mobile Top Navbar */
+  .mobile-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 16px;
+    background: var(--bg-surface);
+    border-bottom: 1px solid var(--border-subtle);
+    z-index: 90;
+    flex-shrink: 0;
+  }
+
+  .mobile-header-brand {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .mobile-header-actions {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+  }
+
+  .mobile-menu-toggle {
+    background: var(--bg-elevated);
+    border: 1px solid var(--border-medium);
+    color: var(--text-primary);
+    width: 34px;
+    height: 34px;
+    border-radius: var(--radius-sm);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 18px;
+    cursor: pointer;
+    transition: all var(--transition);
+  }
+
+  .mobile-menu-toggle:hover {
+    border-color: var(--accent-purple);
+    color: var(--accent-purple);
+  }
+
+  /* Off-canvas Mobile Sidebar Drawer */
+  .sidebar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    width: 260px;
+    z-index: 100;
+    transform: translateX(-100%);
+    transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+    box-shadow: 10px 0 30px rgba(0, 0, 0, 0.5);
+    background: var(--bg-surface);
+  }
+
+  .sidebar.open {
+    transform: translateX(0);
+  }
+
+  /* Backdrop filter when mobile drawer is open */
+  .sidebar-backdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    background: rgba(10, 11, 18, 0.7);
+    backdrop-filter: blur(4px);
+    z-index: 95;
+  }
+
+  .main-content {
+    flex: 1;
+    padding: 16px 16px 32px;
+    gap: 16px;
+    overflow-y: auto;
+  }
+
+  .timeline-item {
+    grid-template-columns: 46px 80px 1fr;
+    gap: 10px;
+  }
+
+  .timeline-item > div:last-child {
+    grid-column: 1 / -1;
+    display: flex;
+    justify-content: flex-end;
+    align-items: center;
+  }
+
+  .timeline-thumb, .timeline-thumb-img, .timeline-thumb-placeholder {
+    width: 80px;
+    height: 48px;
+  }
+
+  .auth-card {
+    padding: 24px 20px;
+  }
+
+  .stats-grid {
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 12px;
+  }
+
+  .stat-card {
+    padding: 14px 16px;
+  }
+
+  .stat-value {
+    font-size: 22px;
+  }
+}
+
+/* Extra Small Phones (<= 540px) */
+@media (max-width: 540px) {
+  .timeline-item {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+
+  .timeline-thumb, .timeline-thumb-img, .timeline-thumb-placeholder {
+    width: 100%;
+    height: 120px;
+  }
+
+  .stats-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .auth-container {
+    padding: 12px;
+  }
+
+  .auth-card {
+    padding: 24px 16px;
+    border-radius: var(--radius-lg);
+  }
+
+  .oauth-button-group {
+    gap: 8px;
+  }
+
+  .btn-oauth {
+    font-size: 12px;
+    padding: 10px 12px;
+  }
 }
 
 

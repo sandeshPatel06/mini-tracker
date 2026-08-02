@@ -2,8 +2,7 @@ export namespace db {
 	
 	export class LogEntry {
 	    id: number;
-	    // Go type: time
-	    timestamp: any;
+	    timestamp: string;
 	    image_path: string;
 	    total_keys: number;
 	    unique_keys: number;
@@ -20,7 +19,7 @@ export namespace db {
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.id = source["id"];
-	        this.timestamp = this.convertValues(source["timestamp"], null);
+	        this.timestamp = source["timestamp"];
 	        this.image_path = source["image_path"];
 	        this.total_keys = source["total_keys"];
 	        this.unique_keys = source["unique_keys"];
@@ -30,24 +29,6 @@ export namespace db {
 	        this.ai_confidence = source["ai_confidence"];
 	        this.ai_reason = source["ai_reason"];
 	    }
-	
-		convertValues(a: any, classs: any, asMap: boolean = false): any {
-		    if (!a) {
-		        return a;
-		    }
-		    if (a.slice && a.map) {
-		        return (a as any[]).map(elem => this.convertValues(elem, classs));
-		    } else if ("object" === typeof a) {
-		        if (asMap) {
-		            for (const key of Object.keys(a)) {
-		                a[key] = new classs(a[key]);
-		            }
-		            return a;
-		        }
-		        return new classs(a);
-		    }
-		    return a;
-		}
 	}
 	export class ProductivityStats {
 	    date: string;

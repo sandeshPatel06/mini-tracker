@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { LogEntry, ProductivityStats, AppConfig, Page, User } from './types';
+import { apiFetch, setRuntimeBackendUrl } from './api';
 import Dashboard from './pages/Dashboard';
 import Timeline from './pages/Timeline';
 import Analytics from './pages/Analytics';
@@ -50,7 +51,7 @@ export default function App() {
 
   // Verify active user session on startup
   useEffect(() => {
-    fetch('/api/auth/me')
+    apiFetch('/api/auth/me')
       .then(r => r.ok ? r.json() : null)
       .then(data => {
         if (data && data.authenticated && data.user) {
@@ -65,7 +66,7 @@ export default function App() {
 
   const handleLogout = async () => {
     try {
-      await fetch('/api/auth/logout', { method: 'POST' });
+      await apiFetch('/api/auth/logout', { method: 'POST' });
     } catch {}
     setCurrentUser(null);
     setIsGuestMode(false);
@@ -74,7 +75,7 @@ export default function App() {
 
   // Fetch initial tracker status
   useEffect(() => {
-    fetch('/api/tracker/status')
+    apiFetch('/api/tracker/status')
       .then(r => r.ok ? r.json() : null)
       .then(data => {
         if (data) {
@@ -96,7 +97,7 @@ export default function App() {
 
   const handleToggleTracking = async () => {
     try {
-      const res = await fetch('/api/tracker/toggle', { method: 'POST' });
+      const res = await apiFetch('/api/tracker/toggle', { method: 'POST' });
       if (res.ok) {
         const data = await res.json();
         setIsTrackingActive(!!data.active);
@@ -152,9 +153,9 @@ export default function App() {
     } else {
       try {
         const [resLogs, resStats, resConfig] = await Promise.all([
-          fetch(`/api/logs?date=${date}`).then(r => r.ok ? r.json() : []),
-          fetch(`/api/stats?date=${date}`).then(r => r.ok ? r.json() : null),
-          fetch(`/api/config`).then(r => r.ok ? r.json() : null),
+          apiFetch(`/api/logs?date=${date}`).then(r => r.ok ? r.json() : []),
+          apiFetch(`/api/stats?date=${date}`).then(r => r.ok ? r.json() : null),
+          apiFetch(`/api/config`).then(r => r.ok ? r.json() : null),
         ]);
         logsData = resLogs;
         statsData = resStats;
@@ -162,6 +163,10 @@ export default function App() {
       } catch (err) {
         console.error('API fetch error:', err);
       }
+    }
+
+    if (configData?.backend_endpoint) {
+      setRuntimeBackendUrl(configData.backend_endpoint);
     }
 
     setLogs(logsData ?? []);
@@ -175,16 +180,55 @@ export default function App() {
     loadData(today);
   }, [today, loadData]);
 
-  // Auto-refresh every 15 seconds
+  // Keypress input tracking & background sync cron interval
   useEffect(() => {
-    const tid = setInterval(() => {
-      const todayStr = new Date().toISOString().slice(0, 10);
-      if (page === 'dashboard' || page === 'timeline') {
-        loadData(todayStr);
+    let totalCount = 0;
+    const uniqueKeys = new Set<string>();
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      totalCount++;
+      uniqueKeys.add(e.code || e.key);
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+
+    // Sync keyboard activity to backend every 10 seconds
+    const inputFlushInterval = setInterval(() => {
+      if (totalCount > 0) {
+        const payload = { total_keys: totalCount, unique_keys: uniqueKeys.size };
+        totalCount = 0;
+        uniqueKeys.clear();
+
+        apiFetch('/api/tracker/input', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        }).catch(() => {});
       }
-    }, 15_000);
-    return () => clearInterval(tid);
-  }, [page, loadData]);
+    }, 10000);
+
+    // Auto-refresh timeline, stats, and AI analytics every 15 seconds
+    const syncInterval = setInterval(() => {
+      const todayStr = new Date().toISOString().slice(0, 10);
+      loadData(todayStr);
+    }, 15000);
+
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      clearInterval(inputFlushInterval);
+      clearInterval(syncInterval);
+    };
+  }, [loadData]);
+
+  // Mobile navbar collapse state
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState<boolean>(false);
+
+  // Close mobile menu on page transition
+  const navigateTo = (targetPage: Page) => {
+    window.location.hash = targetPage === 'organization' ? 'organization' : '';
+    setPage(targetPage);
+    setIsMobileMenuOpen(false);
+  };
 
   const navItems: { id: Page; icon: string; label: string }[] = [
     { id: 'dashboard', icon: '⚡', label: 'Dashboard' },
@@ -200,19 +244,51 @@ export default function App() {
   if (authChecked && !currentUser && !isGuestMode) {
     return (
       <AuthPage
-        onAuthSuccess={(user) => {
+        onAuthSuccess={(user, org) => {
+          if (user) {
+            localStorage.setItem('mini_auth_user', JSON.stringify(user));
+          }
+          if (org) {
+            localStorage.setItem('mini_auth_org', JSON.stringify(org));
+          }
           setCurrentUser(user);
-          setPage('dashboard');
         }}
-        onSkip={() => setIsGuestMode(true)}
+        onSkip={() => {
+          setIsGuestMode(true);
+        }}
       />
     );
   }
 
   return (
-    <div className="app-shell">
+    <div className={`app-shell ${isMobileMenuOpen ? 'mobile-nav-active' : ''}`}>
+      {/* Mobile Header Bar */}
+      <header className="mobile-header">
+        <div className="mobile-header-brand">
+          <div className="sidebar-logo-icon" style={{ width: 28, height: 28, fontSize: 14 }}>📍</div>
+          <span className="sidebar-logo-text" style={{ fontSize: 14 }}>Mini Tracker</span>
+        </div>
+        <div className="mobile-header-actions">
+          <div style={{ fontFamily: 'monospace', fontSize: 13, fontWeight: 700, color: 'var(--accent-teal)' }}>
+            {formatTimer(elapsedSeconds)}
+          </div>
+          <button
+            className="mobile-menu-toggle"
+            onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
+            aria-label="Toggle Navigation Menu"
+          >
+            {isMobileMenuOpen ? '✕' : '☰'}
+          </button>
+        </div>
+      </header>
+
+      {/* Sidebar Backdrop Overlay for Mobile */}
+      {isMobileMenuOpen && (
+        <div className="sidebar-backdrop" onClick={() => setIsMobileMenuOpen(false)} />
+      )}
+
       {/* Sidebar */}
-      <aside className="sidebar">
+      <aside className={`sidebar ${isMobileMenuOpen ? 'open' : ''}`}>
         <div className="sidebar-logo">
           <div className="sidebar-logo-icon">📍</div>
           <div>
@@ -223,6 +299,7 @@ export default function App() {
 
         {/* Work Clock & Tracking Control Widget */}
         <div
+          className="sidebar-widget"
           style={{
             margin: '12px 16px',
             padding: '12px 14px',
@@ -268,13 +345,10 @@ export default function App() {
             key={item.id}
             id={`nav-${item.id}`}
             className={`nav-item ${page === item.id ? 'active' : ''}`}
-            onClick={() => {
-              window.location.hash = item.id === 'organization' ? 'organization' : '';
-              setPage(item.id);
-            }}
+            onClick={() => navigateTo(item.id)}
           >
             <span className="nav-icon">{item.icon}</span>
-            <span>{item.label}</span>
+            <span className="nav-text">{item.label}</span>
           </div>
         ))}
 
@@ -338,45 +412,47 @@ export default function App() {
 
       {/* Main content area */}
       <main className="main-content">
-        {page === 'dashboard' && (
-          <Dashboard
-            logs={logs}
-            stats={stats}
-            config={config}
-            loading={loading}
-            today={today}
-            onRefresh={() => loadData(today)}
-          />
-        )}
-        {page === 'timeline' && (
-          <Timeline
-            logs={logs}
-            loading={loading}
-            today={today}
-            onDateChange={(d) => { setToday(d); loadData(d); }}
-          />
-        )}
-        {page === 'analytics' && (
-          <Analytics
-            logs={logs}
-            stats={stats}
-            loading={loading}
-            today={today}
-            onDateChange={(d) => { setToday(d); loadData(d); }}
-          />
-        )}
-        {page === 'organization' && (
-          <OrganizationPage />
-        )}
-        {page === 'accept-invite' && (
-          <AcceptInvitePage
-            token={inviteToken}
-            onSuccess={() => {
-              window.location.hash = 'organization';
-              setPage('organization');
-            }}
-          />
-        )}
+        <div className="page-container">
+          {page === 'dashboard' && (
+            <Dashboard
+              logs={logs}
+              stats={stats}
+              config={config}
+              loading={loading}
+              today={today}
+              onRefresh={() => loadData(today)}
+            />
+          )}
+          {page === 'timeline' && (
+            <Timeline
+              logs={logs}
+              loading={loading}
+              today={today}
+              onDateChange={(d) => { setToday(d); loadData(d); }}
+            />
+          )}
+          {page === 'analytics' && (
+            <Analytics
+              logs={logs}
+              stats={stats}
+              loading={loading}
+              today={today}
+              onDateChange={(d) => { setToday(d); loadData(d); }}
+            />
+          )}
+          {page === 'organization' && (
+            <OrganizationPage />
+          )}
+          {page === 'accept-invite' && (
+            <AcceptInvitePage
+              token={inviteToken}
+              onSuccess={() => {
+                window.location.hash = 'organization';
+                setPage('organization');
+              }}
+            />
+          )}
+        </div>
       </main>
     </div>
   );

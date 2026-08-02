@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { User, Organization } from '../types';
+import { apiFetch, buildApiUrl } from '../api';
 
 interface AuthProps {
   onAuthSuccess: (user: User, org: Organization | null) => void;
@@ -16,6 +17,39 @@ export function AuthPage({ onAuthSuccess, onSkip }: AuthProps) {
   const [oauthLoading, setOauthLoading] = useState<'google' | 'azure' | null>(null);
   const [error, setError] = useState('');
 
+  const pollTimerRef = React.useRef<any>(null);
+
+  React.useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const authErr = params.get('error');
+    if (authErr) {
+      setError(decodeURIComponent(authErr));
+    }
+
+    return () => {
+      if (pollTimerRef.current) clearInterval(pollTimerRef.current);
+    };
+  }, []);
+
+  const startAuthPolling = () => {
+    if (pollTimerRef.current) clearInterval(pollTimerRef.current);
+    pollTimerRef.current = setInterval(async () => {
+      try {
+        const res = await apiFetch('/api/auth/me');
+        if (res.ok) {
+          const data = await res.json();
+          if (data.authenticated && data.user) {
+            if (pollTimerRef.current) clearInterval(pollTimerRef.current);
+            setOauthLoading(null);
+            onAuthSuccess(data.user, data.org || null);
+          }
+        }
+      } catch {
+        // Continue polling silently until auth completes
+      }
+    }, 1500);
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
@@ -27,7 +61,7 @@ export function AuthPage({ onAuthSuccess, onSkip }: AuthProps) {
       : { name: orgName || 'My Workspace', email, password, full_name: fullName };
 
     try {
-      const res = await fetch(endpoint, {
+      const res = await apiFetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
@@ -50,8 +84,21 @@ export function AuthPage({ onAuthSuccess, onSkip }: AuthProps) {
     setError('');
     setOauthLoading(provider);
     
-    // Redirect to backend OAuth route
-    window.location.href = `/api/auth/oauth/${provider}`;
+    const redirectTarget = encodeURIComponent('/auth-success');
+    const targetUrl = buildApiUrl(`/api/auth/oauth/${provider}?redirect=${redirectTarget}`);
+
+    // Begin background polling for login completion
+    startAuthPolling();
+
+    // Trigger external system browser opening to avoid webview disallowed_useragent errors
+    if ((window as any).runtime?.BrowserOpenURL) {
+      (window as any).runtime.BrowserOpenURL(targetUrl);
+    } else {
+      const opened = window.open(targetUrl, '_blank');
+      if (!opened) {
+        window.location.href = targetUrl;
+      }
+    }
   };
 
   return (

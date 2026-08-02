@@ -8,6 +8,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -40,12 +41,26 @@ type GeminiClient struct {
 	mu        sync.Mutex
 }
 
-// NewGeminiClient returns a new Gemini client.
-func NewGeminiClient(apiKey string) *GeminiClient {
-	return &GeminiClient{
-		apiKey: apiKey,
-		client: &http.Client{Timeout: 45 * time.Second},
+// NewGeminiClient returns a new Gemini client using an optional initialModel or GEMINI_MODEL env var.
+func NewGeminiClient(apiKey string, initialModel ...string) *GeminiClient {
+	m := ""
+	if len(initialModel) > 0 && initialModel[0] != "" {
+		m = initialModel[0]
+	} else if envModel := os.Getenv("GEMINI_MODEL"); envModel != "" {
+		m = envModel
 	}
+	return &GeminiClient{
+		apiKey:    apiKey,
+		modelName: m,
+		client:    &http.Client{Timeout: 45 * time.Second},
+	}
+}
+
+// SetModel explicitly sets the model name to use.
+func (g *GeminiClient) SetModel(modelName string) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.modelName = modelName
 }
 
 // SetAPIKey updates the API key at runtime and resets model selection.
@@ -53,7 +68,7 @@ func (g *GeminiClient) SetAPIKey(apiKey string) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	g.apiKey = apiKey
-	g.modelName = ""
+	g.modelName = os.Getenv("GEMINI_MODEL")
 }
 
 // HasKey checks if an API key is currently set.
@@ -155,9 +170,31 @@ func (g *GeminiClient) FetchAvailableModels(ctx context.Context) ([]string, erro
 	return candidates, nil
 }
 
-// SelectBestModel picks the cheapest available model, auto-discovering from API or fallback list.
+// SelectBestModel picks the environment-configured model, pre-configured model, or cheapest available model via discovery.
 func (g *GeminiClient) SelectBestModel(ctx context.Context, exclude map[string]bool) (string, error) {
-	// Try online auto-discovery first
+	// 1. If GEMINI_MODEL env var is set and not excluded, use it directly without API lookup
+	if envModel := os.Getenv("GEMINI_MODEL"); envModel != "" {
+		if exclude == nil || !exclude[envModel] {
+			g.mu.Lock()
+			g.modelName = envModel
+			g.mu.Unlock()
+			log.Printf("[ai/gemini] Using environment-configured model: %s", envModel)
+			return envModel, nil
+		}
+	}
+
+	// 2. If client has a pre-configured modelName not excluded, use it
+	g.mu.Lock()
+	current := g.modelName
+	g.mu.Unlock()
+	if current != "" {
+		if exclude == nil || !exclude[current] {
+			log.Printf("[ai/gemini] Using pre-configured model: %s", current)
+			return current, nil
+		}
+	}
+
+	// 3. Try online auto-discovery first if no explicit model is configured
 	models, err := g.FetchAvailableModels(ctx)
 	if err == nil {
 		for _, m := range models {
@@ -174,14 +211,14 @@ func (g *GeminiClient) SelectBestModel(ctx context.Context, exclude map[string]b
 		log.Printf("[ai/gemini] Model listing warning: %v — falling back to candidate list", err)
 	}
 
-	// Fallback candidates if API listing fails or returns no unexcluded models
+	// 4. Fallback candidates if API listing fails or returns no unexcluded models
 	fallbacks := []string{
-		"gemma-4-31b-it",
 		"gemini-2.0-flash",
 		"gemini-2.0-flash-lite",
 		"gemini-2.5-flash",
 		"gemini-1.5-flash",
 		"gemini-1.5-pro",
+		"gemma-4-31b-it",
 	}
 
 	for _, m := range fallbacks {

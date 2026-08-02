@@ -12,6 +12,7 @@ import (
 // Config holds application configuration.
 type Config struct {
 	GeminiAPIKey       string        `json:"gemini_api_key"`
+	GeminiModel        string        `json:"gemini_model"`
 	ScreenshotInterval time.Duration `json:"screenshot_interval_seconds"`
 	AIAnalysisInterval time.Duration `json:"ai_analysis_interval_seconds"`
 	DataDir            string        `json:"data_dir"`
@@ -23,6 +24,7 @@ type Config struct {
 // ~/.config/mini-tracker/config.json, then uses sane defaults.
 func Load() (*Config, error) {
 	cfg := &Config{
+		GeminiModel:        "gemini-2.0-flash",
 		ScreenshotInterval: 30 * time.Second,
 		AIAnalysisInterval: 3 * time.Hour,
 		BackendPort:        8080,
@@ -49,18 +51,26 @@ func Load() (*Config, error) {
 	if v := os.Getenv("GEMINI_API_KEY"); v != "" {
 		cfg.GeminiAPIKey = v
 	}
+	if v := os.Getenv("GEMINI_MODEL"); v != "" {
+		cfg.GeminiModel = v
+	}
 	if v := os.Getenv("AI_ANALYSIS_INTERVAL"); v != "" {
 		if dur, err := time.ParseDuration(v); err == nil {
 			cfg.AIAnalysisInterval = dur
 		}
 	}
-	if v := os.Getenv("BACKEND_ENDPOINT"); v != "" {
+	if v := os.Getenv("BACKEND_URL"); v != "" {
+		cfg.BackendEndpoint = v
+	} else if v := os.Getenv("VITE_BACKEND_URL"); v != "" {
+		cfg.BackendEndpoint = v
+	} else if v := os.Getenv("BACKEND_ENDPOINT"); v != "" {
 		cfg.BackendEndpoint = v
 	}
+
 	if v := os.Getenv("PORT"); v != "" {
 		if p, err := strconv.Atoi(v); err == nil && p > 0 {
 			cfg.BackendPort = p
-			if os.Getenv("BACKEND_ENDPOINT") == "" {
+			if cfg.BackendEndpoint == "" || cfg.BackendEndpoint == "http://localhost:8080" {
 				cfg.BackendEndpoint = fmt.Sprintf("http://localhost:%d", p)
 			}
 		}

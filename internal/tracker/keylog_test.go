@@ -44,9 +44,9 @@ func TestComputeEntropyScore(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			score := computeEntropyScore(tt.total, tt.unique)
+			score := ComputeEntropyScore(tt.total, tt.unique)
 			if score < tt.minScore || score > tt.maxScore {
-				t.Errorf("computeEntropyScore(%d, %d) = %f; want score between %f and %f",
+				t.Errorf("ComputeEntropyScore(%d, %d) = %f; want score between %f and %f",
 					tt.total, tt.unique, score, tt.minScore, tt.maxScore)
 			}
 		})

@@ -55,13 +55,22 @@ func TestOrganizationCRUD(t *testing.T) {
 		t.Errorf("expected valid org ID, got 0")
 	}
 
-	// Fetch org
+	// Fetch org by ID
 	fetched, err := database.GetOrganization(org.ID)
 	if err != nil {
 		t.Fatalf("failed to get organization: %v", err)
 	}
 	if fetched.Name != "Test Corp" || fetched.Slug != "test-corp" {
 		t.Errorf("unexpected org details: %+v", fetched)
+	}
+
+	// Fetch org by Slug
+	bySlug, err := database.GetOrganizationBySlug("test-corp")
+	if err != nil {
+		t.Fatalf("failed to get organization by slug: %v", err)
+	}
+	if bySlug.ID != org.ID || bySlug.Name != "Test Corp" {
+		t.Errorf("unexpected org by slug: %+v", bySlug)
 	}
 }
 

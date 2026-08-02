@@ -6,13 +6,13 @@ package main
 import (
 	"context"
 	"crypto/rand"
-	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -20,6 +20,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/holoplot/go-evdev"
 	"github.com/reak/mini-tracker/internal/ai"
 	"github.com/reak/mini-tracker/internal/config"
 	"github.com/reak/mini-tracker/internal/db"
@@ -44,7 +45,7 @@ func main() {
 	}
 	defer database.Close()
 
-	gemini := ai.NewGeminiClient(cfg.GeminiAPIKey)
+	gemini := ai.NewGeminiClient(cfg.GeminiAPIKey, cfg.GeminiModel)
 	if gemini.HasKey() {
 		go processPendingLogs(database, gemini)
 	}
@@ -255,7 +256,7 @@ func main() {
 		})
 	})
 
-	// POST /api/process-pending
+	// POST /api/process-pending — Trigger cron background AI analysis manually or via scheduler
 	mux.HandleFunc("/api/process-pending", func(w http.ResponseWriter, r *http.Request) {
 		count := processPendingLogs(database, gemini)
 		jsonResp(w, map[string]interface{}{
@@ -263,25 +264,280 @@ func main() {
 		})
 	})
 
+	// POST /api/tracker/input — Ingest keystroke events from desktop app / frontend listeners
+	mux.HandleFunc("/api/tracker/input", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			jsonError(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		var payload struct {
+			TotalKeys  int `json:"total_keys"`
+			UniqueKeys int `json:"unique_keys"`
+			KeyCode    int `json:"key_code"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			jsonError(w, "Invalid input JSON payload", http.StatusBadRequest)
+			return
+		}
+
+		if payload.KeyCode > 0 {
+			keyTracker.RecordKeyCode(evdev.EvCode(payload.KeyCode))
+		} else if payload.TotalKeys > 0 {
+			keyTracker.RecordKeystrokes(payload.TotalKeys, payload.UniqueKeys)
+		}
+
+		jsonResp(w, map[string]interface{}{"success": true})
+	})
+
+	// POST /api/screenshots — Receive screenshot base64 + keystroke data from desktop app, save log, trigger AI API analysis & store analytics
+	mux.HandleFunc("/api/screenshots", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			jsonError(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		var payload struct {
+			ImageBase64  string  `json:"image_base64"`
+			TotalKeys    int     `json:"total_keys"`
+			UniqueKeys   int     `json:"unique_keys"`
+			EntropyScore float64 `json:"entropy_score"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			jsonError(w, "Invalid screenshot payload", http.StatusBadRequest)
+			return
+		}
+
+		if payload.ImageBase64 == "" {
+			jsonError(w, "Image base64 data required", http.StatusBadRequest)
+			return
+		}
+
+		// Save screenshot image to disk
+		screensDir := filepath.Join(cfg.DataDir, "screenshots")
+		_ = os.MkdirAll(screensDir, 0755)
+		filePath := filepath.Join(screensDir, fmt.Sprintf("ss_%d.jpg", time.Now().UnixNano()))
+
+		rawImg, err := base64.StdEncoding.DecodeString(payload.ImageBase64)
+		if err != nil {
+			jsonError(w, "Invalid base64 encoding", http.StatusBadRequest)
+			return
+		}
+
+		if err := os.WriteFile(filePath, rawImg, 0644); err != nil {
+			jsonError(w, "Failed to save screenshot file", http.StatusInternalServerError)
+			return
+		}
+
+		entropy := payload.EntropyScore
+		if entropy == 0 && payload.TotalKeys > 0 {
+			entropy = tracker.ComputeEntropyScore(payload.TotalKeys, payload.UniqueKeys)
+		}
+
+		entry := &db.LogEntry{
+			Timestamp:    time.Now(),
+			ImagePath:    filePath,
+			TotalKeys:    payload.TotalKeys,
+			UniqueKeys:   payload.UniqueKeys,
+			EntropyScore: entropy,
+		}
+
+		logID, err := database.InsertLog(entry)
+		if err != nil {
+			jsonError(w, "Database error", http.StatusInternalServerError)
+			return
+		}
+
+		// Perform AI API analysis
+		ctx, cancel := context.WithTimeout(r.Context(), 45*time.Second)
+		defer cancel()
+
+		var category, reason string
+		var productive bool
+		var confidence float64
+
+		res, err := gemini.Analyze(ctx, payload.ImageBase64, entropy)
+		if err == nil {
+			category = res.Category
+			productive = res.Productive
+			confidence = res.Confidence
+			reason = res.Reason
+			_ = database.UpdateAIResult(logID, category, productive, confidence, reason)
+			// Remove screenshot file after AI analysis is complete
+			_ = os.Remove(filePath)
+		} else {
+			log.Printf("[server] API screenshot upload AI processing deferred for log #%d: %v", logID, err)
+		}
+
+		entry.ID = logID
+		entry.AICategory = category
+		entry.IsProductive = productive
+		entry.AIConfidence = confidence
+		entry.AIReason = reason
+
+		jsonResp(w, map[string]interface{}{
+			"success": true,
+			"log":     entry,
+		})
+	})
+
 	mailer := email.NewMailer()
 
-	// Corporate API Endpoints
+	// In-memory cache for tracking recent OAuth/Login sessions across webview boundaries
+	var (
+		recentOAuthUser  *db.User
+		recentOAuthOrg   *db.Organization
+		recentOAuthTime  time.Time
+		recentOAuthMutex sync.RWMutex
+	)
 
-	// Helper to set session cookie
+	setRecentOAuth := func(u *db.User, o *db.Organization) {
+		recentOAuthMutex.Lock()
+		defer recentOAuthMutex.Unlock()
+		recentOAuthUser = u
+		recentOAuthOrg = o
+		recentOAuthTime = time.Now()
+	}
+
+	getRecentOAuth := func() (*db.User, *db.Organization) {
+		recentOAuthMutex.RLock()
+		defer recentOAuthMutex.RUnlock()
+		if recentOAuthUser != nil && time.Since(recentOAuthTime) < 5*time.Minute {
+			return recentOAuthUser, recentOAuthOrg
+		}
+		return nil, nil
+	}
+
+	clearRecentOAuth := func() {
+		recentOAuthMutex.Lock()
+		defer recentOAuthMutex.Unlock()
+		recentOAuthUser = nil
+		recentOAuthOrg = nil
+	}
+
+	// Helper to set session cookie securely
 	setSessionCookie := func(w http.ResponseWriter, userID int64) {
 		http.SetCookie(w, &http.Cookie{
 			Name:     "mini_session_user_id",
 			Value:    fmt.Sprintf("%d", userID),
 			Path:     "/",
 			HttpOnly: true,
+			SameSite: http.SameSiteLaxMode,
 			Expires:  time.Now().Add(30 * 24 * time.Hour),
 		})
+		if u, err := database.GetUserByID(userID); err == nil && u != nil {
+			o, _ := database.GetOrganization(u.OrgID)
+			setRecentOAuth(u, o)
+		}
+	}
+
+	// Helper to resolve redirect URL after OAuth completion
+	getRedirectTarget := func(r *http.Request) string {
+		if target := r.URL.Query().Get("redirect"); target != "" {
+			if strings.HasPrefix(target, "wails://") || target == "/" || target == "/auth-success" {
+				return "/auth-success"
+			}
+			return target
+		}
+		return "/auth-success"
+	}
+
+	// GET /auth-success — Clean confirmation page displayed in external browser post-OAuth
+	mux.HandleFunc("/auth-success", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		fmt.Fprint(w, `<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Authentication Successful - Mini Tracker</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background: #0a0b12; color: #e2e8f0; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; }
+        .card { background: #0f1120; border: 1px solid rgba(99, 102, 241, 0.25); border-radius: 20px; padding: 40px 32px; text-align: center; max-width: 400px; box-shadow: 0 20px 50px rgba(0,0,0,0.6); }
+        .icon { font-size: 48px; margin-bottom: 16px; display: block; }
+        h2 { margin: 0 0 8px; color: #10b981; font-size: 22px; font-weight: 700; }
+        p { color: #94a3b8; font-size: 14px; line-height: 1.5; margin: 0 0 24px; }
+        .badge { display: inline-block; background: rgba(99, 102, 241, 0.15); color: #818cf8; border: 1px solid rgba(99, 102, 241, 0.3); padding: 8px 18px; border-radius: 99px; font-weight: 600; font-size: 13px; }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <span class="icon">✨</span>
+        <h2>Authentication Successful!</h2>
+        <p>You have logged in successfully. You may close this browser tab and return to the Mini Tracker application.</p>
+        <div class="badge">Session Active</div>
+    </div>
+    <script>
+        setTimeout(function() { window.close(); }, 3000);
+    </script>
+</body>
+</html>`)
+	})
+
+	// Helper to resolve backend callback URL dynamically via env vars (BACKEND_URL, BACKEND_ENDPOINT, APP_URL)
+	resolveOAuthCallbackURL := func(r *http.Request, envURIKey, path string) string {
+		if uri := os.Getenv(envURIKey); uri != "" {
+			return uri
+		}
+		backendURL := os.Getenv("BACKEND_URL")
+		if backendURL == "" {
+			backendURL = os.Getenv("BACKEND_ENDPOINT")
+		}
+		if backendURL == "" {
+			backendURL = os.Getenv("APP_URL")
+		}
+		if backendURL == "" {
+			backendURL = fmt.Sprintf("http://%s", r.Host)
+		}
+		return fmt.Sprintf("%s%s", strings.TrimRight(backendURL, "/"), path)
+	}
+
+	// Helper to safely provision or retrieve an OAuth user without crashing/panicking
+	provisionOAuthUser := func(orgName, orgSlug, userEmail, userFullName string) (*db.User, error) {
+		if userEmail == "" {
+			return nil, fmt.Errorf("user email cannot be empty")
+		}
+		if userFullName == "" {
+			userFullName = "OAuth User"
+		}
+
+		// 1. Check or create organization safely
+		org, err := database.GetOrganizationBySlug(orgSlug)
+		if err != nil || org == nil {
+			newOrg, createErr := database.CreateOrganization(orgName, orgSlug)
+			if createErr != nil {
+				// Re-attempt fetch in case org was created concurrently
+				org, err = database.GetOrganizationBySlug(orgSlug)
+				if err != nil || org == nil {
+					return nil, fmt.Errorf("organization lookup/creation failed: %v", createErr)
+				}
+			} else {
+				org = newOrg
+			}
+		}
+
+		// 2. Check or create user safely
+		user, err := database.GetUserByEmail(userEmail)
+		if err != nil || user == nil {
+			passHash := hashPassword("sso-oauth-account-" + userEmail)
+			newUser, createErr := database.CreateUser(org.ID, userEmail, passHash, userFullName, "member")
+			if createErr != nil {
+				// Re-attempt fetch in case user exists under another organization
+				user, err = database.GetUserByEmail(userEmail)
+				if err != nil || user == nil {
+					return nil, fmt.Errorf("user lookup/creation failed: %v", createErr)
+				}
+			} else {
+				user = newUser
+			}
+		}
+
+		return user, nil
 	}
 
 	// POST /api/org/register — Create a new organization & owner user
 	mux.HandleFunc("/api/org/register", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
-			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			jsonError(w, "Method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
 		var req struct {
@@ -291,15 +547,18 @@ func main() {
 			FullName string `json:"full_name"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Name == "" || req.Email == "" || req.Password == "" {
-			http.Error(w, "Invalid request payload", http.StatusBadRequest)
+			jsonError(w, "Invalid request payload. Name, email, and password are required.", http.StatusBadRequest)
 			return
 		}
 
 		slug := strings.ToLower(strings.ReplaceAll(strings.TrimSpace(req.Name), " ", "-"))
 		org, err := database.CreateOrganization(req.Name, slug)
 		if err != nil {
-			http.Error(w, fmt.Sprintf("Organization creation failed: %v", err), http.StatusBadRequest)
-			return
+			org, _ = database.GetOrganizationBySlug(slug)
+			if org == nil {
+				jsonError(w, fmt.Sprintf("Organization creation failed: %v", err), http.StatusBadRequest)
+				return
+			}
 		}
 
 		passHash := hashPassword(req.Password)
@@ -309,7 +568,7 @@ func main() {
 		}
 		user, err := database.CreateUser(org.ID, req.Email, passHash, fullName, "owner")
 		if err != nil {
-			http.Error(w, fmt.Sprintf("User creation failed: %v", err), http.StatusBadRequest)
+			jsonError(w, fmt.Sprintf("User creation failed (email may already exist): %v", err), http.StatusBadRequest)
 			return
 		}
 
@@ -317,6 +576,7 @@ func main() {
 
 		jsonResp(w, map[string]interface{}{
 			"success": true,
+			"token":   fmt.Sprintf("%d", user.ID),
 			"org":     org,
 			"user":    user,
 		})
@@ -325,21 +585,21 @@ func main() {
 	// POST /api/auth/login — Authenticate user
 	mux.HandleFunc("/api/auth/login", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
-			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			jsonError(w, "Method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
 		var req struct {
 			Email    string `json:"email"`
 			Password string `json:"password"`
 		}
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Email == "" {
-			http.Error(w, "Invalid credentials", http.StatusBadRequest)
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Email == "" || req.Password == "" {
+			jsonError(w, "Email and password are required", http.StatusBadRequest)
 			return
 		}
 
 		user, err := database.GetUserByEmail(req.Email)
-		if err != nil || user.PasswordHash != hashPassword(req.Password) {
-			http.Error(w, "Invalid email or password", http.StatusUnauthorized)
+		if err != nil || user == nil || user.PasswordHash != hashPassword(req.Password) {
+			jsonError(w, "Invalid email or password", http.StatusUnauthorized)
 			return
 		}
 
@@ -348,6 +608,7 @@ func main() {
 		org, _ := database.GetOrganization(user.OrgID)
 		jsonResp(w, map[string]interface{}{
 			"success": true,
+			"token":   fmt.Sprintf("%d", user.ID),
 			"user":    user,
 			"org":     org,
 		})
@@ -355,6 +616,7 @@ func main() {
 
 	// POST /api/auth/logout — End user session
 	mux.HandleFunc("/api/auth/logout", func(w http.ResponseWriter, r *http.Request) {
+		clearRecentOAuth()
 		http.SetCookie(w, &http.Cookie{
 			Name:     "mini_session_user_id",
 			Value:    "",
@@ -368,20 +630,36 @@ func main() {
 
 	// GET /api/auth/me — Get active session state
 	mux.HandleFunc("/api/auth/me", func(w http.ResponseWriter, r *http.Request) {
-		cookie, err := r.Cookie("mini_session_user_id")
-		if err != nil || cookie.Value == "" {
-			jsonResp(w, map[string]interface{}{"authenticated": false})
-			return
+		var userID int64
+
+		if cookie, err := r.Cookie("mini_session_user_id"); err == nil && cookie.Value != "" {
+			userID, _ = strconv.ParseInt(cookie.Value, 10, 64)
+		}
+		if userID == 0 {
+			authHeader := r.Header.Get("Authorization")
+			if strings.HasPrefix(authHeader, "Bearer ") {
+				userID, _ = strconv.ParseInt(strings.TrimPrefix(authHeader, "Bearer "), 10, 64)
+			}
+		}
+		if userID == 0 {
+			userIDHeader := r.Header.Get("X-Session-User-ID")
+			if userIDHeader != "" {
+				userID, _ = strconv.ParseInt(userIDHeader, 10, 64)
+			}
+		}
+		if userID == 0 {
+			if recentUser, _ := getRecentOAuth(); recentUser != nil {
+				userID = recentUser.ID
+			}
 		}
 
-		userID, _ := strconv.ParseInt(cookie.Value, 10, 64)
 		if userID == 0 {
 			jsonResp(w, map[string]interface{}{"authenticated": false})
 			return
 		}
 
 		user, err := database.GetUserByID(userID)
-		if err != nil {
+		if err != nil || user == nil {
 			jsonResp(w, map[string]interface{}{"authenticated": false})
 			return
 		}
@@ -396,28 +674,230 @@ func main() {
 
 	// GET /api/auth/oauth/google — Google OAuth Single Sign-On Endpoint
 	mux.HandleFunc("/api/auth/oauth/google", func(w http.ResponseWriter, r *http.Request) {
-		// Mock/Demonstration OAuth flow: Authenticate/Provision Google SSO User
-		email := "google.user@company.com"
-		user, err := database.GetUserByEmail(email)
-		if err != nil {
-			org, _ := database.CreateOrganization("Google Workspace Org", "google-org")
-			user, _ = database.CreateUser(org.ID, email, hashPassword("google-sso"), "Google Workspace User", "member")
+		redirectTarget := getRedirectTarget(r)
+
+		clientID := os.Getenv("GOOGLE_CLIENT_ID")
+		clientSecret := os.Getenv("GOOGLE_CLIENT_SECRET")
+		redirectURI := resolveOAuthCallbackURL(r, "GOOGLE_REDIRECT_URI", "/api/auth/oauth/google/callback")
+
+		// Real OAuth Flow if Client ID & Secret are configured
+		if clientID != "" && clientSecret != "" {
+			authURL := fmt.Sprintf("https://accounts.google.com/o/oauth2/v2/auth?client_id=%s&redirect_uri=%s&response_type=code&scope=openid%%20email%%20profile&state=%s",
+				url.QueryEscape(clientID),
+				url.QueryEscape(redirectURI),
+				url.QueryEscape(redirectTarget),
+			)
+			http.Redirect(w, r, authURL, http.StatusFound)
+			return
 		}
+
+		// Default local / test SSO provision flow
+		emailParam := r.URL.Query().Get("email")
+		if emailParam == "" {
+			emailParam = "google.user@company.com"
+		}
+		nameParam := r.URL.Query().Get("name")
+		if nameParam == "" {
+			nameParam = "Google Workspace User"
+		}
+
+		user, err := provisionOAuthUser("Google Workspace Org", "google-org", emailParam, nameParam)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("Google OAuth Authentication Error: %v", err), http.StatusInternalServerError)
+			return
+		}
+
 		setSessionCookie(w, user.ID)
-		http.Redirect(w, r, "/", http.StatusFound)
+		http.Redirect(w, r, redirectTarget, http.StatusFound)
+	})
+
+	// GET /api/auth/oauth/google/callback — Google OAuth 2.0 Callback Handler
+	mux.HandleFunc("/api/auth/oauth/google/callback", func(w http.ResponseWriter, r *http.Request) {
+		code := r.URL.Query().Get("code")
+		stateTarget := r.URL.Query().Get("state")
+		if stateTarget == "" {
+			stateTarget = "/"
+		}
+		if code == "" {
+			http.Error(w, "Missing authorization code", http.StatusBadRequest)
+			return
+		}
+
+		clientID := os.Getenv("GOOGLE_CLIENT_ID")
+		clientSecret := os.Getenv("GOOGLE_CLIENT_SECRET")
+		redirectURI := resolveOAuthCallbackURL(r, "GOOGLE_REDIRECT_URI", "/api/auth/oauth/google/callback")
+
+		resp, err := http.PostForm("https://oauth2.googleapis.com/token", url.Values{
+			"code":          {code},
+			"client_id":     {clientID},
+			"client_secret": {clientSecret},
+			"redirect_uri":  {redirectURI},
+			"grant_type":    {"authorization_code"},
+		})
+		if err != nil || resp.StatusCode != http.StatusOK {
+			http.Error(w, "Failed to exchange OAuth code with Google", http.StatusBadGateway)
+			return
+		}
+		defer resp.Body.Close()
+
+		var tokenResp struct {
+			AccessToken string `json:"access_token"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&tokenResp); err != nil || tokenResp.AccessToken == "" {
+			http.Error(w, "Invalid token response from Google", http.StatusBadGateway)
+			return
+		}
+
+		req, _ := http.NewRequest("GET", "https://www.googleapis.com/oauth2/v2/userinfo", nil)
+		req.Header.Set("Authorization", "Bearer "+tokenResp.AccessToken)
+		userResp, err := http.DefaultClient.Do(req)
+		if err != nil || userResp.StatusCode != http.StatusOK {
+			http.Error(w, "Failed to fetch user profile from Google", http.StatusBadGateway)
+			return
+		}
+		defer userResp.Body.Close()
+
+		var profile struct {
+			Email string `json:"email"`
+			Name  string `json:"name"`
+		}
+		if err := json.NewDecoder(userResp.Body).Decode(&profile); err != nil || profile.Email == "" {
+			http.Error(w, "Invalid user profile response from Google", http.StatusBadGateway)
+			return
+		}
+
+		user, err := provisionOAuthUser("Google Workspace Org", "google-org", profile.Email, profile.Name)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("User Provisioning Error: %v", err), http.StatusInternalServerError)
+			return
+		}
+
+		setSessionCookie(w, user.ID)
+		http.Redirect(w, r, stateTarget, http.StatusFound)
 	})
 
 	// GET /api/auth/oauth/azure — Microsoft Azure AD / Entra ID SSO Endpoint
 	mux.HandleFunc("/api/auth/oauth/azure", func(w http.ResponseWriter, r *http.Request) {
-		// Mock/Demonstration OAuth flow: Authenticate/Provision Azure AD SSO User
-		email := "azure.user@company.com"
-		user, err := database.GetUserByEmail(email)
-		if err != nil {
-			org, _ := database.CreateOrganization("Azure Enterprise Org", "azure-org")
-			user, _ = database.CreateUser(org.ID, email, hashPassword("azure-sso"), "Azure AD User", "member")
+		redirectTarget := getRedirectTarget(r)
+
+		clientID := os.Getenv("AZURE_CLIENT_ID")
+		clientSecret := os.Getenv("AZURE_CLIENT_SECRET")
+		tenantID := os.Getenv("AZURE_TENANT_ID")
+		if tenantID == "" {
+			tenantID = "common"
 		}
+		redirectURI := resolveOAuthCallbackURL(r, "AZURE_REDIRECT_URI", "/api/auth/oauth/azure/callback")
+
+		// Real OAuth Flow if Client ID & Secret are configured
+		if clientID != "" && clientSecret != "" {
+			authURL := fmt.Sprintf("https://login.microsoftonline.com/%s/oauth2/v2.0/authorize?client_id=%s&response_type=code&redirect_uri=%s&scope=openid%%20email%%20profile%%20User.Read&state=%s",
+				tenantID,
+				url.QueryEscape(clientID),
+				url.QueryEscape(redirectURI),
+				url.QueryEscape(redirectTarget),
+			)
+			http.Redirect(w, r, authURL, http.StatusFound)
+			return
+		}
+
+		// Default local / test SSO provision flow
+		emailParam := r.URL.Query().Get("email")
+		if emailParam == "" {
+			emailParam = "azure.user@company.com"
+		}
+		nameParam := r.URL.Query().Get("name")
+		if nameParam == "" {
+			nameParam = "Azure AD User"
+		}
+
+		user, err := provisionOAuthUser("Azure Enterprise Org", "azure-org", emailParam, nameParam)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("Azure OAuth Authentication Error: %v", err), http.StatusInternalServerError)
+			return
+		}
+
 		setSessionCookie(w, user.ID)
-		http.Redirect(w, r, "/", http.StatusFound)
+		http.Redirect(w, r, redirectTarget, http.StatusFound)
+	})
+
+	// GET /api/auth/oauth/azure/callback — Azure AD OAuth 2.0 Callback Handler
+	mux.HandleFunc("/api/auth/oauth/azure/callback", func(w http.ResponseWriter, r *http.Request) {
+		code := r.URL.Query().Get("code")
+		stateTarget := r.URL.Query().Get("state")
+		if stateTarget == "" {
+			stateTarget = "/"
+		}
+		if code == "" {
+			http.Error(w, "Missing authorization code", http.StatusBadRequest)
+			return
+		}
+
+		clientID := os.Getenv("AZURE_CLIENT_ID")
+		clientSecret := os.Getenv("AZURE_CLIENT_SECRET")
+		tenantID := os.Getenv("AZURE_TENANT_ID")
+		if tenantID == "" {
+			tenantID = "common"
+		}
+		redirectURI := resolveOAuthCallbackURL(r, "AZURE_REDIRECT_URI", "/api/auth/oauth/azure/callback")
+
+		tokenEndpoint := fmt.Sprintf("https://login.microsoftonline.com/%s/oauth2/v2.0/token", tenantID)
+		resp, err := http.PostForm(tokenEndpoint, url.Values{
+			"code":          {code},
+			"client_id":     {clientID},
+			"client_secret": {clientSecret},
+			"redirect_uri":  {redirectURI},
+			"grant_type":    {"authorization_code"},
+		})
+		if err != nil || resp.StatusCode != http.StatusOK {
+			http.Error(w, "Failed to exchange OAuth code with Azure AD", http.StatusBadGateway)
+			return
+		}
+		defer resp.Body.Close()
+
+		var tokenResp struct {
+			AccessToken string `json:"access_token"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&tokenResp); err != nil || tokenResp.AccessToken == "" {
+			http.Error(w, "Invalid token response from Azure AD", http.StatusBadGateway)
+			return
+		}
+
+		req, _ := http.NewRequest("GET", "https://graph.microsoft.com/v1.0/me", nil)
+		req.Header.Set("Authorization", "Bearer "+tokenResp.AccessToken)
+		userResp, err := http.DefaultClient.Do(req)
+		if err != nil || userResp.StatusCode != http.StatusOK {
+			http.Error(w, "Failed to fetch user profile from Azure AD", http.StatusBadGateway)
+			return
+		}
+		defer userResp.Body.Close()
+
+		var profile struct {
+			UserPrincipalName string `json:"userPrincipalName"`
+			Mail              string `json:"mail"`
+			DisplayName       string `json:"displayName"`
+		}
+		if err := json.NewDecoder(userResp.Body).Decode(&profile); err != nil {
+			http.Error(w, "Invalid user profile response from Azure AD", http.StatusBadGateway)
+			return
+		}
+
+		userEmail := profile.Mail
+		if userEmail == "" {
+			userEmail = profile.UserPrincipalName
+		}
+		if userEmail == "" {
+			http.Error(w, "No email address found for Azure AD user", http.StatusBadRequest)
+			return
+		}
+
+		user, err := provisionOAuthUser("Azure Enterprise Org", "azure-org", userEmail, profile.DisplayName)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("User Provisioning Error: %v", err), http.StatusInternalServerError)
+			return
+		}
+
+		setSessionCookie(w, user.ID)
+		http.Redirect(w, r, stateTarget, http.StatusFound)
 	})
 
 	// GET /api/org/members — Get team roster and pending invitations
@@ -562,10 +1042,75 @@ func main() {
 	})
 
 	// Serve React Web Dashboard static assets from frontend/dist
-	frontendDir := "frontend/dist"
-	if _, err := os.Stat(frontendDir); err == nil {
-		fileServer := http.FileServer(http.Dir(frontendDir))
-		mux.Handle("/", fileServer)
+	execPath, _ := os.Executable()
+	execDir := filepath.Dir(execPath)
+	homeDir, _ := os.UserHomeDir()
+
+	candidates := []string{
+		"frontend/dist",
+		filepath.Join(execDir, "frontend/dist"),
+		filepath.Join(execDir, "../frontend/dist"),
+		filepath.Join(homeDir, ".local/share/mini-tracker/app/frontend/dist"),
+		"/home/reak/git/mini-tracker/frontend/dist",
+	}
+
+	var validFrontendDir string
+	for _, dir := range candidates {
+		if info, err := os.Stat(dir); err == nil && info.IsDir() {
+			validFrontendDir = dir
+			break
+		}
+	}
+
+	if validFrontendDir != "" {
+		log.Printf("[server] Serving frontend static assets from: %s", validFrontendDir)
+		fileServer := http.FileServer(http.Dir(validFrontendDir))
+		mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path == "/auth-success" {
+				w.Header().Set("Content-Type", "text/html; charset=utf-8")
+				fmt.Fprint(w, `<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Authentication Successful - Mini Tracker</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background: #0a0b12; color: #e2e8f0; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; }
+        .card { background: #0f1120; border: 1px solid rgba(99, 102, 241, 0.25); border-radius: 20px; padding: 40px 32px; text-align: center; max-width: 400px; box-shadow: 0 20px 50px rgba(0,0,0,0.6); }
+        .icon { font-size: 48px; margin-bottom: 16px; display: block; }
+        h2 { margin: 0 0 8px; color: #10b981; font-size: 22px; font-weight: 700; }
+        p { color: #94a3b8; font-size: 14px; line-height: 1.5; margin: 0 0 24px; }
+        .badge { display: inline-block; background: rgba(99, 102, 241, 0.15); color: #818cf8; border: 1px solid rgba(99, 102, 241, 0.3); padding: 8px 18px; border-radius: 99px; font-weight: 600; font-size: 13px; }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <span class="icon">✨</span>
+        <h2>Authentication Successful!</h2>
+        <p>You have logged in successfully. You may close this browser tab and return to the Mini Tracker application.</p>
+        <div class="badge">Session Active</div>
+    </div>
+    <script>
+        setTimeout(function() { window.close(); }, 3000);
+    </script>
+</body>
+</html>`)
+				return
+			}
+			if strings.HasPrefix(r.URL.Path, "/api/") {
+				http.NotFound(w, r)
+				return
+			}
+			path := filepath.Join(validFrontendDir, r.URL.Path)
+			info, err := os.Stat(path)
+			if os.IsNotExist(err) || info.IsDir() {
+				http.ServeFile(w, r, filepath.Join(validFrontendDir, "index.html"))
+				return
+			}
+			fileServer.ServeHTTP(w, r)
+		})
+	} else {
+		log.Printf("[server] WARNING: frontend static directory not found in candidates!")
 	}
 
 	port := os.Getenv("PORT")
@@ -585,8 +1130,7 @@ func main() {
 }
 
 func hashPassword(password string) string {
-	h := sha256.Sum256([]byte("mini-tracker-salt-" + password))
-	return hex.EncodeToString(h[:])
+	return db.HashPassword(password)
 }
 
 func generateToken() string {
@@ -600,11 +1144,26 @@ func jsonResp(w http.ResponseWriter, v interface{}) {
 	json.NewEncoder(w).Encode(v)
 }
 
+func jsonError(w http.ResponseWriter, msg string, status int) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": false,
+		"error":   msg,
+	})
+}
+
 func cors(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+		origin := r.Header.Get("Origin")
+		if origin != "" {
+			w.Header().Set("Access-Control-Allow-Origin", origin)
+			w.Header().Set("Access-Control-Allow-Credentials", "true")
+		} else {
+			w.Header().Set("Access-Control-Allow-Origin", "*")
+		}
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, Cookie, X-Session-User-ID")
 		if r.Method == "OPTIONS" {
 			w.WriteHeader(http.StatusNoContent)
 			return

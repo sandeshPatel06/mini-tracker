@@ -29,6 +29,9 @@ help: ## Show this help message
 install: ## Run automated Linux installer (builds app & configures systemd daemon)
 	./install.sh
 
+uninstall: ## Remove Mini Tracker app, systemd daemon, desktop entries, and user data from local system
+	./uninstall.sh
+
 setup-debs: ## Install GTK3/WebKit2GTK dependencies without sudo into ~/.local
 	./scripts/install-debs-user.sh
 

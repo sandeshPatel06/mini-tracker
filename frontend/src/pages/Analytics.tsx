@@ -121,7 +121,7 @@ export default function Analytics({ logs, stats, loading, today, onDateChange }:
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
 
           {/* Productive vs Unproductive donut + summary */}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+          <div className="charts-grid-2col">
             <div className="card fade-in-up fade-in-up-delay-1">
               <div className="card-header">
                 <span className="card-title">Productivity Split</span>

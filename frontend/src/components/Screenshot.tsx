@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { buildApiUrl } from '../api';
 
 declare const window: Window & {
   go?: {
@@ -37,7 +38,7 @@ export function ScreenshotThumb({ imagePath, onClick, className }: ThumbProps) {
           setLoading(false);
         });
     } else {
-      setSrc(`/api/image?path=${encodeURIComponent(imagePath)}`);
+      setSrc(buildApiUrl(`/api/image?path=${encodeURIComponent(imagePath)}`));
       setLoading(false);
     }
   }, [imagePath]);
@@ -75,7 +76,7 @@ export function ImageModal({ imagePath, onClose }: ModalProps) {
     if (window.go?.main?.App?.GetImageBase64) {
       window.go.main.App.GetImageBase64(imagePath).then(res => setSrc(res));
     } else {
-      setSrc(`/api/image?path=${encodeURIComponent(imagePath)}`);
+      setSrc(buildApiUrl(`/api/image?path=${encodeURIComponent(imagePath)}`));
     }
   }, [imagePath]);
 

@@ -1,0 +1,22 @@
+meta {
+  name: Get Logs
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{base_url}}/api/logs?date=2026-08-04&user_id=1&start_date=2026-08-01&end_date=2026-08-04
+  body: none
+  auth: bearer
+}
+
+params:query {
+  ~date: 2026-08-04
+  ~user_id: 1
+  ~start_date: 2026-08-01
+  ~end_date: 2026-08-04
+}
+
+auth:bearer {
+  token: {{token}}
+}

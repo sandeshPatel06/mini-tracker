@@ -7,6 +7,9 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+	"fmt"
+	"os/exec"
+	"runtime"
 
 	"github.com/reak/mini-tracker/internal/ai"
 	"github.com/reak/mini-tracker/internal/config"
@@ -352,5 +355,29 @@ func (a *App) ProcessPendingLogs() (int, error) {
 
 	log.Printf("[app] completed processing %d/%d pending logs", processed, len(logs))
 	return processed, nil
+}
+
+// OpenTrackerWizard opens the wizard as a separate OS-level popup window.
+func (a *App) OpenTrackerWizard(token string) error {
+	url := fmt.Sprintf("http://127.0.0.1:8080/wizard?token=%s", token)
+	var cmd *exec.Cmd
+	switch runtime.GOOS {
+	case "linux":
+		cmd = exec.Command("google-chrome", "--app="+url, "--window-size=300,460")
+		if err := cmd.Start(); err != nil {
+			return exec.Command("xdg-open", url).Start()
+		}
+	case "darwin":
+		cmd = exec.Command("open", "-n", "-a", "Google Chrome", "--args", "--app="+url, "--window-size=300,460")
+		if err := cmd.Start(); err != nil {
+			return exec.Command("open", url).Start()
+		}
+	case "windows":
+		cmd = exec.Command("cmd", "/c", "start", "chrome", "--app="+url, "--window-size=300,460")
+		if err := cmd.Start(); err != nil {
+			return exec.Command("cmd", "/c", "start", url).Start()
+		}
+	}
+	return nil
 }
 

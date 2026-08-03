@@ -1,0 +1,19 @@
+meta {
+  name: Accept Invite
+  type: http
+  seq: 5
+}
+
+post {
+  url: {{base_url}}/api/org/accept-invite
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "token": "SAMPLE_INVITE_TOKEN",
+    "password": "memberpassword123",
+    "full_name": "Team Member"
+  }
+}

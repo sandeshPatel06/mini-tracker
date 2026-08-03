@@ -26,6 +26,10 @@ export function GetTodayLogs() {
   return window['go']['main']['App']['GetTodayLogs']();
 }
 
+export function OpenTrackerWizard(arg1) {
+  return window['go']['main']['App']['OpenTrackerWizard'](arg1);
+}
+
 export function ProcessPendingLogs() {
   return window['go']['main']['App']['ProcessPendingLogs']();
 }

@@ -1,0 +1,20 @@
+meta {
+  name: Register Organization
+  type: http
+  seq: 1
+}
+
+post {
+  url: {{base_url}}/api/org/register
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "name": "Acme Corp",
+    "full_name": "Admin User",
+    "email": "admin@example.com",
+    "password": "password123"
+  }
+}

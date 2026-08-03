@@ -71,99 +71,100 @@ export const AcceptInvitePage: React.FC<AcceptInviteProps> = ({ token, onSuccess
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center min-h-[400px]">
-        <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-sky-400"></div>
+      <div className="empty-state">
+        <div className="skeleton" style={{ width: 40, height: 40, borderRadius: '50%' }} />
+        <div className="empty-state-title" style={{ marginTop: 12 }}>Loading invitation...</div>
       </div>
     );
   }
 
   if (error && !invitation) {
     return (
-      <div className="max-w-md mx-auto my-12 bg-slate-800 border border-rose-500/30 rounded-2xl p-8 shadow-2xl text-center space-y-4">
-        <div className="w-12 h-12 bg-rose-500/10 text-rose-400 rounded-full flex items-center justify-center mx-auto text-2xl">
-          ⚠️
+      <div className="card fade-in-up" style={{ maxWidth: 440, margin: '48px auto', textAlign: 'center' }}>
+        <div className="card-body" style={{ padding: 32 }}>
+          <div style={{ fontSize: 36, marginBottom: 12 }}>⚠️</div>
+          <h2 style={{ fontSize: 18, fontWeight: 700, color: 'var(--text-primary)', marginBottom: 8 }}>Invalid Invitation</h2>
+          <p style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 20 }}>{error}</p>
+          <button
+            onClick={() => window.location.hash = ''}
+            className="btn btn-secondary"
+          >
+            Return to Dashboard
+          </button>
         </div>
-        <h2 className="text-xl font-bold text-slate-100">Invalid Invitation</h2>
-        <p className="text-slate-400 text-sm">{error}</p>
-        <button
-          onClick={() => window.location.hash = ''}
-          className="px-5 py-2.5 bg-slate-700 hover:bg-slate-600 text-slate-200 font-medium rounded-xl text-sm transition-colors"
-        >
-          Return to Dashboard
-        </button>
       </div>
     );
   }
 
   return (
-    <div className="max-w-md mx-auto my-8 animate-fade-in">
-      <div className="bg-slate-800/80 border border-slate-700/60 rounded-2xl p-8 shadow-2xl backdrop-blur-md space-y-6">
-        <div className="text-center space-y-2">
-          <span className="px-3 py-1 bg-sky-500/10 text-sky-400 border border-sky-500/30 rounded-full text-xs font-semibold uppercase tracking-wider">
-            Team Onboarding
-          </span>
-          <h1 className="text-2xl font-bold text-slate-100 mt-2">Join {invitation?.org_name}</h1>
-          <p className="text-slate-400 text-sm">
-            You've been invited to test Mini Tracker as a <span className="font-semibold text-slate-200">{invitation?.role}</span>.
-          </p>
+    <div className="fade-in-up" style={{ maxWidth: 440, margin: '32px auto' }}>
+      <div className="card">
+        <div className="card-body" style={{ padding: 28 }}>
+          <div style={{ textAlign: 'center', marginBottom: 20 }}>
+            <span className="badge badge-productive" style={{ marginBottom: 10 }}>
+              Team Onboarding
+            </span>
+            <h1 style={{ fontSize: 20, fontWeight: 700, color: 'var(--text-primary)', marginTop: 8 }}>
+              Join {invitation?.org_name}
+            </h1>
+            <p style={{ fontSize: 13, color: 'var(--text-secondary)', marginTop: 4 }}>
+              You've been invited to test get-Hike as a <span style={{ fontWeight: 600, color: 'var(--accent-purple)' }}>{invitation?.role}</span>.
+            </p>
+          </div>
+
+          {error && (
+            <div className="alert alert-error">
+              {error}
+            </div>
+          )}
+
+          <form onSubmit={handleSubmit}>
+            <div className="form-group">
+              <label className="form-label">Email Address</label>
+              <input
+                type="email"
+                disabled
+                value={invitation?.email || ''}
+                className="form-input"
+                style={{ opacity: 0.7, cursor: 'not-allowed' }}
+              />
+            </div>
+
+            <div className="form-group">
+              <label className="form-label">Full Name</label>
+              <input
+                type="text"
+                required
+                placeholder="Jane Doe"
+                value={fullName}
+                onChange={(e) => setFullName(e.target.value)}
+                className="form-input"
+              />
+            </div>
+
+            <div className="form-group">
+              <label className="form-label">Create Password</label>
+              <input
+                type="password"
+                required
+                minLength={6}
+                placeholder="••••••••"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                className="form-input"
+              />
+            </div>
+
+            <button
+              type="submit"
+              disabled={submitting}
+              className="btn btn-primary w-full"
+              style={{ marginTop: 12, padding: '10px 16px' }}
+            >
+              {submitting ? 'Creating Account...' : 'Complete Onboarding & Join Team'}
+            </button>
+          </form>
         </div>
-
-        {error && (
-          <div className="p-3 bg-rose-500/10 border border-rose-500/30 rounded-xl text-rose-400 text-sm">
-            {error}
-          </div>
-        )}
-
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div>
-            <label className="block text-xs font-semibold uppercase text-slate-400 mb-1.5">
-              Email Address
-            </label>
-            <input
-              type="email"
-              disabled
-              value={invitation?.email || ''}
-              className="w-full bg-slate-900/60 border border-slate-700/50 rounded-xl px-4 py-2.5 text-sm text-slate-400 cursor-not-allowed"
-            />
-          </div>
-
-          <div>
-            <label className="block text-xs font-semibold uppercase text-slate-400 mb-1.5">
-              Full Name
-            </label>
-            <input
-              type="text"
-              required
-              placeholder="Jane Doe"
-              value={fullName}
-              onChange={(e) => setFullName(e.target.value)}
-              className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-2.5 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-sky-400"
-            />
-          </div>
-
-          <div>
-            <label className="block text-xs font-semibold uppercase text-slate-400 mb-1.5">
-              Create Password
-            </label>
-            <input
-              type="password"
-              required
-              minLength={6}
-              placeholder="••••••••"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-2.5 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-sky-400"
-            />
-          </div>
-
-          <button
-            type="submit"
-            disabled={submitting}
-            className="w-full py-3 bg-gradient-to-r from-sky-500 to-blue-600 hover:from-sky-400 hover:to-blue-500 text-white font-medium rounded-xl text-sm shadow-lg shadow-sky-500/20 transition-all duration-200 mt-2"
-          >
-            {submitting ? 'Creating Account...' : 'Complete Onboarding & Join Team'}
-          </button>
-        </form>
       </div>
     </div>
   );

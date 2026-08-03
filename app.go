@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"log"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/reak/mini-tracker/internal/ai"
@@ -95,7 +96,53 @@ func (a *App) startup(ctx context.Context) {
 		}()
 	}
 
-	log.Printf("[app] started — screenshot interval: %s", cfg.ScreenshotInterval)
+	// 7-day Screenshot Retention Cron Routine (runs hourly to clean up files > 7 days old)
+	go func() {
+		a.cleanOldScreenshots()
+		ticker := time.NewTicker(1 * time.Hour)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-a.ctx.Done():
+				return
+			case <-ticker.C:
+				a.cleanOldScreenshots()
+			}
+		}
+	}()
+
+	log.Printf("[app] started — screenshot interval: %s (7-day retention active)", cfg.ScreenshotInterval)
+}
+
+// cleanOldScreenshots scans dataDir/images/ and removes folders/files older than 7 days.
+func (a *App) cleanOldScreenshots() {
+	if a.cfg == nil || a.cfg.DataDir == "" {
+		return
+	}
+
+	imagesDir := filepath.Join(a.cfg.DataDir, "images")
+	entries, err := os.ReadDir(imagesDir)
+	if err != nil {
+		return
+	}
+
+	cutoff := time.Now().AddDate(0, 0, -7)
+
+	for _, entry := range entries {
+		if entry.IsDir() {
+			// Date folders are named YYYY-MM-DD
+			folderTime, err := time.Parse("2006-01-02", entry.Name())
+			if err == nil {
+				if folderTime.Before(cutoff) {
+					fullPath := filepath.Join(imagesDir, entry.Name())
+					if err := os.RemoveAll(fullPath); err == nil {
+						log.Printf("[app] retention cron: deleted screenshots older than 7 days in %s", fullPath)
+					}
+				}
+			}
+		}
+	}
 }
 
 // collect captures a screenshot + uses latest keystroke stats, persists the
@@ -134,22 +181,13 @@ func (a *App) collect() {
 		ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 		defer cancel()
 
-		result, err := a.gemini.Analyze(ctx, b64Data, score)
-		if err != nil {
-			log.Printf("[app] AI analysis error: %v", err)
-		} else {
+		// Async AI analysis
+		if result, err := a.gemini.Analyze(ctx, b64Data, score); err == nil {
 			if err := a.database.UpdateAIResult(logID, result.Category, result.Productive, result.Confidence, result.Reason); err != nil {
 				log.Printf("[app] update AI result error: %v", err)
 			}
 			log.Printf("[app] logged #%d — category=%s productive=%v",
 				logID, result.Category, result.Productive)
-		}
-
-		// Ensure screenshot file is deleted after processing/sending to backend
-		if filePath != "" {
-			if err := os.Remove(filePath); err == nil {
-				log.Printf("[app] deleted temporary screenshot: %s", filePath)
-			}
 		}
 	}(id, shot.FilePath, shot.Base64Data, keyStats.EntropyScore)
 }
@@ -193,6 +231,38 @@ func (a *App) GetStats(date string) (*db.ProductivityStats, error) {
 	return a.database.GetProductivityStats(date)
 }
 
+// RecordInputActivity allows the frontend desktop application to report user keystroke activity
+// without requiring root/sudo/evdev input group permissions on Linux.
+func (a *App) RecordInputActivity(totalKeys, uniqueKeys int) {
+	if a.keyTracker != nil {
+		a.keyTracker.RecordKeystrokes(totalKeys, uniqueKeys)
+	}
+}
+
+// ClearAllLocalData purges all local screenshot files and resets the SQLite database.
+func (a *App) ClearAllLocalData() (bool, error) {
+	if a.cfg == nil {
+		return false, nil
+	}
+	imagesDir := filepath.Join(a.cfg.DataDir, "images")
+	_ = os.RemoveAll(imagesDir)
+	_ = os.MkdirAll(imagesDir, 0755)
+
+	dbPath := filepath.Join(a.cfg.DataDir, "tracker.db")
+	if a.database != nil {
+		_ = a.database.Close()
+	}
+	_ = os.Remove(dbPath)
+	_ = os.Remove(dbPath + "-wal")
+	_ = os.Remove(dbPath + "-shm")
+
+	newDb, err := db.Open(a.cfg.DataDir)
+	if err == nil {
+		a.database = newDb
+	}
+	return true, nil
+}
+
 // GetConfig returns non-sensitive config values for the UI.
 func (a *App) GetConfig() map[string]interface{} {
 	if a.cfg == nil {
@@ -219,6 +289,15 @@ func (a *App) UpdateGeminiAPIKey(apiKey string) (bool, error) {
 		log.Printf("[app] save config error: %v", err)
 	}
 	go a.ProcessPendingLogs()
+	return true, nil
+}
+
+// UpdateAIModel updates the active model name in Gemini client.
+func (a *App) UpdateAIModel(modelName string) (bool, error) {
+	if a.gemini != nil {
+		a.gemini.SetModel(modelName)
+		log.Printf("[app] Updated AI model to: %s", modelName)
+	}
 	return true, nil
 }
 
@@ -268,12 +347,6 @@ func (a *App) ProcessPendingLogs() (int, error) {
 
 		if err := a.database.UpdateAIResult(entry.ID, res.Category, res.Productive, res.Confidence, res.Reason); err == nil {
 			processed++
-			// Delete screenshot file after sending to backend/AI
-			if entry.ImagePath != "" {
-				if err := os.Remove(entry.ImagePath); err == nil {
-					log.Printf("[app] deleted processed screenshot: %s", entry.ImagePath)
-				}
-			}
 		}
 	}
 

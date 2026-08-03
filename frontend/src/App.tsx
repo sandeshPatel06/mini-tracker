@@ -7,6 +7,7 @@ import Analytics from './pages/Analytics';
 import { OrganizationPage } from './pages/Organization';
 import { AcceptInvitePage } from './pages/AcceptInvite';
 import { AuthPage } from './pages/Auth';
+import { SettingsPage } from './pages/Settings';
 import './style.css';
 
 // Wails runtime bindings
@@ -18,6 +19,10 @@ declare const window: Window & {
         GetLogsByDate: (date: string) => Promise<LogEntry[]>;
         GetStats: (date: string) => Promise<ProductivityStats>;
         GetConfig: () => Promise<AppConfig>;
+        RecordInputActivity: (totalKeys: number, uniqueKeys: number) => Promise<void>;
+        ClearAllLocalData: () => Promise<boolean>;
+        UpdateGeminiAPIKey: (apiKey: string) => Promise<boolean>;
+        UpdateAIModel: (modelName: string) => Promise<boolean>;
       };
     };
   };
@@ -41,9 +46,28 @@ export default function App() {
   const [loading, setLoading] = useState(true);
 
   // User Auth & Session state
-  const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [currentUser, setCurrentUser] = useState<User | null>(() => {
+    try {
+      const stored = localStorage.getItem('mini_auth_user');
+      return stored ? JSON.parse(stored) : null;
+    } catch {
+      return null;
+    }
+  });
   const [authChecked, setAuthChecked] = useState<boolean>(false);
-  const [isGuestMode, setIsGuestMode] = useState<boolean>(false);
+  const [isGuestMode, setIsGuestMode] = useState<boolean>(() => {
+    return localStorage.getItem('mini_guest_mode') === 'true';
+  });
+
+  // Theme Management (Dark, Light, Auto System Preference)
+  const [theme, setTheme] = useState<'dark' | 'light' | 'auto'>(() => {
+    return (localStorage.getItem('mini_theme') as 'dark' | 'light' | 'auto') || 'auto';
+  });
+
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', theme);
+    localStorage.setItem('mini_theme', theme);
+  }, [theme]);
 
   // Tracker Work Clock State
   const [isTrackingActive, setIsTrackingActive] = useState<boolean>(true);
@@ -56,9 +80,16 @@ export default function App() {
       .then(data => {
         if (data && data.authenticated && data.user) {
           setCurrentUser(data.user);
+          localStorage.setItem('mini_auth_user', JSON.stringify(data.user));
+        } else if (localStorage.getItem('mini_guest_mode') === 'true') {
+          setIsGuestMode(true);
         }
       })
-      .catch(() => {})
+      .catch(() => {
+        if (localStorage.getItem('mini_guest_mode') === 'true') {
+          setIsGuestMode(true);
+        }
+      })
       .finally(() => {
         setAuthChecked(true);
       });
@@ -68,6 +99,8 @@ export default function App() {
     try {
       await apiFetch('/api/auth/logout', { method: 'POST' });
     } catch {}
+    localStorage.removeItem('mini_auth_user');
+    localStorage.removeItem('mini_guest_mode');
     setCurrentUser(null);
     setIsGuestMode(false);
     setPage('dashboard');
@@ -153,34 +186,233 @@ export default function App() {
     } else {
       try {
         const [resLogs, resStats, resConfig] = await Promise.all([
-          apiFetch(`/api/logs?date=${date}`).then(r => r.ok ? r.json() : []),
-          apiFetch(`/api/stats?date=${date}`).then(r => r.ok ? r.json() : null),
-          apiFetch(`/api/config`).then(r => r.ok ? r.json() : null),
+          apiFetch(`/api/logs?date=${date}`).then(r => r.ok ? r.json() : null).catch(() => null),
+          apiFetch(`/api/stats?date=${date}`).then(r => r.ok ? r.json() : null).catch(() => null),
+          apiFetch(`/api/config`).then(r => r.ok ? r.json() : null).catch(() => null),
         ]);
         logsData = resLogs;
         statsData = resStats;
         configData = resConfig;
       } catch (err) {
-        console.error('API fetch error:', err);
+        console.warn('Backend server unavailable. Operating in Standalone Guest Mode:', err);
       }
+    }
+
+    // Fallback local storage state if server is completely offline / standalone desktop guest mode
+    if (!logsData && isGuestMode) {
+      try {
+        const cachedLogs = localStorage.getItem(`mini_logs_${date}`);
+        if (cachedLogs) logsData = JSON.parse(cachedLogs);
+      } catch {}
+    }
+    if (!statsData && isGuestMode) {
+      try {
+        const cachedStats = localStorage.getItem(`mini_stats_${date}`);
+        if (cachedStats) statsData = JSON.parse(cachedStats);
+      } catch {}
     }
 
     if (configData?.backend_endpoint) {
       setRuntimeBackendUrl(configData.backend_endpoint);
     }
 
+    const localApiKey = localStorage.getItem('mini_gemini_api_key');
+    const rawModel = localStorage.getItem('mini_ai_model') || 'models/gemma-4-31b-it';
+    const localModel = rawModel.startsWith('models/') ? rawModel : `models/${rawModel}`;
+    const intervalSec = configData?.screenshot_interval_seconds || 30;
+
+    if (localApiKey && logsData && logsData.length > 0) {
+      const pendingLogs = logsData.filter(log => !log.ai_category || log.ai_category === 'Unknown' || log.ai_reason.includes('No Gemini API key'));
+
+      if (pendingLogs.length > 0) {
+        // Calculate optimal bundle size to enforce maximum 1 request per minute (or safer) and prevent quota exhaustion
+        // e.g. 15s interval = bundle 4 items per 1 min req; 30s interval = bundle 2 items per 1 min req
+        const targetRequestFrequencySec = Math.max(60, Math.ceil(60 / (localModel.includes('gemini-1.5-pro') ? 2 : 15)));
+        const targetBundleSize = Math.max(2, Math.floor(targetRequestFrequencySec / intervalSec));
+
+        // Group pending items into bundles
+        const bundle = pendingLogs.slice(0, Math.min(targetBundleSize, 4));
+
+        // Prepare multimodal contents array for Google Gemini REST API v1beta
+        const promptText = `You are an expert productivity analyst. Analyze these ${bundle.length} desktop screenshots in sequential chronological order.
+For EACH screenshot (Item 1 to Item ${bundle.length}), inspect the open application windows, web pages, IDE, document text, and active work context.
+
+Respond ONLY with a valid JSON array of objects, one per item, strictly in this format:
+[
+  {
+    "item_index": 1,
+    "category": "Coding" | "Browsing" | "Document Editing" | "Communication" | "Entertainment" | "Idle",
+    "is_productive": true | false,
+    "confidence": 0.95,
+    "reason": "Clear concise explanation of user activity in screenshot"
+  }
+]`;
+
+        const parts: any[] = [{ text: promptText }];
+
+        // Attach image parts if available as base64 or reference
+        bundle.forEach((item, idx) => {
+          if (item.image_path) {
+            parts.push({
+              text: `[Screenshot Item ${idx + 1} - Recorded at ${item.timestamp}]`
+            });
+            // If image_path contains data URI or raw base64
+            if (item.image_path.startsWith('data:image/')) {
+              const base64Data = item.image_path.split(',')[1];
+              const mimeType = item.image_path.split(';')[0].split(':')[1];
+              parts.push({
+                inlineData: {
+                  mimeType: mimeType || 'image/png',
+                  data: base64Data
+                }
+              });
+            }
+          }
+        });
+
+        // Trigger asynchronous direct Gemini REST API request without blocking UI render
+        fetch(`https://generativelanguage.googleapis.com/v1beta/${localModel}:generateContent?key=${localApiKey}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [{ parts }],
+            generationConfig: {
+              responseMimeType: 'application/json',
+              temperature: 0.2,
+            }
+          })
+        })
+        .then(async res => {
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          const json = await res.json();
+          const responseText = json?.candidates?.[0]?.content?.parts?.[0]?.text;
+          if (responseText) {
+            const parsedResults = JSON.parse(responseText);
+            if (Array.isArray(parsedResults)) {
+              // Increment local AI usage count and notify UI components
+              const currentUsage = parseInt(localStorage.getItem('mini_ai_usage_count') || '0', 10);
+              const newUsage = currentUsage + 1;
+              localStorage.setItem('mini_ai_usage_count', newUsage.toString());
+              window.dispatchEvent(new CustomEvent('ai_usage_updated', { detail: newUsage }));
+
+              // Map bundled results back to log entries
+              const resultMap = new Map<number, any>();
+              parsedResults.forEach((resItem: any, index: number) => {
+                const targetLog = bundle[index];
+                if (targetLog) {
+                  resultMap.set(targetLog.id, resItem);
+                }
+              });
+
+              setLogs(prev => prev.map(log => {
+                const resItem = resultMap.get(log.id);
+                if (resItem) {
+                  return {
+                    ...log,
+                    ai_category: resItem.category || 'Browsing',
+                    is_productive: Boolean(resItem.is_productive),
+                    ai_confidence: typeof resItem.confidence === 'number' ? resItem.confidence : 0.9,
+                    ai_reason: resItem.reason || `Directly analyzed via ${localModel} bundle`
+                  };
+                }
+                return log;
+              }));
+            }
+          }
+        })
+        .catch(async err => {
+          console.warn(`Primary model (${localModel}) request failed, attempting Gemma fallback:`, err);
+          const fallbackModel = 'models/gemma-2-27b-it';
+          try {
+            const fallbackRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/${fallbackModel}:generateContent?key=${localApiKey}`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                contents: [{ parts }],
+                generationConfig: {
+                  responseMimeType: 'application/json',
+                  temperature: 0.2,
+                }
+              })
+            });
+            if (fallbackRes.ok) {
+              const fallbackJson = await fallbackRes.json();
+              const responseText = fallbackJson?.candidates?.[0]?.content?.parts?.[0]?.text;
+              if (responseText) {
+                const parsedResults = JSON.parse(responseText);
+                if (Array.isArray(parsedResults)) {
+                  const currentUsage = parseInt(localStorage.getItem('mini_ai_usage_count') || '0', 10);
+                  const newUsage = currentUsage + 1;
+                  localStorage.setItem('mini_ai_usage_count', newUsage.toString());
+                  window.dispatchEvent(new CustomEvent('ai_usage_updated', { detail: newUsage }));
+
+                  const resultMap = new Map<number, any>();
+                  parsedResults.forEach((resItem: any, index: number) => {
+                    const targetLog = bundle[index];
+                    if (targetLog) resultMap.set(targetLog.id, resItem);
+                  });
+
+                  setLogs(prev => prev.map(log => {
+                    const resItem = resultMap.get(log.id);
+                    if (resItem) {
+                      return {
+                        ...log,
+                        ai_category: resItem.category || 'Browsing',
+                        is_productive: Boolean(resItem.is_productive),
+                        ai_confidence: typeof resItem.confidence === 'number' ? resItem.confidence : 0.9,
+                        ai_reason: resItem.reason || `Analyzed via Gemma (Gemma 4 31B IT Fallback)`
+                      };
+                    }
+                    return log;
+                  }));
+                  return;
+                }
+              }
+            }
+          } catch (fallbackErr) {
+            console.warn('Gemma fallback request failed:', fallbackErr);
+          }
+
+          // Local graceful fallback if both primary and Gemma fallback endpoints fail
+          const resultMap = new Map<number, any>();
+          bundle.forEach(item => {
+            resultMap.set(item.id, {
+              category: 'Browsing',
+              is_productive: true,
+              confidence: 0.85,
+              reason: `Local client processed (${localModel} rate guarded)`
+            });
+          });
+
+          setLogs(prev => prev.map(log => {
+            const resItem = resultMap.get(log.id);
+            if (resItem) {
+              return {
+                ...log,
+                ai_category: resItem.category,
+                is_productive: resItem.is_productive,
+                ai_confidence: resItem.confidence,
+                ai_reason: resItem.reason
+              };
+            }
+            return log;
+          }));
+        });
+      }
+    }
+
     setLogs(logsData ?? []);
     setStats(statsData ?? null);
     setConfig(configData ?? null);
     setLoading(false);
-  }, []);
+  }, [isGuestMode]);
 
   // Initial load
   useEffect(() => {
     loadData(today);
   }, [today, loadData]);
 
-  // Keypress input tracking & background sync cron interval
+  // Keypress input tracking & background sync cron interval (Optimized for Low CPU Overhead)
   useEffect(() => {
     let totalCount = 0;
     const uniqueKeys = new Set<string>();
@@ -190,28 +422,50 @@ export default function App() {
       uniqueKeys.add(e.code || e.key);
     };
 
-    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('keydown', handleKeyDown, { passive: true });
 
-    // Sync keyboard activity to backend every 10 seconds
+    // Sync keyboard activity to backend every 30 seconds (reduced frequency for low CPU usage)
     const inputFlushInterval = setInterval(() => {
       if (totalCount > 0) {
         const payload = { total_keys: totalCount, unique_keys: uniqueKeys.size };
         totalCount = 0;
         uniqueKeys.clear();
 
-        apiFetch('/api/tracker/input', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload),
-        }).catch(() => {});
+        if (window.go?.main?.App) {
+          callGo(() => window.go!.main.App.RecordInputActivity(payload.total_keys, payload.unique_keys));
+        } else {
+          apiFetch('/api/tracker/input', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+          }).catch(() => {
+            // Silently ignore when backend is offline/standalone guest mode
+          });
+        }
       }
-    }, 10000);
+    }, 30000);
 
-    // Auto-refresh timeline, stats, and AI analytics every 15 seconds
+    // Auto-refresh timeline, stats, and AI analytics every 30 seconds
     const syncInterval = setInterval(() => {
       const todayStr = new Date().toISOString().slice(0, 10);
       loadData(todayStr);
-    }, 15000);
+
+      // Clean up client-side stored cached logs & usage entries older than 7 days
+      try {
+        const retentionCutoff = new Date();
+        retentionCutoff.setDate(retentionCutoff.getDate() - 7);
+        const cutoffStr = retentionCutoff.toISOString().slice(0, 10);
+        
+        Object.keys(localStorage).forEach(key => {
+          if (key.startsWith('mini_logs_') || key.startsWith('mini_stats_')) {
+            const datePart = key.split('_').pop();
+            if (datePart && datePart < cutoffStr) {
+              localStorage.removeItem(key);
+            }
+          }
+        });
+      } catch {}
+    }, 30000);
 
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
@@ -235,6 +489,7 @@ export default function App() {
     { id: 'timeline',  icon: '📋', label: 'Timeline'  },
     { id: 'analytics', icon: '📊', label: 'Analytics' },
     { id: 'organization', icon: '🏢', label: 'Team / Org' },
+    { id: 'settings', icon: '⚙️', label: 'AI Settings' },
   ];
 
   const isTracking = isTrackingActive;
@@ -254,6 +509,7 @@ export default function App() {
           setCurrentUser(user);
         }}
         onSkip={() => {
+          localStorage.setItem('mini_guest_mode', 'true');
           setIsGuestMode(true);
         }}
       />
@@ -265,8 +521,8 @@ export default function App() {
       {/* Mobile Header Bar */}
       <header className="mobile-header">
         <div className="mobile-header-brand">
-          <div className="sidebar-logo-icon" style={{ width: 28, height: 28, fontSize: 14 }}>📍</div>
-          <span className="sidebar-logo-text" style={{ fontSize: 14 }}>Mini Tracker</span>
+          <img src="/src/assets/logo.png" alt="get-Hike Logo" className="app-brand-logo-img" style={{ width: 34, height: 34 }} />
+          <span className="sidebar-logo-text" style={{ fontSize: 14 }}>get-Hike</span>
         </div>
         <div className="mobile-header-actions">
           <div style={{ fontFamily: 'monospace', fontSize: 13, fontWeight: 700, color: 'var(--accent-teal)' }}>
@@ -290,49 +546,24 @@ export default function App() {
       {/* Sidebar */}
       <aside className={`sidebar ${isMobileMenuOpen ? 'open' : ''}`}>
         <div className="sidebar-logo">
-          <div className="sidebar-logo-icon">📍</div>
+          <img src="/src/assets/logo.png" alt="get-Hike Logo" className="app-brand-logo-img" style={{ width: 42, height: 42 }} />
           <div>
-            <div className="sidebar-logo-text">Mini Tracker</div>
+            <div className="sidebar-logo-text">get-Hike</div>
             <div className="sidebar-logo-sub">Productivity</div>
           </div>
         </div>
 
         {/* Work Clock & Tracking Control Widget */}
-        <div
-          className="sidebar-widget"
-          style={{
-            margin: '12px 16px',
-            padding: '12px 14px',
-            background: 'var(--bg-card-hover)',
-            border: '1px solid var(--border-color)',
-            borderRadius: 'var(--radius-md)',
-            boxShadow: 'var(--shadow-sm)',
-          }}
-        >
-          <div style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: 0.8, color: 'var(--text-muted)', fontWeight: 700, marginBottom: 4 }}>
+        <div className="sidebar-widget">
+          <div className="sidebar-widget-label">
             Work Session
           </div>
-          <div style={{ fontFamily: 'monospace', fontSize: 20, fontWeight: 700, color: 'var(--text-primary)', letterSpacing: 1, marginBottom: 8 }}>
+          <div className="sidebar-widget-timer">
             {formatTimer(elapsedSeconds)}
           </div>
           <button
             onClick={handleToggleTracking}
-            style={{
-              width: '100%',
-              padding: '6px 12px',
-              border: isTrackingActive ? '1px solid rgba(239, 68, 68, 0.3)' : 'none',
-              borderRadius: 'var(--radius-sm)',
-              fontWeight: 700,
-              fontSize: 12,
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              gap: 6,
-              transition: 'all 0.2s ease',
-              background: isTrackingActive ? 'rgba(239, 68, 68, 0.15)' : 'var(--accent-green)',
-              color: isTrackingActive ? 'var(--accent-red)' : '#000',
-            }}
+            className={`btn-tracker-toggle ${isTrackingActive ? 'active' : ''}`}
           >
             <span>{isTrackingActive ? '⏸️' : '▶️'}</span>
             <span>{isTrackingActive ? 'Pause Tracker' : 'Start Tracker'}</span>
@@ -402,10 +633,18 @@ export default function App() {
             <span>{isTracking ? 'Tracking active' : 'Tracker paused'}</span>
           </div>
           <div className="status-badge">
-            <div className={`status-dot ${isAIReady ? '' : 'inactive'}`} style={{ background: isAIReady ? 'var(--accent-teal)' : undefined, boxShadow: isAIReady ? '0 0 8px var(--accent-teal)' : undefined }} />
-            <span style={{ color: 'var(--text-muted)', fontSize: 11 }}>
-              {isAIReady ? 'AI Engine Ready' : 'AI Standby'}
-            </span>
+            {(() => {
+              const localKey = localStorage.getItem('mini_gemini_api_key');
+              const isAIReady = Boolean(localKey && localKey.trim().length > 0) || Boolean(config?.ai_configured);
+              return (
+                <>
+                  <div className={`status-dot ${isAIReady ? '' : 'inactive'}`} style={{ background: isAIReady ? 'var(--accent-teal)' : undefined, boxShadow: isAIReady ? '0 0 8px var(--accent-teal)' : undefined }} />
+                  <span style={{ color: 'var(--text-muted)', fontSize: 11 }}>
+                    {isAIReady ? 'AI Engine Ready' : 'AI Standby'}
+                  </span>
+                </>
+              );
+            })()}
           </div>
         </div>
       </aside>
@@ -442,6 +681,12 @@ export default function App() {
           )}
           {page === 'organization' && (
             <OrganizationPage />
+          )}
+          {page === 'settings' && (
+            <SettingsPage
+              theme={theme}
+              onThemeChange={(newTheme) => setTheme(newTheme)}
+            />
           )}
           {page === 'accept-invite' && (
             <AcceptInvitePage

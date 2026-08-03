@@ -79,8 +79,9 @@ export const OrganizationPage: React.FC = () => {
 
   if (loading && !org) {
     return (
-      <div className="flex items-center justify-center min-h-[400px]">
-        <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-sky-400"></div>
+      <div className="empty-state" style={{ minHeight: 400 }}>
+        <div className="skeleton" style={{ width: 48, height: 48, borderRadius: '50%' }} />
+        <div className="empty-state-title" style={{ marginTop: 12 }}>Loading organization details...</div>
       </div>
     );
   }

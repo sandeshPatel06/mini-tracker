@@ -106,10 +106,8 @@ export function AuthPage({ onAuthSuccess, onSkip }: AuthProps) {
       <div className="auth-card">
         {/* Logo & Header */}
         <div className="auth-header">
-          <div className="auth-logo-badge">
-            <span style={{ fontSize: 24 }}>📍</span>
-          </div>
-          <h1 className="auth-title">Mini Tracker</h1>
+          <img src="/src/assets/logo.png" alt="get-Hike Logo" style={{ width: 72, height: 72, margin: '0 auto 12px', display: 'block', filter: 'drop-shadow(0 6px 12px rgba(99, 102, 241, 0.4))' }} />
+          <h1 className="auth-title">get-Hike</h1>
           <p className="auth-subtitle">
             Privacy-First Linux Productivity Platform & AI Analyzer
           </p>

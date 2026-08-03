@@ -24,7 +24,7 @@ type Config struct {
 // ~/.config/mini-tracker/config.json, then uses sane defaults.
 func Load() (*Config, error) {
 	cfg := &Config{
-		GeminiModel:        "gemini-2.0-flash",
+		GeminiModel:        "Gemma 4 31B IT",
 		ScreenshotInterval: 30 * time.Second,
 		AIAnalysisInterval: 3 * time.Hour,
 		BackendPort:        8080,
@@ -175,4 +175,3 @@ func indexOf(s string, char byte) int {
 	}
 	return -1
 }
-

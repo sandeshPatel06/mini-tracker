@@ -114,9 +114,6 @@ export default function Timeline({ logs, loading, today, onDateChange }: Props) 
                         ⌨️ {log.total_keys} keys · {log.unique_keys} unique
                       </span>
                     </div>
-                    <div style={{ marginTop: 4 }}>
-                      <EntropyBar value={log.entropy_score} />
-                    </div>
                   </div>
 
                   <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>

@@ -4,7 +4,7 @@ import { apiFetch, buildApiUrl } from '../api';
 import logoAsset from '../assets/logo.png';
 
 interface AuthProps {
-  onAuthSuccess: (user: User, org: Organization | null) => void;
+  onAuthSuccess: (user: User, org: Organization | null, token?: string) => void;
   onSkip?: () => void;
 }
 
@@ -70,7 +70,7 @@ export function AuthPage({ onAuthSuccess, onSkip }: AuthProps) {
 
       const data = await res.json();
       if (res.ok && data.success) {
-        onAuthSuccess(data.user, data.org || null);
+        onAuthSuccess(data.user, data.org || null, data.token);
       } else {
         setError(data.error || data.message || 'Authentication failed. Please check your credentials.');
       }

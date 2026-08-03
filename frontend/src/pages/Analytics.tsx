@@ -1,8 +1,10 @@
-import { LogEntry, ProductivityStats } from '../types';
+import { useState, useEffect } from 'react';
+import { LogEntry, ProductivityStats, User } from '../types';
+import { apiFetch } from '../api';
 import { format } from 'date-fns';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
-  LineChart, Line, PieChart, Pie, Cell, Legend,
+  LineChart, Line, PieChart, Pie, Cell,
 } from 'recharts';
 
 interface Props {
@@ -11,6 +13,12 @@ interface Props {
   loading: boolean;
   today: string;
   onDateChange: (date: string) => void;
+  currentUser?: User | null;
+  selectedUserId?: number | null;
+  startDate?: string;
+  endDate?: string;
+  onUserChange?: (userId: number | null) => void;
+  onDateRangeChange?: (start: string, end: string) => void;
 }
 
 const COLORS = {
@@ -42,7 +50,34 @@ const CustomTooltip = ({ active, payload, label }: { active?: boolean; payload?:
   );
 };
 
-export default function Analytics({ logs, stats, loading, today, onDateChange }: Props) {
+export default function Analytics({
+  logs,
+  stats,
+  loading,
+  today,
+  onDateChange,
+  currentUser,
+  selectedUserId,
+  startDate,
+  endDate,
+  onUserChange,
+  onDateRangeChange,
+}: Props) {
+  const [members, setMembers] = useState<{ id: number; full_name: string; email: string; role: string }[]>([]);
+
+  useEffect(() => {
+    if (currentUser?.role === 'admin' || currentUser?.role === 'owner') {
+      apiFetch('/api/org/members')
+        .then(r => r.ok ? r.json() : null)
+        .then(data => {
+          if (data?.members) {
+            setMembers(data.members);
+          }
+        })
+        .catch(() => {});
+    }
+  }, [currentUser]);
+
   // Build hourly bar chart data
   const hourlyData = Array.from({ length: 24 }, (_, h) => {
     const hourLogs = logs.filter(l => new Date(l.timestamp).getHours() === h);
@@ -84,25 +119,66 @@ export default function Analytics({ logs, stats, loading, today, onDateChange }:
       ]
     : null;
 
-  const dateLabel = today === new Date().toISOString().slice(0, 10)
+  const dateLabel = startDate && endDate && startDate !== endDate
+    ? `${format(new Date(startDate + 'T00:00:00'), 'MMM d, yyyy')} - ${format(new Date(endDate + 'T00:00:00'), 'MMM d, yyyy')}`
+    : today === new Date().toISOString().slice(0, 10)
     ? 'Today'
     : format(new Date(today + 'T00:00:00'), 'MMMM d, yyyy');
 
   return (
     <div>
-      <div className="page-header fade-in-up">
+      <div className="page-header fade-in-up" style={{ flexWrap: 'wrap', gap: 16 }}>
         <div>
           <h1 className="page-title">Analytics</h1>
-          <div className="page-subtitle">{dateLabel} · deep dive</div>
+          <div className="page-subtitle">
+            {dateLabel} · {selectedUserId ? 'Single User Deep Dive' : 'Team / All Users Overview'}
+          </div>
         </div>
-        <input
-          id="analytics-date-picker"
-          type="date"
-          className="date-input"
-          value={today}
-          max={new Date().toISOString().slice(0, 10)}
-          onChange={(e) => onDateChange(e.target.value)}
-        />
+
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+          {/* User selector for Admin/Owner */}
+          {(currentUser?.role === 'admin' || currentUser?.role === 'owner') && members.length > 0 && (
+            <select
+              className="date-input"
+              value={selectedUserId || ''}
+              onChange={(e) => onUserChange?.(e.target.value ? Number(e.target.value) : null)}
+              style={{ padding: '6px 12px', borderRadius: 8, background: 'var(--bg-elevated)', color: 'var(--text-primary)', border: '1px solid var(--border-medium)' }}
+            >
+              <option value="">👥 All Organization Users</option>
+              {members.map(m => (
+                <option key={m.id} value={m.id}>
+                  👤 {m.full_name || m.email} ({m.role})
+                </option>
+              ))}
+            </select>
+          )}
+
+          {/* Date range filter */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <input
+              type="date"
+              className="date-input"
+              value={startDate || today}
+              max={new Date().toISOString().slice(0, 10)}
+              onChange={(e) => {
+                const s = e.target.value;
+                onDateRangeChange?.(s, endDate || s);
+                onDateChange(s);
+              }}
+            />
+            <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>to</span>
+            <input
+              type="date"
+              className="date-input"
+              value={endDate || today}
+              max={new Date().toISOString().slice(0, 10)}
+              onChange={(e) => {
+                const ed = e.target.value;
+                onDateRangeChange?.(startDate || today, ed);
+              }}
+            />
+          </div>
+        </div>
       </div>
 
       {loading ? (

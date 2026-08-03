@@ -5,7 +5,9 @@ package main
 
 import (
 	"context"
+	"crypto/hmac"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
@@ -185,13 +187,23 @@ func main() {
 		})
 	})
 
-	// GET /api/logs?date=YYYY-MM-DD
+	// GET /api/logs?date=YYYY-MM-DD&start_date=...&end_date=...&user_id=...
 	mux.HandleFunc("/api/logs", func(w http.ResponseWriter, r *http.Request) {
 		date := r.URL.Query().Get("date")
-		if date == "" {
-			date = time.Now().Format("2006-01-02")
+		startDate := r.URL.Query().Get("start_date")
+		endDate := r.URL.Query().Get("end_date")
+		userIDStr := r.URL.Query().Get("user_id")
+
+		if startDate == "" && endDate == "" {
+			if date == "" {
+				date = time.Now().Format("2006-01-02")
+			}
+			startDate = date
+			endDate = date
 		}
-		logs, err := database.GetLogsForDate(date)
+
+		userID, _ := strconv.ParseInt(userIDStr, 10, 64)
+		logs, err := database.GetLogsFiltered(userID, startDate, endDate)
 		if err != nil {
 			http.Error(w, err.Error(), 500)
 			return
@@ -199,13 +211,23 @@ func main() {
 		jsonResp(w, logs)
 	})
 
-	// GET /api/stats?date=YYYY-MM-DD
+	// GET /api/stats?date=YYYY-MM-DD&start_date=...&end_date=...&user_id=...
 	mux.HandleFunc("/api/stats", func(w http.ResponseWriter, r *http.Request) {
 		date := r.URL.Query().Get("date")
-		if date == "" {
-			date = time.Now().Format("2006-01-02")
+		startDate := r.URL.Query().Get("start_date")
+		endDate := r.URL.Query().Get("end_date")
+		userIDStr := r.URL.Query().Get("user_id")
+
+		if startDate == "" && endDate == "" {
+			if date == "" {
+				date = time.Now().Format("2006-01-02")
+			}
+			startDate = date
+			endDate = date
 		}
-		stats, err := database.GetProductivityStats(date)
+
+		userID, _ := strconv.ParseInt(userIDStr, 10, 64)
+		stats, err := database.GetProductivityStatsFiltered(userID, startDate, endDate)
 		if err != nil {
 			http.Error(w, err.Error(), 500)
 			return
@@ -382,38 +404,6 @@ func main() {
 
 	mailer := email.NewMailer()
 
-	// In-memory cache for tracking recent OAuth/Login sessions across webview boundaries
-	var (
-		recentOAuthUser  *db.User
-		recentOAuthOrg   *db.Organization
-		recentOAuthTime  time.Time
-		recentOAuthMutex sync.RWMutex
-	)
-
-	setRecentOAuth := func(u *db.User, o *db.Organization) {
-		recentOAuthMutex.Lock()
-		defer recentOAuthMutex.Unlock()
-		recentOAuthUser = u
-		recentOAuthOrg = o
-		recentOAuthTime = time.Now()
-	}
-
-	getRecentOAuth := func() (*db.User, *db.Organization) {
-		recentOAuthMutex.RLock()
-		defer recentOAuthMutex.RUnlock()
-		if recentOAuthUser != nil && time.Since(recentOAuthTime) < 5*time.Minute {
-			return recentOAuthUser, recentOAuthOrg
-		}
-		return nil, nil
-	}
-
-	clearRecentOAuth := func() {
-		recentOAuthMutex.Lock()
-		defer recentOAuthMutex.Unlock()
-		recentOAuthUser = nil
-		recentOAuthOrg = nil
-	}
-
 	// Helper to set session cookie securely
 	setSessionCookie := func(w http.ResponseWriter, userID int64) {
 		http.SetCookie(w, &http.Cookie{
@@ -572,11 +562,11 @@ func main() {
 			return
 		}
 
-		setSessionCookie(w, user.ID)
+		token := setJWTTokenCookie(w, user)
 
 		jsonResp(w, map[string]interface{}{
 			"success": true,
-			"token":   fmt.Sprintf("%d", user.ID),
+			"token":   token,
 			"org":     org,
 			"user":    user,
 		})
@@ -603,12 +593,12 @@ func main() {
 			return
 		}
 
-		setSessionCookie(w, user.ID)
+		token := setJWTTokenCookie(w, user)
 
 		org, _ := database.GetOrganization(user.OrgID)
 		jsonResp(w, map[string]interface{}{
 			"success": true,
-			"token":   fmt.Sprintf("%d", user.ID),
+			"token":   token,
 			"user":    user,
 			"org":     org,
 		})
@@ -618,7 +608,7 @@ func main() {
 	mux.HandleFunc("/api/auth/logout", func(w http.ResponseWriter, r *http.Request) {
 		clearRecentOAuth()
 		http.SetCookie(w, &http.Cookie{
-			Name:     "mini_session_user_id",
+			Name:     "mini_session_jwt",
 			Value:    "",
 			Path:     "/",
 			HttpOnly: true,
@@ -630,44 +620,22 @@ func main() {
 
 	// GET /api/auth/me — Get active session state
 	mux.HandleFunc("/api/auth/me", func(w http.ResponseWriter, r *http.Request) {
-		var userID int64
-
-		if cookie, err := r.Cookie("mini_session_user_id"); err == nil && cookie.Value != "" {
-			userID, _ = strconv.ParseInt(cookie.Value, 10, 64)
-		}
-		if userID == 0 {
-			authHeader := r.Header.Get("Authorization")
-			if strings.HasPrefix(authHeader, "Bearer ") {
-				userID, _ = strconv.ParseInt(strings.TrimPrefix(authHeader, "Bearer "), 10, 64)
-			}
-		}
-		if userID == 0 {
-			userIDHeader := r.Header.Get("X-Session-User-ID")
-			if userIDHeader != "" {
-				userID, _ = strconv.ParseInt(userIDHeader, 10, 64)
-			}
-		}
-		if userID == 0 {
-			if recentUser, _ := getRecentOAuth(); recentUser != nil {
-				userID = recentUser.ID
-			}
-		}
-
-		if userID == 0 {
+		user := getSessionUser(r, database)
+		if user == nil {
 			jsonResp(w, map[string]interface{}{"authenticated": false})
 			return
 		}
 
-		user, err := database.GetUserByID(userID)
-		if err != nil || user == nil {
+		dbUser, err := database.GetUserByID(user.ID)
+		if err != nil || dbUser == nil {
 			jsonResp(w, map[string]interface{}{"authenticated": false})
 			return
 		}
 
-		org, _ := database.GetOrganization(user.OrgID)
+		org, _ := database.GetOrganization(dbUser.OrgID)
 		jsonResp(w, map[string]interface{}{
 			"authenticated": true,
-			"user":          user,
+			"user":          dbUser,
 			"org":           org,
 		})
 	})
@@ -902,8 +870,17 @@ func main() {
 
 	// GET /api/org/members — Get team roster and pending invitations
 	mux.HandleFunc("/api/org/members", func(w http.ResponseWriter, r *http.Request) {
+		sessUser := getSessionUser(r, database)
+		if sessUser != nil && sessUser.Role == "member" {
+			jsonError(w, "Forbidden: Only organization admins can access member roster", http.StatusForbidden)
+			return
+		}
+
 		orgIDStr := r.URL.Query().Get("org_id")
 		orgID, _ := strconv.ParseInt(orgIDStr, 10, 64)
+		if orgID == 0 && sessUser != nil {
+			orgID = sessUser.OrgID
+		}
 		if orgID == 0 {
 			orgID = 1
 		}
@@ -928,6 +905,11 @@ func main() {
 	mux.HandleFunc("/api/org/invite", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		sessUser := getSessionUser(r, database)
+		if sessUser != nil && sessUser.Role == "member" {
+			jsonError(w, "Forbidden: Only organization admins can send invitations", http.StatusForbidden)
 			return
 		}
 		var req struct {
@@ -1224,4 +1206,161 @@ func processPendingLogs(database *db.DB, gemini *ai.GeminiClient) int {
 
 func encodingBase64(data []byte) string {
 	return base64.StdEncoding.EncodeToString(data)
+}
+
+var jwtSecret = []byte("mini-tracker-jwt-secret-key-corporate-2026")
+
+type JWTClaims struct {
+	UserID int64  `json:"user_id"`
+	Email  string `json:"email"`
+	Role   string `json:"role"`
+	OrgID  int64  `json:"org_id"`
+	Exp    int64  `json:"exp"`
+}
+
+func generateJWT(user *db.User) string {
+	header := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"HS256","typ":"JWT"}`))
+	claims := JWTClaims{
+		UserID: user.ID,
+		Email:  user.Email,
+		Role:   user.Role,
+		OrgID:  user.OrgID,
+		Exp:    time.Now().Add(7 * 24 * time.Hour).Unix(),
+	}
+	claimsBytes, _ := json.Marshal(claims)
+	payload := base64.RawURLEncoding.EncodeToString(claimsBytes)
+	signatureInput := header + "." + payload
+
+	h := hmac.New(sha256.New, jwtSecret)
+	h.Write([]byte(signatureInput))
+	signature := base64.RawURLEncoding.EncodeToString(h.Sum(nil))
+
+	return signatureInput + "." + signature
+}
+
+func parseJWT(tokenStr string) *JWTClaims {
+	parts := strings.Split(tokenStr, ".")
+	if len(parts) != 3 {
+		return nil
+	}
+	signatureInput := parts[0] + "." + parts[1]
+	h := hmac.New(sha256.New, jwtSecret)
+	h.Write([]byte(signatureInput))
+	expectedSig := base64.RawURLEncoding.EncodeToString(h.Sum(nil))
+
+	if !hmac.Equal([]byte(parts[2]), []byte(expectedSig)) {
+		return nil
+	}
+
+	payloadBytes, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		return nil
+	}
+
+	var claims JWTClaims
+	if err := json.Unmarshal(payloadBytes, &claims); err != nil {
+		return nil
+	}
+
+	if time.Now().Unix() > claims.Exp {
+		return nil
+	}
+
+	return &claims
+}
+
+func setJWTTokenCookie(w http.ResponseWriter, user *db.User) string {
+	jwtToken := generateJWT(user)
+	http.SetCookie(w, &http.Cookie{
+		Name:     "mini_session_jwt",
+		Value:    jwtToken,
+		Path:     "/",
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+		MaxAge:   7 * 24 * 3600,
+	})
+	http.SetCookie(w, &http.Cookie{
+		Name:     "mini_session_user_id",
+		Value:    fmt.Sprintf("%d", user.ID),
+		Path:     "/",
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+		MaxAge:   7 * 24 * 3600,
+	})
+	return jwtToken
+}
+
+func getSessionUser(r *http.Request, database *db.DB) *db.User {
+	var tokenStr string
+
+	if cookie, err := r.Cookie("mini_session_jwt"); err == nil && cookie.Value != "" {
+		tokenStr = cookie.Value
+	}
+	if tokenStr == "" {
+		authHeader := r.Header.Get("Authorization")
+		if strings.HasPrefix(authHeader, "Bearer ") {
+			tokenStr = strings.TrimPrefix(authHeader, "Bearer ")
+		}
+	}
+
+	if tokenStr != "" {
+		claims := parseJWT(tokenStr)
+		if claims != nil {
+			return &db.User{
+				ID:    claims.UserID,
+				Email: claims.Email,
+				Role:  claims.Role,
+				OrgID: claims.OrgID,
+			}
+		}
+	}
+
+	// Legacy cookie fallback
+	if cookie, err := r.Cookie("mini_session_user_id"); err == nil && cookie.Value != "" {
+		if uid, err := strconv.ParseInt(cookie.Value, 10, 64); err == nil && uid > 0 {
+			u, _ := database.GetUserByID(uid)
+			return u
+		}
+	}
+	if uidHeader := r.Header.Get("X-Session-User-ID"); uidHeader != "" {
+		if uid, err := strconv.ParseInt(uidHeader, 10, 64); err == nil && uid > 0 {
+			u, _ := database.GetUserByID(uid)
+			return u
+		}
+	}
+	if recentUser, _ := getRecentOAuth(); recentUser != nil {
+		return recentUser
+	}
+	return nil
+}
+
+var (
+	recentOAuthUser  *db.User
+	recentOAuthOrg   *db.Organization
+	recentOAuthTime  time.Time
+	recentOAuthMutex sync.RWMutex
+)
+
+func setRecentOAuth(u *db.User, o *db.Organization) {
+	recentOAuthMutex.Lock()
+	defer recentOAuthMutex.Unlock()
+	recentOAuthUser = u
+	recentOAuthOrg = o
+	recentOAuthTime = time.Now()
+}
+
+func getRecentOAuth() (*db.User, *db.Organization) {
+	recentOAuthMutex.RLock()
+	defer recentOAuthMutex.RUnlock()
+	if recentOAuthUser != nil && time.Since(recentOAuthTime) < 5*time.Minute {
+		return recentOAuthUser, recentOAuthOrg
+	}
+	return nil, nil
+}
+
+func clearRecentOAuth() {
+	recentOAuthMutex.Lock()
+	defer recentOAuthMutex.Unlock()
+	recentOAuthUser = nil
+	recentOAuthOrg = nil
 }

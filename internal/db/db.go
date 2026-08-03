@@ -142,13 +142,15 @@ func (db *DB) migrate() error {
 		return err
 	}
 
-	// Seed default organization if empty
+	// Seed default organization and test accounts if empty
 	var orgCount int
 	_ = db.conn.QueryRow(`SELECT COUNT(*) FROM organizations`).Scan(&orgCount)
 	if orgCount == 0 {
 		adminHash := HashPassword("admin123")
+		memberHash := HashPassword("user123")
 		_, _ = db.conn.Exec(`INSERT INTO organizations (id, name, slug) VALUES (1, 'Default Beta Org', 'default-beta')`)
 		_, _ = db.conn.Exec(`INSERT INTO users (id, org_id, email, password_hash, full_name, role) VALUES (1, 1, 'admin@company.com', ?, 'Beta Admin', 'owner')`, adminHash)
+		_, _ = db.conn.Exec(`INSERT INTO users (id, org_id, email, password_hash, full_name, role) VALUES (2, 1, 'user@company.com', ?, 'Test Team Member', 'member')`, memberHash)
 	}
 
 	return nil
@@ -390,14 +392,31 @@ func (db *DB) UpdateAIResult(id int64, category string, productive bool, confide
 	return err
 }
 
-// GetLogsForDate returns all logs for the given date (YYYY-MM-DD).
-func (db *DB) GetLogsForDate(date string) ([]LogEntry, error) {
-	rows, err := db.conn.Query(`
-		SELECT id, timestamp, image_path, total_keys, unique_keys, entropy_score,
+// GetLogsFiltered returns logs filtered by optional user_id, start_date, and end_date.
+func (db *DB) GetLogsFiltered(userID int64, startDate, endDate string) ([]LogEntry, error) {
+	query := `SELECT id, timestamp, image_path, total_keys, unique_keys, entropy_score,
 		       ai_category, is_productive, ai_confidence, ai_reason
-		FROM logs
-		WHERE date(timestamp) = ?
-		ORDER BY timestamp ASC`, date)
+		FROM logs WHERE 1=1`
+	args := []interface{}{}
+
+	if userID > 0 {
+		query += ` AND user_id = ?`
+		args = append(args, userID)
+	}
+	if startDate != "" && endDate != "" {
+		query += ` AND date(timestamp) BETWEEN ? AND ?`
+		args = append(args, startDate, endDate)
+	} else if startDate != "" {
+		query += ` AND date(timestamp) >= ?`
+		args = append(args, startDate)
+	} else if endDate != "" {
+		query += ` AND date(timestamp) <= ?`
+		args = append(args, endDate)
+	}
+
+	query += ` ORDER BY timestamp ASC`
+
+	rows, err := db.conn.Query(query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -419,15 +438,41 @@ func (db *DB) GetLogsForDate(date string) ([]LogEntry, error) {
 	return entries, rows.Err()
 }
 
+// GetLogsForDate returns all logs for the given date (YYYY-MM-DD).
+func (db *DB) GetLogsForDate(date string) ([]LogEntry, error) {
+	return db.GetLogsFiltered(0, date, date)
+}
+
 // GetTodayLogs returns today's logs.
 func (db *DB) GetTodayLogs() ([]LogEntry, error) {
 	today := time.Now().Format("2006-01-02")
 	return db.GetLogsForDate(today)
 }
 
-// GetProductivityStats returns aggregated stats for a given date.
-func (db *DB) GetProductivityStats(date string) (*ProductivityStats, error) {
-	stats := &ProductivityStats{Date: date}
+// GetProductivityStatsFiltered returns aggregated stats filtered by optional user_id and date range.
+func (db *DB) GetProductivityStatsFiltered(userID int64, startDate, endDate string) (*ProductivityStats, error) {
+	stats := &ProductivityStats{Date: startDate}
+	if startDate != "" && endDate != "" && startDate != endDate {
+		stats.Date = fmt.Sprintf("%s to %s", startDate, endDate)
+	}
+
+	whereClause := ` WHERE 1=1`
+	args := []interface{}{}
+
+	if userID > 0 {
+		whereClause += ` AND user_id = ?`
+		args = append(args, userID)
+	}
+	if startDate != "" && endDate != "" {
+		whereClause += ` AND date(timestamp) BETWEEN ? AND ?`
+		args = append(args, startDate, endDate)
+	} else if startDate != "" {
+		whereClause += ` AND date(timestamp) >= ?`
+		args = append(args, startDate)
+	} else if endDate != "" {
+		whereClause += ` AND date(timestamp) <= ?`
+		args = append(args, endDate)
+	}
 
 	row := db.conn.QueryRow(`
 		SELECT
@@ -435,7 +480,7 @@ func (db *DB) GetProductivityStats(date string) (*ProductivityStats, error) {
 			SUM(CASE WHEN is_productive=1 AND ai_category != '' AND ai_category != 'Unknown' THEN 1 ELSE 0 END) as prod,
 			SUM(CASE WHEN is_productive=0 AND ai_category != '' AND ai_category != 'Unknown' THEN 1 ELSE 0 END) as unprod,
 			COALESCE(AVG(entropy_score), 0) as avg_entropy
-		FROM logs WHERE date(timestamp) = ?`, date)
+		FROM logs`+whereClause, args...)
 	if err := row.Scan(&stats.TotalMinutes, &stats.ProductiveMin,
 		&stats.UnproductiveMin, &stats.AvgEntropyScore); err != nil {
 		return stats, nil
@@ -443,12 +488,16 @@ func (db *DB) GetProductivityStats(date string) (*ProductivityStats, error) {
 
 	// Top category
 	catRow := db.conn.QueryRow(`
-		SELECT ai_category FROM logs
-		WHERE date(timestamp) = ? AND ai_category != '' AND ai_category != 'Unknown'
-		GROUP BY ai_category ORDER BY COUNT(*) DESC LIMIT 1`, date)
+		SELECT ai_category FROM logs`+whereClause+` AND ai_category != '' AND ai_category != 'Unknown'
+		GROUP BY ai_category ORDER BY COUNT(*) DESC LIMIT 1`, args...)
 	_ = catRow.Scan(&stats.TopCategory)
 
 	return stats, nil
+}
+
+// GetProductivityStats returns aggregated stats for a given date.
+func (db *DB) GetProductivityStats(date string) (*ProductivityStats, error) {
+	return db.GetProductivityStatsFiltered(0, date, date)
 }
 
 // GetUnanalyzedLogs returns all logs that have not yet been successfully analyzed by AI.

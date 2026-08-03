@@ -271,7 +271,9 @@ mkdir -p "${PIXMAP_DIR}"
 
 # Install application icon across all system & user icon paths
 ICON_SOURCE=""
-if [ -f "build/appicon.png" ]; then
+if [ -f "frontend/src/assets/logo.png" ]; then
+    ICON_SOURCE="frontend/src/assets/logo.png"
+elif [ -f "build/appicon.png" ]; then
     ICON_SOURCE="build/appicon.png"
 elif [ -f "frontend/src/assets/images/logo-universal.png" ]; then
     ICON_SOURCE="frontend/src/assets/images/logo-universal.png"
@@ -293,30 +295,30 @@ if [ -n "${ICON_SOURCE}" ]; then
 fi
 
 # Create Primary .desktop entry
-DESKTOP_ENTRY_FILE="${APPLICATIONS_DIR}/mini-tracker.desktop"
+DESKTOP_ENTRY_FILE="${APPLICATIONS_DIR}/get-hike.desktop"
 cat << EOF > "${DESKTOP_ENTRY_FILE}"
 [Desktop Entry]
 Type=Application
-Name=Mini Tracker
-GenericName=Productivity Tracker Desktop App
+Name=get-Hike
+GenericName=Productivity Tracker & AI Analyzer
 Comment=Privacy-first Linux Productivity Tracker & AI Analyzer
 Exec=${BIN_DIR}/mini-tracker-gui %u
 Icon=${INSTALLED_ICON_PATH}
 Terminal=false
 Categories=Utility;Development;Office;
-Keywords=productivity;tracker;time;analytics;
+Keywords=productivity;tracker;time;analytics;get-hike;
 StartupNotify=true
-StartupWMClass=mini-tracker
-WMClass=mini-tracker
+StartupWMClass=get-Hike
+WMClass=get-Hike
 EOF
 chmod 755 "${DESKTOP_ENTRY_FILE}"
 
 # Create secondary .desktop aliases to match all potential WM_CLASS window identifiers
-for alias_name in mini-tracker-server mini-tracker-tmp localhost; do
+for alias_name in mini-tracker mini-tracker-server mini-tracker-tmp localhost get-hike; do
     cat << EOF > "${APPLICATIONS_DIR}/${alias_name}.desktop"
 [Desktop Entry]
 Type=Application
-Name=Mini Tracker
+Name=get-Hike
 Exec=${BIN_DIR}/mini-tracker-gui %u
 Icon=${INSTALLED_ICON_PATH}
 Terminal=false

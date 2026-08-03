@@ -140,17 +140,20 @@ func (g *GeminiClient) FetchAvailableModels(ctx context.Context) ([]string, erro
 	// Rank models by cost/efficiency/capability
 	scoreModel := func(name string) int {
 		lName := strings.ToLower(name)
-		if strings.Contains(lName, "Gemma 4 31B IT") || strings.Contains(lName, "2.0-flash") {
-			return 110
+		if strings.Contains(lName, "gemma-4-31b-it") || strings.Contains(lName, "gemma-4") {
+			return 120
 		}
 		if strings.Contains(lName, "gemini-2.5-flash") || strings.Contains(lName, "2.5-flash") {
-			return 105
+			return 115
+		}
+		if strings.Contains(lName, "gemini-2.0-flash") || strings.Contains(lName, "2.0-flash") {
+			return 90
 		}
 		if strings.Contains(lName, "gemini-1.5-flash") || strings.Contains(lName, "1.5-flash") {
-			return 100
+			return 85
 		}
 		if strings.Contains(lName, "flash") {
-			return 90
+			return 80
 		}
 		if strings.Contains(lName, "gemma") {
 			return 50

@@ -152,7 +152,7 @@ export default function App() {
     return `${pad(hrs)}:${pad(mins)}:${pad(secs)}`;
   };
 
-  // Hash-based routing handler for invitations
+  // Hash-based routing handler for invitations & organization link
   const checkHashRoute = useCallback(() => {
     const hash = window.location.hash;
     if (hash.includes('/accept-invite')) {
@@ -162,9 +162,15 @@ export default function App() {
         setPage('accept-invite');
       }
     } else if (hash === '#organization') {
-      setPage('organization');
+      const isAdmin = currentUser?.role === 'admin' || currentUser?.role === 'owner' || isGuestMode;
+      if (isAdmin) {
+        setPage('organization');
+      } else {
+        window.location.hash = '';
+        setPage('dashboard');
+      }
     }
-  }, []);
+  }, [currentUser, isGuestMode]);
 
   useEffect(() => {
     checkHashRoute();
@@ -172,11 +178,22 @@ export default function App() {
     return () => window.removeEventListener('hashchange', checkHashRoute);
   }, [checkHashRoute]);
 
-  const loadData = useCallback(async (date: string) => {
+  const [selectedUserId, setSelectedUserId] = useState<number | null>(null);
+  const [startDate, setStartDate] = useState<string>(today);
+  const [endDate, setEndDate] = useState<string>(today);
+
+  const loadData = useCallback(async (date: string, filterUserId?: number | null, sDate?: string, eDate?: string) => {
     setLoading(true);
     let logsData: LogEntry[] | null = null;
     let statsData: ProductivityStats | null = null;
     let configData: AppConfig | null = null;
+
+    const targetUser = filterUserId !== undefined ? filterUserId : selectedUserId;
+    const start = sDate || startDate || date;
+    const end = eDate || endDate || date;
+
+    const userParam = targetUser ? `&user_id=${targetUser}` : '';
+    const dateParam = `start_date=${start}&end_date=${end}`;
 
     if (window.go?.main?.App) {
       [logsData, statsData, configData] = await Promise.all([
@@ -187,8 +204,8 @@ export default function App() {
     } else {
       try {
         const [resLogs, resStats, resConfig] = await Promise.all([
-          apiFetch(`/api/logs?date=${date}`).then(r => r.ok ? r.json() : null).catch(() => null),
-          apiFetch(`/api/stats?date=${date}`).then(r => r.ok ? r.json() : null).catch(() => null),
+          apiFetch(`/api/logs?${dateParam}${userParam}`).then(r => r.ok ? r.json() : null).catch(() => null),
+          apiFetch(`/api/stats?${dateParam}${userParam}`).then(r => r.ok ? r.json() : null).catch(() => null),
           apiFetch(`/api/config`).then(r => r.ok ? r.json() : null).catch(() => null),
         ]);
         logsData = resLogs;
@@ -489,8 +506,10 @@ Respond ONLY with a valid JSON array of objects, one per item, strictly in this 
     { id: 'dashboard', icon: '⚡', label: 'Dashboard' },
     { id: 'timeline',  icon: '📋', label: 'Timeline'  },
     { id: 'analytics', icon: '📊', label: 'Analytics' },
-    { id: 'organization', icon: '🏢', label: 'Team / Org' },
-    { id: 'settings', icon: '⚙️', label: 'AI Settings' },
+    ...(currentUser?.role === 'admin' || currentUser?.role === 'owner' || isGuestMode ? [
+      { id: 'organization' as Page, icon: '🏢', label: 'Team / Org' },
+      { id: 'settings' as Page, icon: '⚙️', label: 'AI Settings' },
+    ] : []),
   ];
 
   const isTracking = isTrackingActive;
@@ -500,12 +519,15 @@ Respond ONLY with a valid JSON array of objects, one per item, strictly in this 
   if (authChecked && !currentUser && !isGuestMode) {
     return (
       <AuthPage
-        onAuthSuccess={(user, org) => {
+        onAuthSuccess={(user, org, token) => {
           if (user) {
             localStorage.setItem('mini_auth_user', JSON.stringify(user));
           }
           if (org) {
             localStorage.setItem('mini_auth_org', JSON.stringify(org));
+          }
+          if (token) {
+            localStorage.setItem('mini_jwt_token', token);
           }
           setCurrentUser(user);
         }}
@@ -636,7 +658,7 @@ Respond ONLY with a valid JSON array of objects, one per item, strictly in this 
           <div className="status-badge">
             {(() => {
               const localKey = localStorage.getItem('mini_gemini_api_key');
-              const isAIReady = Boolean(localKey && localKey.trim().length > 0) || Boolean(config?.ai_configured);
+              const isAIReady = Boolean(localKey && localKey.trim().length > 0) || Boolean(config?.ai_configured) || Boolean(currentUser?.role === 'member');
               return (
                 <>
                   <div className={`status-dot ${isAIReady ? '' : 'inactive'}`} style={{ background: isAIReady ? 'var(--accent-teal)' : undefined, boxShadow: isAIReady ? '0 0 8px var(--accent-teal)' : undefined }} />
@@ -677,18 +699,49 @@ Respond ONLY with a valid JSON array of objects, one per item, strictly in this 
               stats={stats}
               loading={loading}
               today={today}
-              onDateChange={(d) => { setToday(d); loadData(d); }}
+              onDateChange={(d) => { setToday(d); loadData(d, selectedUserId, d, d); }}
+              currentUser={currentUser}
+              selectedUserId={selectedUserId}
+              startDate={startDate}
+              endDate={endDate}
+              onUserChange={(uid) => {
+                setSelectedUserId(uid);
+                loadData(today, uid, startDate, endDate);
+              }}
+              onDateRangeChange={(s, e) => {
+                setStartDate(s);
+                setEndDate(e);
+                loadData(today, selectedUserId, s, e);
+              }}
             />
           )}
-          {page === 'organization' && (
+          {page === 'organization' && (currentUser?.role === 'admin' || currentUser?.role === 'owner' || isGuestMode) ? (
             <OrganizationPage />
-          )}
-          {page === 'settings' && (
+          ) : page === 'organization' ? (
+            <Dashboard
+              logs={logs}
+              stats={stats}
+              config={config}
+              loading={loading}
+              today={today}
+              onRefresh={() => loadData(today)}
+            />
+          ) : null}
+          {page === 'settings' && (currentUser?.role === 'admin' || currentUser?.role === 'owner' || isGuestMode) ? (
             <SettingsPage
               theme={theme}
               onThemeChange={(newTheme) => setTheme(newTheme)}
             />
-          )}
+          ) : page === 'settings' ? (
+            <Dashboard
+              logs={logs}
+              stats={stats}
+              config={config}
+              loading={loading}
+              today={today}
+              onRefresh={() => loadData(today)}
+            />
+          ) : null}
           {page === 'accept-invite' && (
             <AcceptInvitePage
               token={inviteToken}

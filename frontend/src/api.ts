@@ -36,14 +36,21 @@ export function apiFetch(path: string, options: RequestInit = {}): Promise<Respo
   const url = buildApiUrl(path);
   const headers = new Headers(options.headers || {});
 
-  // Attach token from localStorage for robust cross-origin authentication
+  // Attach JWT or session token from localStorage for robust authentication
   try {
-    const savedUser = localStorage.getItem('mini_auth_user');
-    if (savedUser) {
-      const parsed = JSON.parse(savedUser);
-      if (parsed?.id) {
-        headers.set('Authorization', `Bearer ${parsed.id}`);
-        headers.set('X-Session-User-ID', `${parsed.id}`);
+    const savedToken = localStorage.getItem('mini_jwt_token');
+    if (savedToken) {
+      headers.set('Authorization', `Bearer ${savedToken}`);
+    } else {
+      const savedUser = localStorage.getItem('mini_auth_user');
+      if (savedUser) {
+        const parsed = JSON.parse(savedUser);
+        if (parsed?.token) {
+          headers.set('Authorization', `Bearer ${parsed.token}`);
+        } else if (parsed?.id) {
+          headers.set('Authorization', `Bearer ${parsed.id}`);
+          headers.set('X-Session-User-ID', `${parsed.id}`);
+        }
       }
     }
   } catch {

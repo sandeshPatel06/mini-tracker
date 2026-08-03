@@ -317,16 +317,20 @@ WMClass=get-Hike
 EOF
 chmod 755 "${DESKTOP_ENTRY_FILE}"
 
-# Create secondary .desktop aliases to match all potential WM_CLASS window identifiers
-for alias_name in mini-tracker mini-tracker-server mini-tracker-tmp localhost get-hike; do
+# Create desktop launchers to match all potential search queries and window identifiers
+for alias_name in mini-tracker mini-tracker-server mini-tracker-tmp localhost; do
     cat << EOF > "${APPLICATIONS_DIR}/${alias_name}.desktop"
 [Desktop Entry]
 Type=Application
-Name=get-Hike
+Name=get-Hike (${alias_name})
+GenericName=Productivity Tracker & AI Analyzer
+Comment=Privacy-first Linux Productivity Tracker & AI Analyzer
 Exec=${BIN_DIR}/mini-tracker-gui %u
 Icon=${INSTALLED_ICON_PATH}
 Terminal=false
-NoDisplay=true
+Categories=Utility;Development;Office;
+Keywords=productivity;tracker;time;analytics;get-hike;mini-tracker;
+StartupNotify=true
 StartupWMClass=${alias_name}
 EOF
     chmod 755 "${APPLICATIONS_DIR}/${alias_name}.desktop"

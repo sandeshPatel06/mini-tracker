@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { User, Organization } from '../types';
 import { apiFetch, buildApiUrl } from '../api';
+import logoAsset from '../assets/logo.png';
 
 interface AuthProps {
   onAuthSuccess: (user: User, org: Organization | null) => void;
@@ -106,7 +107,7 @@ export function AuthPage({ onAuthSuccess, onSkip }: AuthProps) {
       <div className="auth-card">
         {/* Logo & Header */}
         <div className="auth-header">
-          <img src="/src/assets/logo.png" alt="get-Hike Logo" style={{ width: 72, height: 72, margin: '0 auto 12px', display: 'block', filter: 'drop-shadow(0 6px 12px rgba(99, 102, 241, 0.4))' }} />
+          <img src={logoAsset} alt="get-Hike Logo" style={{ width: 72, height: 72, margin: '0 auto 12px', display: 'block', filter: 'drop-shadow(0 6px 12px rgba(99, 102, 241, 0.4))' }} />
           <h1 className="auth-title">get-Hike</h1>
           <p className="auth-subtitle">
             Privacy-First Linux Productivity Platform & AI Analyzer

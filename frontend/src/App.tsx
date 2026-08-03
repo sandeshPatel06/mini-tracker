@@ -8,6 +8,7 @@ import { OrganizationPage } from './pages/Organization';
 import { AcceptInvitePage } from './pages/AcceptInvite';
 import { AuthPage } from './pages/Auth';
 import { SettingsPage } from './pages/Settings';
+import logoAsset from './assets/logo.png';
 import './style.css';
 
 // Wails runtime bindings
@@ -521,7 +522,7 @@ Respond ONLY with a valid JSON array of objects, one per item, strictly in this 
       {/* Mobile Header Bar */}
       <header className="mobile-header">
         <div className="mobile-header-brand">
-          <img src="/src/assets/logo.png" alt="get-Hike Logo" className="app-brand-logo-img" style={{ width: 34, height: 34 }} />
+          <img src={logoAsset} alt="get-Hike Logo" className="app-brand-logo-img" style={{ width: 34, height: 34 }} />
           <span className="sidebar-logo-text" style={{ fontSize: 14 }}>get-Hike</span>
         </div>
         <div className="mobile-header-actions">
@@ -546,7 +547,7 @@ Respond ONLY with a valid JSON array of objects, one per item, strictly in this 
       {/* Sidebar */}
       <aside className={`sidebar ${isMobileMenuOpen ? 'open' : ''}`}>
         <div className="sidebar-logo">
-          <img src="/src/assets/logo.png" alt="get-Hike Logo" className="app-brand-logo-img" style={{ width: 42, height: 42 }} />
+          <img src={logoAsset} alt="get-Hike Logo" className="app-brand-logo-img" style={{ width: 42, height: 42 }} />
           <div>
             <div className="sidebar-logo-text">get-Hike</div>
             <div className="sidebar-logo-sub">Productivity</div>

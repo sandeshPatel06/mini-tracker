@@ -140,7 +140,7 @@ func (g *GeminiClient) FetchAvailableModels(ctx context.Context) ([]string, erro
 	// Rank models by cost/efficiency/capability
 	scoreModel := func(name string) int {
 		lName := strings.ToLower(name)
-		if strings.Contains(lName, "gemini-2.0-flash") || strings.Contains(lName, "2.0-flash") {
+		if strings.Contains(lName, "Gemma 4 31B IT") || strings.Contains(lName, "2.0-flash") {
 			return 110
 		}
 		if strings.Contains(lName, "gemini-2.5-flash") || strings.Contains(lName, "2.5-flash") {
@@ -213,11 +213,6 @@ func (g *GeminiClient) SelectBestModel(ctx context.Context, exclude map[string]b
 
 	// 4. Fallback candidates if API listing fails or returns no unexcluded models
 	fallbacks := []string{
-		"gemini-2.0-flash",
-		"gemini-2.0-flash-lite",
-		"gemini-2.5-flash",
-		"gemini-1.5-flash",
-		"gemini-1.5-pro",
 		"gemma-4-31b-it",
 	}
 
@@ -435,4 +430,3 @@ func truncateString(s string, maxLen int) string {
 	}
 	return s[:maxLen] + "..."
 }
-

@@ -432,8 +432,8 @@ func (db *DB) GetProductivityStats(date string) (*ProductivityStats, error) {
 	row := db.conn.QueryRow(`
 		SELECT
 			COUNT(*) as total,
-			SUM(CASE WHEN is_productive=1 THEN 1 ELSE 0 END) as prod,
-			SUM(CASE WHEN is_productive=0 THEN 1 ELSE 0 END) as unprod,
+			SUM(CASE WHEN is_productive=1 AND ai_category != '' AND ai_category != 'Unknown' THEN 1 ELSE 0 END) as prod,
+			SUM(CASE WHEN is_productive=0 AND ai_category != '' AND ai_category != 'Unknown' THEN 1 ELSE 0 END) as unprod,
 			COALESCE(AVG(entropy_score), 0) as avg_entropy
 		FROM logs WHERE date(timestamp) = ?`, date)
 	if err := row.Scan(&stats.TotalMinutes, &stats.ProductiveMin,
@@ -444,7 +444,7 @@ func (db *DB) GetProductivityStats(date string) (*ProductivityStats, error) {
 	// Top category
 	catRow := db.conn.QueryRow(`
 		SELECT ai_category FROM logs
-		WHERE date(timestamp) = ? AND ai_category != ''
+		WHERE date(timestamp) = ? AND ai_category != '' AND ai_category != 'Unknown'
 		GROUP BY ai_category ORDER BY COUNT(*) DESC LIMIT 1`, date)
 	_ = catRow.Scan(&stats.TopCategory)
 

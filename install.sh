@@ -97,17 +97,27 @@ pkill -9 -x "${APP_NAME_LOWER}-server" 2>/dev/null || true
 BINARY_SOURCE=""
 CUSTOM_BUILD_PATH="${LOCAL_BUILD_PATH:-${1:-}}"
 
+DEFAULT_REPO_URL="https://github.com/sandeshPatel06/mini-tracker"
+DEFAULT_DOWNLOAD_URL="${DEFAULT_REPO_URL}/releases/download/latest/mini-tracker-server"
+EFFECTIVE_DOWNLOAD_URL="${DOWNLOAD_URL:-${DEFAULT_DOWNLOAD_URL}}"
+
 if [ -n "${CUSTOM_BUILD_PATH}" ] && [ -f "${CUSTOM_BUILD_PATH}" ]; then
     BINARY_SOURCE="${CUSTOM_BUILD_PATH}"
     log "✅ Using specified custom local build binary: ${BINARY_SOURCE}"
-elif [ -n "${DOWNLOAD_URL:-}" ]; then
-    log "📥 Downloading binary from release URL: ${DOWNLOAD_URL}..."
+elif [ -n "${EFFECTIVE_DOWNLOAD_URL}" ]; then
+    log "📥 Downloading binary from release URL: ${EFFECTIVE_DOWNLOAD_URL}..."
     mkdir -p bin
-    curl -sSL "${DOWNLOAD_URL}" -o bin/mini-tracker-server
-    chmod +x bin/mini-tracker-server
-    BINARY_SOURCE="bin/mini-tracker-server"
-    log "✅ Downloaded release binary to: ${BINARY_SOURCE}"
-elif [ -f "build/bin/mini-tracker" ]; then
+    if curl -sSL --fail "${EFFECTIVE_DOWNLOAD_URL}" -o bin/mini-tracker-server 2>/dev/null; then
+        chmod +x bin/mini-tracker-server
+        BINARY_SOURCE="bin/mini-tracker-server"
+        log "✅ Downloaded release binary to: ${BINARY_SOURCE}"
+    else
+        log "⚠️ Could not download release binary from ${EFFECTIVE_DOWNLOAD_URL}. Falling back to local search/build..."
+    fi
+fi
+
+if [ -z "${BINARY_SOURCE}" ]; then
+    if [ -f "build/bin/mini-tracker" ]; then
     BINARY_SOURCE="build/bin/mini-tracker"
     log "✅ Found build binary: ${BINARY_SOURCE}"
 elif [ -f "build/bin/mini-tracker-tmp" ]; then
@@ -135,6 +145,7 @@ else
     go build -o bin/mini-tracker-server ./cmd/server || { log "❌ Failed to build Go binary"; exit 1; }
     BINARY_SOURCE="bin/mini-tracker-server"
     log "✅ Build complete: ${BINARY_SOURCE}"
+fi
 fi
 
 # ==============================================================================

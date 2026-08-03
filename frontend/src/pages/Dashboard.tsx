@@ -25,16 +25,6 @@ interface Props {
   onRefresh?: () => void;
 }
 
-function EntropyBar({ value }: { value: number }) {
-  return (
-    <div className="entropy-bar-wrapper">
-      <div className="entropy-bar-track">
-        <div className="entropy-bar-fill" style={{ width: `${Math.min(value, 100)}%` }} />
-      </div>
-      <span className="entropy-bar-label">{value.toFixed(0)}</span>
-    </div>
-  );
-}
 
 function StatCard({
   label, value, sub, icon, color, delay
@@ -59,8 +49,8 @@ export default function Dashboard({ logs, stats, config, loading, today, onRefre
   const [apiKeyInput, setApiKeyInput] = useState('');
   const [savingKey, setSavingKey] = useState(false);
 
-  const productiveCount = logs.filter(l => l.is_productive).length;
   const pendingCount = logs.filter(l => !l.ai_category || l.ai_category === 'Unknown' || l.ai_reason.includes('No Gemini API key')).length;
+  const productiveCount = logs.filter(l => l.is_productive && l.ai_category && l.ai_category !== 'Unknown' && !l.ai_reason.includes('No Gemini API key')).length;
   const avgEntropy = logs.length
     ? logs.reduce((acc, l) => acc + l.entropy_score, 0) / logs.length
     : 0;
@@ -81,6 +71,7 @@ export default function Dashboard({ logs, stats, config, loading, today, onRefre
     if (!apiKeyInput.trim()) return;
     setSavingKey(true);
     try {
+      localStorage.setItem('mini_gemini_api_key', apiKeyInput.trim());
       if (window.go?.main?.App?.UpdateGeminiAPIKey) {
         await window.go.main.App.UpdateGeminiAPIKey(apiKeyInput.trim());
       } else {
@@ -138,55 +129,7 @@ export default function Dashboard({ logs, stats, config, loading, today, onRefre
         </div>
       </div>
 
-      {/* AI Key Configuration Alert Card if key is missing */}
-      {(!config || !config.ai_configured) && (
-        <div
-          className="card fade-in-up"
-          style={{
-            marginTop: 16,
-            marginBottom: 20,
-            background: 'rgba(245, 158, 11, 0.08)',
-            borderColor: 'rgba(245, 158, 11, 0.3)',
-          }}
-        >
-          <div className="card-body" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap' }}>
-            <div style={{ flex: 1, minWidth: 260 }}>
-              <div style={{ color: 'var(--accent-amber)', fontWeight: 600, fontSize: 14, display: 'flex', alignItems: 'center', gap: 6 }}>
-                🔑 Enable AI Intelligence Engine
-              </div>
-              <div style={{ color: 'var(--text-secondary)', fontSize: 12, marginTop: 4 }}>
-                Enter your AI service key below to enable automated activity insights and productivity classification.
-              </div>
-            </div>
-            <div style={{ display: 'flex', gap: 8, flex: '0 0 auto' }}>
-              <input
-                type="password"
-                placeholder="Paste key here..."
-                value={apiKeyInput}
-                onChange={(e) => setApiKeyInput(e.target.value)}
-                className="date-input"
-                style={{ width: 220, fontFamily: 'monospace' }}
-              />
-              <button
-                onClick={handleSaveKey}
-                disabled={savingKey || !apiKeyInput.trim()}
-                style={{
-                  background: 'var(--accent-amber)',
-                  color: '#000',
-                  fontWeight: 700,
-                  border: 'none',
-                  borderRadius: 'var(--radius-sm)',
-                  padding: '8px 16px',
-                  cursor: 'pointer',
-                  fontSize: 12,
-                }}
-              >
-                {savingKey ? 'Saving…' : 'Save Key'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+
 
       {/* Stats Grid */}
       <div className="stats-grid" style={{ marginTop: 0 }}>
@@ -257,9 +200,6 @@ export default function Dashboard({ logs, stats, config, loading, today, onRefre
                       <CategoryBadge category={log.ai_category} />
                     </div>
                     <div className="timeline-reason">{log.ai_reason || '—'}</div>
-                    <div className="timeline-keys" style={{ marginTop: 6 }}>
-                      <EntropyBar value={log.entropy_score} />
-                    </div>
                   </div>
                   <div>
                     {!log.ai_category || log.ai_reason.includes('API key') || log.ai_reason.includes('No key') ? (

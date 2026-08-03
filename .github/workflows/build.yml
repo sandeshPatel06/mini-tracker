@@ -1,0 +1,51 @@
+name: Build and Release Binary
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build & Publish Release Binary
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+          cache: true
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Build Frontend React App
+        run: |
+          cd frontend
+          npm ci
+          npm run build
+
+      - name: Build Server Binary
+        run: |
+          mkdir -p bin
+          go build -o bin/mini-tracker-server ./cmd/server
+
+      - name: Create Nightly/Latest Tag & Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release delete latest --yes || true
+          git tag -f latest
+          git push origin latest --force
+          gh release create latest bin/mini-tracker-server --title "Latest Build" --notes "Automated build binary for main branch" --prerelease --clobber

@@ -80,6 +80,14 @@ export function ImageModal({ imagePath, onClose }: ModalProps) {
     }
   }, [imagePath]);
 
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [onClose]);
+
   if (!imagePath) return null;
 
   return (
@@ -90,64 +98,72 @@ export function ImageModal({ imagePath, onClose }: ModalProps) {
         left: 0,
         right: 0,
         bottom: 0,
-        background: 'rgba(0, 0, 0, 0.85)',
-        backdropFilter: 'blur(8px)',
-        zIndex: 9999,
+        background: 'rgba(10, 10, 18, 0.88)',
+        backdropFilter: 'blur(12px)',
+        zIndex: 99999,
         display: 'flex',
+        flexDirection: 'column',
         alignItems: 'center',
         justifyContent: 'center',
-        padding: 24,
+        padding: '32px 24px',
+        animation: 'fadeIn 0.2s ease-out'
       }}
       onClick={onClose}
     >
       <div
         style={{
           position: 'relative',
-          maxWidth: '90vw',
-          maxHeight: '90vh',
-          background: 'var(--bg-card)',
-          borderRadius: 12,
-          padding: 8,
-          border: '1px solid var(--border-color)',
-          boxShadow: '0 20px 40px rgba(0,0,0,0.5)',
+          maxWidth: '92vw',
+          maxHeight: '88vh',
+          background: 'var(--bg-surface)',
+          borderRadius: 16,
+          padding: 12,
+          border: '1px solid var(--border-medium)',
+          boxShadow: '0 25px 60px rgba(0, 0, 0, 0.6)',
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center'
         }}
         onClick={(e) => e.stopPropagation()}
       >
-        <button
-          onClick={onClose}
-          style={{
-            position: 'absolute',
-            top: -12,
-            right: -12,
-            background: 'var(--accent-red)',
-            color: '#fff',
-            border: 'none',
-            borderRadius: '50%',
-            width: 28,
-            height: 28,
-            cursor: 'pointer',
-            fontWeight: 'bold',
-            fontSize: 14,
-            boxShadow: '0 2px 8px rgba(0,0,0,0.3)',
-          }}
-        >
-          ✕
-        </button>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%', marginBottom: 10, padding: '4px 8px' }}>
+          <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-secondary)' }}>
+            🖥️ Desktop Screenshot Inspection
+          </span>
+          <button
+            onClick={onClose}
+            className="btn btn-secondary"
+            style={{
+              padding: '4px 12px',
+              fontSize: 12,
+              borderRadius: 20,
+              cursor: 'pointer'
+            }}
+          >
+            ✕ Close (ESC)
+          </button>
+        </div>
+
         {src ? (
           <img
             src={src}
-            alt="Enlarged Screenshot"
+            alt="Desktop Screenshot Inspection"
             style={{
               maxWidth: '100%',
-              maxHeight: '80vh',
-              borderRadius: 8,
+              maxHeight: '78vh',
+              borderRadius: 10,
               display: 'block',
+              objectFit: 'contain',
+              border: '1px solid var(--border-subtle)'
             }}
           />
         ) : (
-          <div style={{ padding: 40, color: 'var(--text-muted)' }}>Loading image…</div>
+          <div style={{ padding: '60px 100px', color: 'var(--text-muted)', fontSize: 14 }}>
+            ⏳ Loading full-resolution screenshot…
+          </div>
         )}
-        <div style={{ padding: '8px 4px 4px 4px', fontSize: 12, color: 'var(--text-muted)', textAlign: 'center' }}>
+
+        <div style={{ marginTop: 10, fontSize: 11, fontFamily: 'monospace', color: 'var(--text-muted)', textAlign: 'center', wordBreak: 'break-all' }}>
           {imagePath}
         </div>
       </div>

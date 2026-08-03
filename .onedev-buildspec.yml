@@ -1,0 +1,28 @@
+version: 52
+jobs:
+  - name: Build & Publish Release Binary
+    steps:
+      - type: CheckoutStep
+        name: checkout
+      - type: RunContainerStep
+        name: build and package binary
+        image: golang:1.22
+        commands: |
+          apt-get update && apt-get install -y curl
+          curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
+          apt-get install -y nodejs
+          cd frontend
+          npm ci
+          npm run build
+          cd ..
+          mkdir -p bin
+          go build -o bin/mini-tracker-server ./cmd/server
+        useContainer: true
+      - type: PublishArtifactStep
+        name: publish artifact
+        artifacts: bin/mini-tracker-server
+    triggers:
+      - branchTriggers:
+          - branches: main
+    retryCondition: never
+    timeout: 3600

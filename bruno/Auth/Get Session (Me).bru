@@ -1,0 +1,15 @@
+meta {
+  name: Get Session (Me)
+  type: http
+  seq: 2
+}
+
+get {
+  url: {{base_url}}/api/auth/me
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token}}
+}

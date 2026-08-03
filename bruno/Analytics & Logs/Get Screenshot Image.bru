@@ -1,0 +1,19 @@
+meta {
+  name: Get Screenshot Image
+  type: http
+  seq: 3
+}
+
+get {
+  url: {{base_url}}/api/image?path=/path/to/screenshot.jpg
+  body: none
+  auth: bearer
+}
+
+params:query {
+  path: /path/to/screenshot.jpg
+}
+
+auth:bearer {
+  token: {{token}}
+}

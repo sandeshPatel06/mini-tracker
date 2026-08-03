@@ -1,0 +1,21 @@
+meta {
+  name: Update AI Configuration
+  type: http
+  seq: 1
+}
+
+post {
+  url: {{base_url}}/api/config
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token}}
+}
+
+body:json {
+  {
+    "gemini_api_key": "YOUR_GEMINI_API_KEY_HERE"
+  }
+}

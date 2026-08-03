@@ -26,6 +26,9 @@ scratch/
 *.png
 *.jpg
 *.jpeg
+!frontend/src/assets/logo.png
+!frontend/src/assets/images/*.png
+!build/appicon.png
 
 # Logs & temporary files
 *.log

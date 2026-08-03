@@ -1,0 +1,19 @@
+meta {
+  name: Get Org Members
+  type: http
+  seq: 2
+}
+
+get {
+  url: {{base_url}}/api/org/members?org_id=1
+  body: none
+  auth: bearer
+}
+
+params:query {
+  org_id: 1
+}
+
+auth:bearer {
+  token: {{token}}
+}

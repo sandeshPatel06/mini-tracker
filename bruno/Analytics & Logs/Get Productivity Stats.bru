@@ -1,0 +1,22 @@
+meta {
+  name: Get Productivity Stats
+  type: http
+  seq: 2
+}
+
+get {
+  url: {{base_url}}/api/stats?date=2026-08-04&user_id=1&start_date=2026-08-01&end_date=2026-08-04
+  body: none
+  auth: bearer
+}
+
+params:query {
+  ~date: 2026-08-04
+  ~user_id: 1
+  ~start_date: 2026-08-01
+  ~end_date: 2026-08-04
+}
+
+auth:bearer {
+  token: {{token}}
+}

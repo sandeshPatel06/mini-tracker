@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { LogEntry, ProductivityStats, AppConfig, Page, User } from './types';
 import { apiFetch, setRuntimeBackendUrl } from './api';
 import Dashboard from './pages/Dashboard';
@@ -8,6 +8,7 @@ import { OrganizationPage } from './pages/Organization';
 import { AcceptInvitePage } from './pages/AcceptInvite';
 import { AuthPage } from './pages/Auth';
 import { SettingsPage } from './pages/Settings';
+// MiniTrackerWizard is now opened via window.open('/wizard') as a real OS window
 import logoAsset from './assets/logo.png';
 import './style.css';
 
@@ -73,6 +74,23 @@ export default function App() {
   // Tracker Work Clock State
   const [isTrackingActive, setIsTrackingActive] = useState<boolean>(true);
   const [elapsedSeconds, setElapsedSeconds] = useState<number>(0);
+
+  // Wizard window reference — keeps track of the separate OS window
+  const wizardWinRef = useRef<Window | null>(null);
+
+  const openWizardWindow = () => {
+    try {
+      const token = localStorage.getItem('mini_jwt_token') || '';
+      const w = window as any;
+      if (w.go && w.go.main && w.go.main.App && w.go.main.App.OpenTrackerWizard) {
+        w.go.main.App.OpenTrackerWizard(token);
+      } else {
+        console.error("Wails Go bindings not found");
+      }
+    } catch (e) {
+      console.error("Failed to open tracker wizard", e);
+    }
+  };
 
   // Verify active user session on startup
   useEffect(() => {
@@ -753,6 +771,54 @@ Respond ONLY with a valid JSON array of objects, one per item, strictly in this 
           )}
         </div>
       </main>
+
+      {/* Upwork-style floating tracker pill — opens as real separate OS window */}
+      <button
+        onClick={openWizardWindow}
+        style={{
+          position: 'fixed',
+          bottom: 20,
+          right: 20,
+          zIndex: 9998,
+          background: '#1c1c1e',
+          color: '#f5f5f7',
+          border: '1px solid rgba(255,255,255,0.12)',
+          borderRadius: 12,
+          padding: '8px 14px',
+          fontWeight: 600,
+          fontSize: 13,
+          cursor: 'pointer',
+          boxShadow: '0 4px 20px rgba(0,0,0,0.5)',
+          display: 'none', // hidden per user request
+          alignItems: 'center',
+          gap: 10,
+          fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+          transition: 'box-shadow 0.2s',
+        }}
+        title="Open Time Tracker (separate window)"
+      >
+        {/* Status dot */}
+        <span style={{
+          width: 8,
+          height: 8,
+          borderRadius: '50%',
+          background: isTrackingActive ? '#30d158' : '#636366',
+          boxShadow: isTrackingActive ? '0 0 6px #30d158' : 'none',
+          flexShrink: 0,
+          transition: 'background 0.3s',
+        }} />
+        {/* Timer */}
+        <span style={{
+          fontFamily: '"SF Mono", "Courier New", monospace',
+          fontVariantNumeric: 'tabular-nums',
+          letterSpacing: '0.02em',
+          color: isTrackingActive ? '#f5f5f7' : '#8e8e93',
+        }}>
+          {formatTimer(elapsedSeconds)}
+        </span>
+        {/* Open icon */}
+        <span style={{ color: '#636366', fontSize: 11 }}>↗</span>
+      </button>
     </div>
   );
 }

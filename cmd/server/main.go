@@ -158,6 +158,12 @@ func main() {
 
 	mux := http.NewServeMux()
 
+	// GET /wizard — Self-contained floating tracker widget (opens as standalone OS window via wizard-launch.sh)
+	mux.HandleFunc("/wizard", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		fmt.Fprint(w, wizardHTML)
+	})
+
 	// GET & POST /api/tracker/status & /api/tracker/toggle
 	mux.HandleFunc("/api/tracker/status", func(w http.ResponseWriter, r *http.Request) {
 		trackerMutex.Lock()
@@ -1163,40 +1169,71 @@ func processPendingLogs(database *db.DB, gemini *ai.GeminiClient) int {
 		return 0
 	}
 
-	log.Printf("[server] processing %d pending unanalyzed logs with Gemini...", len(logs))
+	log.Printf("[server] processing %d pending unanalyzed logs with Gemini (using multi-screenshot batching)...", len(logs))
 	processed := 0
-	for _, entry := range logs {
-		var b64 string
-		if entry.ImagePath != "" {
-			data, err := os.ReadFile(entry.ImagePath)
-			if err == nil {
-				b64 = encodingBase64(data)
+
+	batchSize := 4
+	for i := 0; i < len(logs); i += batchSize {
+		end := i + batchSize
+		if end > len(logs) {
+			end = len(logs)
+		}
+		chunk := logs[i:end]
+
+		var batchItems []ai.BatchAnalysisItem
+		for _, entry := range chunk {
+			var b64 string
+			if entry.ImagePath != "" {
+				if data, err := os.ReadFile(entry.ImagePath); err == nil {
+					b64 = encodingBase64(data)
+				}
 			}
+			batchItems = append(batchItems, ai.BatchAnalysisItem{
+				LogID:        entry.ID,
+				Base64Image:  b64,
+				EntropyScore: entry.EntropyScore,
+				ImagePath:    entry.ImagePath,
+			})
 		}
 
-		ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
-		res, err := gemini.Analyze(ctx, b64, entry.EntropyScore)
+		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		results, err := gemini.AnalyzeBatch(ctx, batchItems)
 		cancel()
 
 		if err != nil {
-			log.Printf("[server] re-analyze log #%d error: %v", entry.ID, err)
-			if strings.Contains(err.Error(), "429") || strings.Contains(err.Error(), "RESOURCE_EXHAUSTED") {
-				time.Sleep(4 * time.Second)
+			log.Printf("[server] batch AI analysis error for %d logs: %v (falling back to single item analysis)", len(batchItems), err)
+			for _, entry := range chunk {
+				var b64 string
+				if entry.ImagePath != "" {
+					if data, err := os.ReadFile(entry.ImagePath); err == nil {
+						b64 = encodingBase64(data)
+					}
+				}
+				sCtx, sCancel := context.WithTimeout(context.Background(), 45*time.Second)
+				res, sErr := gemini.Analyze(sCtx, b64, entry.EntropyScore)
+				sCancel()
+				if sErr == nil {
+					_ = database.UpdateAIResult(entry.ID, res.Category, res.Productive, res.Confidence, res.Reason)
+					processed++
+					if entry.ImagePath != "" {
+						_ = os.Remove(entry.ImagePath)
+					}
+				}
 			}
 			continue
 		}
 
-		if err := database.UpdateAIResult(entry.ID, res.Category, res.Productive, res.Confidence, res.Reason); err == nil {
-			processed++
-			// Delete screenshot file after sending to backend/AI
-			if entry.ImagePath != "" {
-				if err := os.Remove(entry.ImagePath); err == nil {
-					log.Printf("[server] deleted processed screenshot: %s", entry.ImagePath)
+		for _, res := range results {
+			if err := database.UpdateAIResult(res.LogID, res.Category, res.Productive, res.Confidence, res.Reason); err == nil {
+				processed++
+				for _, item := range batchItems {
+					if item.LogID == res.LogID && item.ImagePath != "" {
+						_ = os.Remove(item.ImagePath)
+					}
 				}
 			}
 		}
 
-		// Throttle slightly between items to respect API rate limits
 		time.Sleep(1 * time.Second)
 	}
 
@@ -1364,3 +1401,422 @@ func clearRecentOAuth() {
 	recentOAuthUser = nil
 	recentOAuthOrg = nil
 }
+
+// wizardHTML — floating tracker window served at GET /wizard.
+// Opened via window.open() from the main app — uses the same dark indigo/teal
+// color palette as the desktop app (style.css tokens).
+const wizardHTML = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>get-Hike · Time Tracker</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg-base:       #080911;
+    --bg-surface:    #0d0e1a;
+    --bg-card:       #121424;
+    --bg-elevated:   #1d203b;
+    --border-subtle: rgba(99,102,241,0.14);
+    --border-medium: rgba(99,102,241,0.28);
+    --border-glow:   rgba(99,102,241,0.45);
+    --accent:        #6366f1;
+    --accent2:       #4f46e5;
+    --teal:          #2dd4bf;
+    --green:         #10b981;
+    --red:           #ef4444;
+    --amber:         #f59e0b;
+    --text-primary:  #f1f5f9;
+    --text-secondary:#94a3b8;
+    --text-muted:    #64748b;
+    --mono:          'JetBrains Mono', monospace;
+  }
+
+  html, body {
+    width: 300px;
+    background: var(--bg-base);
+    font-family: 'Inter', system-ui, sans-serif;
+    font-size: 13px;
+    color: var(--text-primary);
+    overflow: hidden;
+    user-select: none;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* ── Window chrome ─────────────────────────── */
+  #titlebar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 12px;
+    height: 38px;
+    background: var(--bg-surface);
+    border-bottom: 1px solid var(--border-subtle);
+    cursor: grab;
+  }
+  #titlebar:active { cursor: grabbing; }
+  .tb-dots { display: flex; gap: 6px; }
+  .tb-dot {
+    width: 11px; height: 11px; border-radius: 50%; cursor: pointer;
+    transition: filter 0.15s;
+  }
+  .tb-dot:hover { filter: brightness(1.2); }
+  .tb-dot.close  { background: #ff5f57; }
+  .tb-dot.min    { background: #febc2e; }
+  .tb-dot.zoom   { background: #28c840; }
+  .tb-brand {
+    font-size: 11px; font-weight: 600; color: var(--text-muted);
+    letter-spacing: 0.04em; text-transform: uppercase;
+  }
+  .tb-spacer { width: 52px; }
+
+  /* ── Project strip ─────────────────────────── */
+  #project-strip {
+    padding: 10px 14px;
+    background: linear-gradient(135deg, rgba(99,102,241,0.08) 0%, rgba(45,212,191,0.06) 100%);
+    border-bottom: 1px solid var(--border-subtle);
+  }
+  #project-name {
+    font-size: 13px; font-weight: 700;
+    background: linear-gradient(90deg, var(--accent), var(--teal));
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+    background-clip: text;
+    margin-bottom: 2px;
+  }
+  #org-name { font-size: 11px; color: var(--text-muted); }
+
+  /* ── Session timer ─────────────────────────── */
+  #session {
+    padding: 14px 14px 12px;
+    border-bottom: 1px solid var(--border-subtle);
+    background: var(--bg-surface);
+  }
+  #session-top {
+    display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;
+  }
+  #session-lbl { font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.07em; }
+  #online-pill { font-size: 10px; font-weight: 600; display: flex; align-items: center; gap: 4px; }
+  #online-dot  { width: 6px; height: 6px; border-radius: 50%; transition: background 0.3s, box-shadow 0.3s; }
+  #clock {
+    font-family: var(--mono);
+    font-size: 32px; font-weight: 700; color: var(--text-primary);
+    letter-spacing: -0.5px; line-height: 1; margin-bottom: 12px;
+    transition: color 0.3s;
+  }
+  #clock.running { color: var(--teal); }
+
+  /* ON/OFF toggle row */
+  #toggle-row { display: flex; align-items: center; justify-content: space-between; }
+  #toggle-hint { font-size: 11px; color: var(--text-muted); }
+  /* pill switch */
+  .pill-switch { position: relative; width: 46px; height: 24px; cursor: pointer; }
+  .pill-switch input { opacity: 0; width: 0; height: 0; }
+  .pill-track {
+    position: absolute; inset: 0; border-radius: 12px;
+    background: var(--bg-elevated); border: 1px solid var(--border-medium);
+    transition: background 0.2s, border-color 0.2s;
+  }
+  .pill-thumb {
+    position: absolute; top: 3px; left: 3px;
+    width: 18px; height: 18px; border-radius: 50%;
+    background: var(--text-muted);
+    transition: transform 0.2s, background 0.2s;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.4);
+  }
+
+  /* ── Stats grid ────────────────────────────── */
+  #stats {
+    display: grid; grid-template-columns: 1fr 1fr;
+    gap: 1px; background: var(--border-subtle);
+    border-bottom: 1px solid var(--border-subtle);
+  }
+  .stat {
+    background: var(--bg-card); padding: 10px 13px;
+  }
+  .stat-lbl {
+    font-size: 9px; text-transform: uppercase; letter-spacing: 0.07em;
+    color: var(--text-muted); margin-bottom: 3px; font-weight: 600;
+  }
+  .stat-val { font-size: 15px; font-weight: 700; color: var(--text-primary); }
+
+  /* ── Memo ──────────────────────────────────── */
+  #memo-wrap {
+    padding: 10px 13px; border-bottom: 1px solid var(--border-subtle);
+    background: var(--bg-surface);
+  }
+  #memo {
+    width: 100%; background: var(--bg-card); border: 1px solid var(--border-subtle);
+    border-radius: 8px; color: var(--text-primary); font-size: 12px;
+    font-family: 'Inter', sans-serif; padding: 7px 10px; resize: none; outline: none;
+    transition: border-color 0.15s; box-sizing: border-box;
+  }
+  #memo:focus { border-color: var(--border-glow); }
+  #memo::placeholder { color: var(--text-muted); }
+
+  /* ── Activity bars ─────────────────────────── */
+  #activity { padding: 10px 13px 12px; background: var(--bg-surface); }
+  #act-hdr  { display: flex; justify-content: space-between; margin-bottom: 7px; }
+  #act-lbl  { font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.06em; }
+  #act-pct  { font-size: 11px; font-weight: 700; }
+  #bars     { display: flex; gap: 3px; height: 20px; align-items: flex-end; }
+  .bar      { flex: 1; border-radius: 2px 2px 0 0; transition: background 0.4s; }
+
+  /* progress line */
+  #prog-wrap {
+    height: 3px; background: var(--border-subtle);
+    margin: 0 13px; border-radius: 99px; overflow: hidden;
+  }
+  #prog-bar {
+    height: 100%; border-radius: 99px;
+    background: linear-gradient(90deg, var(--accent), var(--teal));
+    transition: width 0.8s ease;
+  }
+
+  /* ── Footer ────────────────────────────────── */
+  #footer {
+    padding: 8px 13px;
+    display: flex; align-items: center; justify-content: space-between;
+    background: var(--bg-base);
+    border-top: 1px solid var(--border-subtle);
+  }
+  #footer-brand {
+    font-size: 11px; font-weight: 600;
+    background: linear-gradient(90deg, var(--accent), var(--teal));
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+  .foot-btn {
+    background: none; border: none; color: var(--text-muted); cursor: pointer;
+    font-size: 14px; padding: 2px 4px; transition: color 0.15s;
+  }
+  .foot-btn:hover { color: var(--text-primary); }
+
+  @keyframes slideIn {
+    from { opacity:0; transform: scale(0.97) translateY(6px); }
+    to   { opacity:1; transform: scale(1)    translateY(0); }
+  }
+  body { animation: slideIn 0.22s cubic-bezier(0.16,1,0.3,1); }
+</style>
+</head>
+<body>
+
+<!-- Title bar (drag handle) -->
+<div id="titlebar">
+  <div class="tb-dots">
+    <div class="tb-dot close"  id="btn-close" title="Close"></div>
+    <div class="tb-dot min"    title="Minimize (click window controls)"></div>
+    <div class="tb-dot zoom"   title="Maximize"></div>
+  </div>
+  <span class="tb-brand">⏱ Time Tracker</span>
+  <span class="tb-spacer"></span>
+</div>
+
+<!-- Project -->
+<div id="project-strip">
+  <div id="project-name">get-Hike Productivity</div>
+  <div id="org-name">Your Organization</div>
+</div>
+
+<!-- Session -->
+<div id="session">
+  <div id="session-top">
+    <span id="session-lbl">Current Session</span>
+    <span id="online-pill">
+      <span id="online-dot"></span>
+      <span id="online-text">Offline</span>
+    </span>
+  </div>
+  <div id="clock">00:00:00</div>
+  <div id="toggle-row">
+    <span id="toggle-hint">Tracker paused</span>
+    <label class="pill-switch" title="Toggle tracking">
+      <input type="checkbox" id="toggle-input">
+      <div class="pill-track" id="pill-track"></div>
+      <div class="pill-thumb" id="pill-thumb"></div>
+    </label>
+  </div>
+</div>
+
+<!-- Stats -->
+<div id="stats">
+  <div class="stat">
+    <div class="stat-lbl">Today</div>
+    <div class="stat-val" id="sv-today">—</div>
+  </div>
+  <div class="stat">
+    <div class="stat-lbl">Productive</div>
+    <div class="stat-val" id="sv-prod">—</div>
+  </div>
+  <div class="stat">
+    <div class="stat-lbl">Score</div>
+    <div class="stat-val" id="sv-score">—</div>
+  </div>
+  <div class="stat">
+    <div class="stat-lbl">Unproductive</div>
+    <div class="stat-val" id="sv-unprod">—</div>
+  </div>
+</div>
+
+<!-- Memo -->
+<div id="memo-wrap">
+  <textarea id="memo" rows="2" placeholder="What are you working on?"></textarea>
+</div>
+
+<!-- Activity -->
+<div id="activity">
+  <div id="act-hdr">
+    <span id="act-lbl">Activity Level</span>
+    <span id="act-pct" style="color:var(--text-muted)">—</span>
+  </div>
+  <div id="bars"></div>
+</div>
+
+<!-- Progress line -->
+<div id="prog-wrap"><div id="prog-bar" style="width:0%"></div></div>
+
+<!-- Footer -->
+<div id="footer">
+  <span id="footer-brand">✦ get-Hike</span>
+  <div style="display:flex;gap:4px">
+    <button class="foot-btn" id="btn-refresh" title="Refresh">↻</button>
+    <button class="foot-btn" id="btn-close2"  title="Close">✕</button>
+  </div>
+</div>
+
+<script>
+(function () {
+  let isActive = false, elapsed = 0;
+
+  const clock     = document.getElementById('clock');
+  const hint      = document.getElementById('toggle-hint');
+  const oDot      = document.getElementById('online-dot');
+  const oText     = document.getElementById('online-text');
+  const actPct    = document.getElementById('act-pct');
+  const barsEl    = document.getElementById('bars');
+  const progBar   = document.getElementById('prog-bar');
+  const pillTrack = document.getElementById('pill-track');
+  const pillThumb = document.getElementById('pill-thumb');
+  const togInput  = document.getElementById('toggle-input');
+
+  /* helpers */
+  const pad    = n => String(n).padStart(2,'0');
+  const fmtClk = s => pad(Math.floor(s/3600))+':'+pad(Math.floor((s%3600)/60))+':'+pad(s%60);
+  const fmtMin = m => { const h=Math.floor(m/60),mm=m%60; return h?h+'h '+(mm?mm+'m':''):mm+'m'; };
+  const colFor = s => s>=70?'#2dd4bf':s>=40?'#f59e0b':'#ef4444';
+
+  function applyStatus(active) {
+    isActive = active;
+    clock.className = active ? 'running' : '';
+    oDot.style.background  = active ? '#10b981' : '#64748b';
+    oDot.style.boxShadow   = active ? '0 0 7px #10b981' : 'none';
+    oText.textContent      = active ? 'Online' : 'Offline';
+    hint.textContent       = active ? 'Tracking active' : 'Tracker paused';
+    togInput.checked       = active;
+    pillTrack.style.background   = active ? 'rgba(99,102,241,0.25)' : '';
+    pillTrack.style.borderColor  = active ? '#6366f1' : '';
+    pillThumb.style.background   = active ? '#6366f1' : '';
+    pillThumb.style.transform    = active ? 'translateX(22px)' : 'translateX(0)';
+  }
+
+  function renderBars(score) {
+    const SEGS=10, fill=Math.round(score/100*SEGS), col=colFor(score);
+    barsEl.innerHTML='';
+    for(let i=0;i<SEGS;i++){
+      const d=document.createElement('div'); d.className='bar';
+      const h=i<fill?(40+Math.round(i/SEGS*60)):20;
+      d.style.height=h+'%';
+      d.style.background=i<fill?col:'rgba(99,102,241,0.12)';
+      barsEl.appendChild(d);
+    }
+    actPct.textContent=score+'%'; actPct.style.color=col;
+    progBar.style.width=Math.min(score,100)+'%';
+    document.getElementById('sv-score').style.color=col;
+    document.getElementById('sv-score').textContent=score+'%';
+    document.getElementById('sv-prod').style.color=col;
+  }
+
+  const authHdr=()=>{const t=localStorage.getItem('mini_jwt_token');return t?{'Authorization':'Bearer '+t}:{};};
+
+  async function fetchStatus(){
+    try{
+      const r=await fetch('/api/tracker/status',{headers:authHdr()});
+      if(!r.ok) throw 0;
+      const d=await r.json();
+      elapsed=d.elapsed_seconds||0;
+      clock.textContent=fmtClk(elapsed);
+      applyStatus(!!d.active);
+    }catch{
+      oText.textContent='Offline'; oDot.style.background='#ef4444';
+    }
+  }
+
+  async function fetchStats(){
+    try{
+      const today=new Date().toISOString().slice(0,10);
+      const r=await fetch('/api/stats?date='+today,{headers:authHdr()});
+      if(!r.ok) return;
+      const d=await r.json();
+      const prod=d.productive_minutes||0, unprod=d.unproductive_minutes||0;
+      const total=d.total_minutes||(prod+unprod);
+      const score=total>0?Math.round(prod/total*100):0;
+      document.getElementById('sv-today').textContent=fmtMin(total);
+      document.getElementById('sv-prod').textContent=fmtMin(prod);
+      document.getElementById('sv-unprod').textContent=unprod>0?fmtMin(unprod):'—';
+      renderBars(score);
+    }catch{}
+  }
+
+  async function doToggle(){
+    try{
+      const r=await fetch('/api/tracker/toggle',{method:'POST',headers:authHdr()});
+      if(!r.ok) return;
+      const d=await r.json();
+      elapsed=d.elapsed_seconds||elapsed;
+      applyStatus(!!d.active);
+    }catch{}
+  }
+
+  /* init */
+  const urlParams = new URLSearchParams(window.location.search);
+  const urlToken = urlParams.get('token');
+  if (urlToken) {
+    localStorage.setItem('mini_jwt_token', urlToken);
+    window.history.replaceState({}, document.title, "/wizard");
+  }
+  
+  renderBars(0);
+  fetchStatus(); fetchStats();
+  setInterval(()=>{if(isActive){elapsed++;clock.textContent=fmtClk(elapsed);}},1000);
+  setInterval(fetchStatus,10000);
+  setInterval(fetchStats,60000);
+
+  /* events */
+  togInput.addEventListener('change', doToggle);
+  document.getElementById('btn-close').addEventListener('click',  ()=>window.close());
+  document.getElementById('btn-close2').addEventListener('click', ()=>window.close());
+  document.getElementById('btn-refresh').addEventListener('click', ()=>{
+    fetchStatus(); fetchStats();
+    const b=document.getElementById('btn-refresh');
+    b.textContent='✓'; setTimeout(()=>b.textContent='↻',800);
+  });
+
+  /* drag (works in window.open popup) */
+  let drag=false,ox=0,oy=0;
+  document.getElementById('titlebar').addEventListener('mousedown',e=>{
+    if(e.target.closest('.tb-dot')) return;
+    drag=true; ox=e.screenX; oy=e.screenY;
+  });
+  document.addEventListener('mousemove',e=>{
+    if(!drag) return;
+    try{window.moveTo(window.screenX+e.screenX-ox,window.screenY+e.screenY-oy);}catch{}
+    ox=e.screenX; oy=e.screenY;
+  });
+  document.addEventListener('mouseup',()=>drag=false);
+})();
+</script>
+</body>
+</html>`

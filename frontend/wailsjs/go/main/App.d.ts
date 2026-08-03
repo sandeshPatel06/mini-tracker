@@ -14,6 +14,8 @@ export function GetStats(arg1:string):Promise<db.ProductivityStats>;
 
 export function GetTodayLogs():Promise<Array<db.LogEntry>>;
 
+export function OpenTrackerWizard(arg1:string):Promise<void>;
+
 export function ProcessPendingLogs():Promise<number>;
 
 export function RecordInputActivity(arg1:number,arg2:number):Promise<void>;

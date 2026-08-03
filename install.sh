@@ -6,8 +6,8 @@ set -u
 # ==============================================================================
 # 1. CONFIGURATION & LOGGING
 # ==============================================================================
-APP_NAME="Mini Tracker"
-APP_NAME_LOWER="mini-tracker"
+APP_NAME="get-Hike"
+APP_NAME_LOWER="get-hike"
 
 # Detect execution context (sudo vs non-sudo)
 if [ "${EUID:-$(id -u)}" -eq 0 ]; then
@@ -216,7 +216,9 @@ fi
 EOF
 chmod 755 "${GUI_LAUNCHER}"
 
-# Symlink GUI launcher to both 'mini-tracker' and 'mini-tracker-gui'
+# Symlink GUI launcher to 'get-hike', 'get-hike-gui', 'mini-tracker' and 'mini-tracker-gui'
+ln -sf "${GUI_LAUNCHER}" "${BIN_DIR}/get-hike"
+ln -sf "${GUI_LAUNCHER}" "${BIN_DIR}/get-hike-gui"
 ln -sf "${GUI_LAUNCHER}" "${BIN_DIR}/mini-tracker"
 ln -sf "${GUI_LAUNCHER}" "${BIN_DIR}/mini-tracker-gui"
 log "✅ Installed launcher scripts."
@@ -235,7 +237,7 @@ if [ "${IS_SUDO}" = false ]; then
     if [ -n "${SHELL_RC}" ]; then
         if ! grep -q 'PATH.*\.local/bin' "${SHELL_RC}"; then
             echo '' >> "${SHELL_RC}"
-            echo '# Mini Tracker PATH' >> "${SHELL_RC}"
+            echo '# get-Hike PATH' >> "${SHELL_RC}"
             echo 'export PATH="$HOME/.local/bin:$PATH"' >> "${SHELL_RC}"
             log "✅ Added ${BIN_DIR} to PATH in ${SHELL_RC}"
         fi
@@ -252,7 +254,7 @@ mkdir -p "${DATA_DIR}"
 ENV_FILE="${CONFIG_DIR}/.env"
 if [ ! -f "${ENV_FILE}" ]; then
     cat << EOF > "${ENV_FILE}"
-# Mini Tracker Environment Configuration
+# get-Hike Environment Configuration
 GEMINI_API_KEY=${GEMINI_API_KEY:-}
 SCREENSHOT_INTERVAL_SECONDS=30
 AI_ANALYSIS_INTERVAL=3h
@@ -279,14 +281,16 @@ elif [ -f "frontend/src/assets/images/logo-universal.png" ]; then
     ICON_SOURCE="frontend/src/assets/images/logo-universal.png"
 fi
 
-INSTALLED_ICON_PATH="${INSTALL_DIR}/mini-tracker.png"
+INSTALLED_ICON_PATH="${INSTALL_DIR}/get-hike.png"
 if [ -n "${ICON_SOURCE}" ]; then
     cp -f "${ICON_SOURCE}" "${INSTALLED_ICON_PATH}"
+    cp -f "${ICON_SOURCE}" "${ICON_DIR}/get-hike.png"
     cp -f "${ICON_SOURCE}" "${ICON_DIR}/mini-tracker.png"
     cp -f "${ICON_SOURCE}" "${ICON_DIR}/mini-tracker-server.png"
     cp -f "${ICON_SOURCE}" "${ICON_DIR}/mini-tracker-tmp.png"
     cp -f "${ICON_SOURCE}" "${ICON_DIR}/localhost.png"
 
+    cp -f "${ICON_SOURCE}" "${PIXMAP_DIR}/get-hike.png"
     cp -f "${ICON_SOURCE}" "${PIXMAP_DIR}/mini-tracker.png"
     cp -f "${ICON_SOURCE}" "${PIXMAP_DIR}/mini-tracker-server.png"
     cp -f "${ICON_SOURCE}" "${PIXMAP_DIR}/mini-tracker-tmp.png"

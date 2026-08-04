@@ -119,7 +119,7 @@ if [ -n "${CUSTOM_BUILD_PATH}" ] && [ -f "${CUSTOM_BUILD_PATH}" ]; then
 elif [ -n "${EFFECTIVE_DOWNLOAD_URL}" ]; then
     log "📥 Downloading binary from release URL: ${EFFECTIVE_DOWNLOAD_URL}..."
     mkdir -p bin
-    if curl -sSL --fail "${EFFECTIVE_DOWNLOAD_URL}" -o bin/mini-tracker-server 2>/dev/null; then
+    if curl -L --fail --progress-bar "${EFFECTIVE_DOWNLOAD_URL}" -o bin/mini-tracker-server; then
         chmod +x bin/mini-tracker-server
         BINARY_SOURCE="bin/mini-tracker-server"
         log "✅ Downloaded release binary to: ${BINARY_SOURCE}"

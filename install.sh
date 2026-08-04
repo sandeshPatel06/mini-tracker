@@ -98,7 +98,19 @@ BINARY_SOURCE=""
 CUSTOM_BUILD_PATH="${LOCAL_BUILD_PATH:-${1:-}}"
 
 DEFAULT_REPO_URL="https://github.com/sandeshPatel06/mini-tracker"
-DEFAULT_DOWNLOAD_URL="${DEFAULT_REPO_URL}/releases/download/latest/mini-tracker-server"
+
+LATEST_TAG=""
+if command -v gh >/dev/null 2>&1; then
+    LATEST_TAG=$(gh release view --json tagName -q .tagName 2>/dev/null || echo "")
+fi
+
+if [ -n "${LATEST_TAG}" ]; then
+    DEFAULT_DOWNLOAD_URL="${DEFAULT_REPO_URL}/releases/download/${LATEST_TAG}/mini-tracker-server"
+else
+    # Fallback to GitHub's latest release redirect
+    DEFAULT_DOWNLOAD_URL="${DEFAULT_REPO_URL}/releases/latest/download/mini-tracker-server"
+fi
+
 EFFECTIVE_DOWNLOAD_URL="${DOWNLOAD_URL:-${DEFAULT_DOWNLOAD_URL}}"
 
 if [ -n "${CUSTOM_BUILD_PATH}" ] && [ -f "${CUSTOM_BUILD_PATH}" ]; then

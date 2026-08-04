@@ -41,11 +41,11 @@ jobs:
           mkdir -p bin
           go build -o bin/mini-tracker-server ./cmd/server
 
-      - name: Create Nightly/Latest Tag & Release
+      - name: Create Date Tag & Release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release delete latest --yes || true
-          git tag -f latest
-          git push origin latest --force
-          gh release create latest bin/mini-tracker-server --title "Latest Build" --notes "Automated build binary for main branch" --prerelease
+          TAG_NAME="build-$(date +'%Y%m%d-%H%M%S')"
+          git tag $TAG_NAME
+          git push origin $TAG_NAME
+          gh release create $TAG_NAME bin/mini-tracker-server --title "Release $TAG_NAME" --notes "Automated build binary for main branch"

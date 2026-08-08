@@ -4,9 +4,11 @@ set -e
 set -u
 set -o pipefail
 
-# Ensure script always runs from the repository root
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-cd "$SCRIPT_DIR" || { echo "❌ Failed to change to script directory: ${SCRIPT_DIR}"; exit 1; }
+# Ensure script runs safely from repository root or stdin pipe
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd || echo ".")"
+if [ -d "$SCRIPT_DIR" ] && [ "$SCRIPT_DIR" != "." ]; then
+    cd "$SCRIPT_DIR" 2>/dev/null || true
+fi
 
 # ==============================================================================
 # 1. CONFIGURATION & LOGGING

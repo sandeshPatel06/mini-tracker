@@ -597,7 +597,8 @@ func main() {
 			res, err := tempGemini.Analyze(ctx, b64Data, score)
 			if err == nil {
 				_ = database.UpdateLogAnalysis(id, res.Category, res.AppName, res.AppCategory, res.WindowTitle, 0, "", res.Productive, res.ProductiveScore, res.Confidence, res.Reason)
-				log.Printf("[server] processed telemetry #%d via AI key source [%s] — category=%s productive=%v", id, keySource, res.Category, res.Productive)
+				_ = database.RecordAPIUsage(oID, uID, keySource, res.Usage.PromptTokenCount, res.Usage.CandidatesTokenCount, res.Usage.TotalTokenCount, effModel)
+				log.Printf("[server] processed telemetry #%d via AI key source [%s] — category=%s productive=%v tokens=%d", id, keySource, res.Category, res.Productive, res.Usage.TotalTokenCount)
 			} else {
 				log.Printf("[server] telemetry AI error for log #%d (source=%s): %v", id, keySource, err)
 			}
@@ -635,6 +636,71 @@ func main() {
 		}
 
 		jsonResp(w, logs)
+	})
+
+	// GET /api/org/usage — Admin-Only endpoint to track organization key usage & member token stats
+	mux.HandleFunc("/api/org/usage", func(w http.ResponseWriter, r *http.Request) {
+		user := getSessionUser(r, database)
+		if user == nil {
+			// Guest / Standalone fallback: return local guest database usage summary
+			summary, err := database.GetUserUsageSummary(0)
+			if err != nil {
+				jsonError(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			jsonResp(w, summary)
+			return
+		}
+
+		if user.Role != "owner" && user.Role != "admin" {
+			jsonError(w, "Forbidden: Only Organization Admins or Owners can view organization-wide usage metrics", http.StatusForbidden)
+			return
+		}
+
+		summary, err := database.GetOrgUsageSummary(user.OrgID)
+		if err != nil {
+			jsonError(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		jsonResp(w, summary)
+	})
+
+	// POST /api/org/usage/reset — Reset usage logs when Google quota resets or admin manually resets
+	mux.HandleFunc("/api/org/usage/reset", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			jsonError(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		user := getSessionUser(r, database)
+		var orgID, userID int64
+		if user != nil {
+			if user.Role != "owner" && user.Role != "admin" {
+				jsonError(w, "Forbidden: Only Organization Admins can reset org usage", http.StatusForbidden)
+				return
+			}
+			orgID = user.OrgID
+		}
+		if err := database.ResetAPIUsage(orgID, userID); err != nil {
+			jsonError(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		log.Printf("[server] API usage counter reset for org #%d", orgID)
+		jsonResp(w, map[string]interface{}{"success": true})
+	})
+
+	// GET /api/user/usage — Individual user token usage endpoint
+	mux.HandleFunc("/api/user/usage", func(w http.ResponseWriter, r *http.Request) {
+		user := getSessionUser(r, database)
+		var targetUserID int64
+		if user != nil {
+			targetUserID = user.ID
+		}
+		summary, err := database.GetUserUsageSummary(targetUserID)
+		if err != nil {
+			jsonError(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		jsonResp(w, summary)
 	})
 
 	// POST /api/org/settings — Save Organization Admin Gemini API key in database

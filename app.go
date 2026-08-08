@@ -53,6 +53,9 @@ func (a *App) startup(ctx context.Context) {
 	}
 	a.cfg = cfg
 
+	// Initialize Desktop File Logger with automatic 7-day log retention
+	_ = logger.InitDesktopLogger(cfg.DataDir)
+
 	// Open database
 	dbConn, err := db.Open(cfg.DataDir)
 	if err != nil {
@@ -205,8 +208,9 @@ func (a *App) collect() {
 				if err := a.database.UpdateAIResult(logID, result.Category, result.Productive, result.Confidence, result.Reason); err != nil {
 					log.Printf("[app] update local AI result error: %v", err)
 				}
-				log.Printf("[app] guest logged #%d — category=%s productive=%v",
-					logID, result.Category, result.Productive)
+				_ = a.database.RecordAPIUsage(0, 0, "guest", result.Usage.PromptTokenCount, result.Usage.CandidatesTokenCount, result.Usage.TotalTokenCount, a.gemini.GetModel())
+				log.Printf("[app] guest logged #%d — category=%s productive=%v tokens=%d",
+					logID, result.Category, result.Productive, result.Usage.TotalTokenCount)
 			}
 		}(id, shot.FilePath, shot.Base64Data, keyStats.EntropyScore)
 	} else {
@@ -424,6 +428,7 @@ func (a *App) ProcessPendingLogs() (int, error) {
 		}
 
 		if err := a.database.UpdateAIResult(entry.ID, res.Category, res.Productive, res.Confidence, res.Reason); err == nil {
+			_ = a.database.RecordAPIUsage(entry.OrgID, entry.UserID, "guest", res.Usage.PromptTokenCount, res.Usage.CandidatesTokenCount, res.Usage.TotalTokenCount, a.gemini.GetModel())
 			processed++
 		}
 	}

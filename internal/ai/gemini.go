@@ -14,16 +14,24 @@ import (
 	"time"
 )
 
+// UsageMetadata represents token usage returned from Gemini REST API.
+type UsageMetadata struct {
+	PromptTokenCount     int `json:"promptTokenCount"`
+	CandidatesTokenCount int `json:"candidatesTokenCount"`
+	TotalTokenCount      int `json:"totalTokenCount"`
+}
+
 // AnalysisResult is the structured response from Gemini.
 type AnalysisResult struct {
-	Category        string  `json:"category"`
-	AppName         string  `json:"app_name"`
-	AppCategory     string  `json:"app_category"`
-	WindowTitle     string  `json:"window_title"`
-	Productive      bool    `json:"productive"`
-	ProductiveScore float64 `json:"productivity_score"`
-	Confidence      float64 `json:"confidence"`
-	Reason          string  `json:"brief_reason"`
+	Category        string        `json:"category"`
+	AppName         string        `json:"app_name"`
+	AppCategory     string        `json:"app_category"`
+	WindowTitle     string        `json:"window_title"`
+	Productive      bool          `json:"productive"`
+	ProductiveScore float64       `json:"productivity_score"`
+	Confidence      float64       `json:"confidence"`
+	Reason          string        `json:"brief_reason"`
+	Usage           UsageMetadata `json:"usage_metadata"`
 }
 
 // GeminiModelInfo represents a model returned by ListModels API.
@@ -315,14 +323,15 @@ type BatchAnalysisItem struct {
 // BatchAnalysisResult represents the result for a single item in a batch.
 type BatchAnalysisResult struct {
 	LogID           int64
-	Category        string  `json:"category"`
-	AppName         string  `json:"app_name"`
-	AppCategory     string  `json:"app_category"`
-	WindowTitle     string  `json:"window_title"`
-	Productive      bool    `json:"productive"`
-	ProductiveScore float64 `json:"productivity_score"`
-	Confidence      float64 `json:"confidence"`
-	Reason          string  `json:"reason"`
+	Category        string        `json:"category"`
+	AppName         string        `json:"app_name"`
+	AppCategory     string        `json:"app_category"`
+	WindowTitle     string        `json:"window_title"`
+	Productive      bool          `json:"productive"`
+	ProductiveScore float64       `json:"productivity_score"`
+	Confidence      float64       `json:"confidence"`
+	Reason          string        `json:"reason"`
+	Usage           UsageMetadata `json:"usage_metadata"`
 }
 
 // AnalyzeBatch sends multiple screenshots in a single Gemini API request.
@@ -419,6 +428,7 @@ Respond ONLY with a valid JSON array of objects, one per item, strictly in this 
 				} `json:"parts"`
 			} `json:"content"`
 		} `json:"candidates"`
+		UsageMetadata UsageMetadata `json:"usageMetadata"`
 	}
 
 	if err := json.NewDecoder(resp.Body).Decode(&geminiResp); err != nil || len(geminiResp.Candidates) == 0 || len(geminiResp.Candidates[0].Content.Parts) == 0 {
@@ -454,6 +464,7 @@ Respond ONLY with a valid JSON array of objects, one per item, strictly in this 
 			ProductiveScore: 95.0,
 			Confidence:      0.9,
 			Reason:          "Analyzed via screenshot batching",
+			Usage:           geminiResp.UsageMetadata,
 		}
 		if i < len(rawResults) {
 			r := rawResults[i]
@@ -553,6 +564,7 @@ func parseGeminiResponse(body io.Reader) (*AnalysisResult, error) {
 				} `json:"parts"`
 			} `json:"content"`
 		} `json:"candidates"`
+		UsageMetadata UsageMetadata `json:"usageMetadata"`
 	}
 	if err := json.NewDecoder(body).Decode(&resp); err != nil {
 		return nil, fmt.Errorf("decode gemini response: %w", err)
@@ -580,6 +592,7 @@ func parseGeminiResponse(body io.Reader) (*AnalysisResult, error) {
 		// 1. Direct unmarshal attempt
 		var direct AnalysisResult
 		if err := json.Unmarshal([]byte(rawText), &direct); err == nil && direct.Category != "" {
+			direct.Usage = resp.UsageMetadata
 			return &direct, nil
 		}
 
@@ -592,6 +605,7 @@ func parseGeminiResponse(body io.Reader) (*AnalysisResult, error) {
 				candidate := sanitizeJSONString(rawText[start : end+1])
 				var res AnalysisResult
 				if err := json.Unmarshal([]byte(candidate), &res); err == nil && res.Category != "" {
+					res.Usage = resp.UsageMetadata
 					return &res, nil
 				}
 			}

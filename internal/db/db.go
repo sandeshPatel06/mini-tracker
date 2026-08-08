@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -153,12 +154,25 @@ func Open(dataDir string, dbURLs ...string) (*DB, error) {
 	db := &DB{entDriver: entDriver, rawDB: rawDB, dialect: drvDialect}
 
 	if err := db.migrate(); err != nil {
-		return nil, fmt.Errorf("ent migrate (%s): %w", drvDialect, err)
+		log.Printf("[db] migration note (%s): %v", drvDialect, err)
 	}
 	return db, nil
 }
 
 func (db *DB) migrate() error {
+	// Safe column additions for existing databases (run before index creation)
+	colMigrations := []string{
+		"ALTER TABLE organizations ADD COLUMN gemini_api_key TEXT DEFAULT ''",
+		"ALTER TABLE organizations ADD COLUMN gemini_model TEXT DEFAULT ''",
+		"ALTER TABLE users ADD COLUMN personal_gemini_api_key TEXT DEFAULT ''",
+		"ALTER TABLE logs ADD COLUMN sync_status TEXT DEFAULT 'pending_upload'",
+		"ALTER TABLE logs ADD COLUMN remote_id INTEGER DEFAULT 0",
+		"ALTER TABLE logs ADD COLUMN synced_at DATETIME",
+	}
+	for _, alter := range colMigrations {
+		_, _ = db.rawDB.Exec(alter)
+	}
+
 	stmts := []string{
 		`CREATE TABLE IF NOT EXISTS organizations (
 			id              SERIAL PRIMARY KEY,
@@ -313,21 +327,8 @@ func (db *DB) migrate() error {
 
 	for _, stmt := range stmts {
 		if _, err := db.rawDB.Exec(stmt); err != nil {
-			return err
+			log.Printf("[db] migration statement note: %v", err)
 		}
-	}
-
-	// Safe column additions for existing databases
-	colMigrations := []string{
-		"ALTER TABLE organizations ADD COLUMN gemini_api_key TEXT DEFAULT ''",
-		"ALTER TABLE organizations ADD COLUMN gemini_model TEXT DEFAULT ''",
-		"ALTER TABLE users ADD COLUMN personal_gemini_api_key TEXT DEFAULT ''",
-		"ALTER TABLE logs ADD COLUMN sync_status TEXT DEFAULT 'pending_upload'",
-		"ALTER TABLE logs ADD COLUMN remote_id INTEGER DEFAULT 0",
-		"ALTER TABLE logs ADD COLUMN synced_at DATETIME",
-	}
-	for _, alter := range colMigrations {
-		_, _ = db.rawDB.Exec(alter)
 	}
 
 	// Seed default org

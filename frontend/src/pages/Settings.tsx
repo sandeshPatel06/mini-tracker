@@ -313,7 +313,7 @@ export function SettingsPage({ theme = 'auto', onThemeChange }: SettingsPageProp
                   ))
                 ) : (
                   <>
-                    <option value="models/gemini-2.5-flash">Gemini 2.5 Flash (Fast & Recommended)</option>
+                    <option value="models/gemma-4-31b-it">Gemini 2.5 Flash (Fast & Recommended)</option>
                     <option value="models/gemini-2.5-pro">Gemini 2.5 Pro (Deep Reasoning)</option>
                     <option value="models/Gemma 4 31B IT">Gemini 2.0 Flash</option>
                     <option value="models/gemma-4-31b-it">Gemma 4 31B IT (Open Weights Multimodal Fallback)</option>
@@ -423,7 +423,7 @@ export function SettingsPage({ theme = 'auto', onThemeChange }: SettingsPageProp
                     className="entropy-bar-fill"
                     style={{
                       width: `${usedPercent}%`,
-                      background: usedPercent > 80 ? 'var(--accent-red)' : 'linear-gradient(90deg, var(--accent-purple), var(--accent-teal))'
+                      background: usedPercent > 80 ? 'var(--accent-red)' : 'var(--accent-purple)'
                     }}
                   />
                 </div>

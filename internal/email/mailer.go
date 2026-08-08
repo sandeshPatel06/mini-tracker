@@ -46,7 +46,7 @@ func (m *Mailer) SendInviteEmail(toEmail, orgName, role, inviteURL string) error
     h1 { font-size: 20px; color: #f8fafc; margin-top: 0; margin-bottom: 12px; }
     p { font-size: 15px; color: #94a3b8; line-height: 1.6; margin-bottom: 24px; }
     .badge { display: inline-block; padding: 4px 10px; background: rgba(56, 189, 248, 0.15); color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.3); border-radius: 9999px; font-size: 13px; font-weight: 600; text-transform: uppercase; }
-    .btn { display: inline-block; background: linear-gradient(135deg, #0284c7 0%%, #2563eb 100%%); color: #ffffff; text-decoration: none; padding: 12px 28px; border-radius: 8px; font-weight: 600; font-size: 15px; text-align: center; }
+    .btn { display: inline-block; background: #2563eb; color: #ffffff; text-decoration: none; padding: 12px 28px; border-radius: 8px; font-weight: 600; font-size: 15px; text-align: center; }
     .footer { margin-top: 32px; font-size: 12px; color: #64748b; border-top: 1px solid #334155; padding-top: 16px; }
   </style>
 </head>

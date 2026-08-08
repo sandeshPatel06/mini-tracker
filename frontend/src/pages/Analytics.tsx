@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { LogEntry, ProductivityStats, User } from '../types';
 import { apiFetch } from '../api';
 import { format } from 'date-fns';
@@ -27,23 +27,27 @@ const COLORS = {
   entropy:      '#6366f1',
   teal:         '#2dd4bf',
   amber:        '#f59e0b',
+  purple:       '#8b5cf6',
 };
 
-// Custom tooltip for recharts
-const CustomTooltip = ({ active, payload, label }: { active?: boolean; payload?: {value:number;name:string}[]; label?: string }) => {
+// Custom Tooltip Component
+const CustomTooltip = ({ active, payload, label }: { active?: boolean; payload?: any[]; label?: string }) => {
   if (!active || !payload?.length) return null;
   return (
     <div style={{
-      background: 'var(--bg-elevated)',
+      background: 'var(--bg-surface)',
       border: '1px solid var(--border-medium)',
-      borderRadius: 'var(--radius-sm)',
-      padding: '8px 12px',
+      borderRadius: 'var(--radius-md)',
+      padding: '10px 14px',
       fontSize: 12,
+      boxShadow: 'var(--shadow-md)',
+      color: 'var(--text-primary)',
     }}>
-      <div style={{ color: 'var(--text-muted)', marginBottom: 4 }}>{label}</div>
+      <div style={{ color: 'var(--text-muted)', marginBottom: 6, fontWeight: 600 }}>{label}</div>
       {payload.map((p, i) => (
-        <div key={i} style={{ color: 'var(--text-primary)' }}>
-          {p.name}: <strong>{typeof p.value === 'number' ? p.value.toFixed(1) : p.value}</strong>
+        <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4 }}>
+          <div style={{ width: 8, height: 8, borderRadius: '50%', background: p.color || p.fill }} />
+          <span>{p.name}: <strong>{typeof p.value === 'number' ? (p.unit ? `${p.value}${p.unit}` : p.value.toFixed(1)) : p.value}</strong></span>
         </div>
       ))}
     </div>
@@ -78,46 +82,85 @@ export default function Analytics({
     }
   }, [currentUser]);
 
-  // Build hourly bar chart data
-  const hourlyData = Array.from({ length: 24 }, (_, h) => {
-    const hourLogs = logs.filter(l => new Date(l.timestamp).getHours() === h);
-    const prod = hourLogs.filter(l => l.is_productive && l.ai_category).length;
-    const unprod = hourLogs.filter(l => !l.is_productive && l.ai_category).length;
-    return { hour: `${String(h).padStart(2, '0')}:00`, Productive: prod, Unproductive: unprod };
-  }).filter(d => d.Productive > 0 || d.Unproductive > 0);
+  // Analyzed logs for focus percentage
+  const analyzedLogs = useMemo(() => {
+    return logs.filter(l => l.ai_category && l.ai_category !== 'Unknown' && !l.ai_reason.includes('No Gemini API key'));
+  }, [logs]);
 
-  // Build entropy line chart data (every capture)
-  const entropyData = [...logs]
-    .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime())
-    .map(l => ({
-      time: format(new Date(l.timestamp), 'HH:mm'),
-      Entropy: parseFloat(l.entropy_score.toFixed(1)),
-      Keys: l.total_keys,
-    }));
+  // Overall Average Focus Score
+  const avgFocusScore = useMemo(() => {
+    if (analyzedLogs.length === 0) return 0;
+    return Math.round(
+      analyzedLogs.reduce((acc, l) => acc + (l.productive_score !== undefined && l.productive_score > 0 ? l.productive_score : l.is_productive ? 100 : 0), 0) / analyzedLogs.length
+    );
+  }, [analyzedLogs]);
 
-  // Category breakdown for pie
-  const categoryMap = new Map<string, number>();
-  logs.filter(l => l.ai_category).forEach(l => {
-    categoryMap.set(l.ai_category, (categoryMap.get(l.ai_category) ?? 0) + 1);
-  });
-  const categoryData = Array.from(categoryMap.entries())
-    .sort((a, b) => b[1] - a[1])
-    .map(([name, value]) => ({ name, value }));
+  // Build hourly focus score trend chart data
+  const hourlyData = useMemo(() => {
+    return Array.from({ length: 24 }, (_, h) => {
+      const hourLogs = logs.filter(l => new Date(l.timestamp).getHours() === h);
+      if (hourLogs.length === 0) return null;
+      const totalScore = hourLogs.reduce((acc, l) => acc + (l.productive_score !== undefined && l.productive_score > 0 ? l.productive_score : l.is_productive ? 100 : 0), 0);
+      const avgScore = Math.round(totalScore / hourLogs.length);
+      return {
+        hour: `${String(h).padStart(2, '0')}:00`,
+        'Focus Rating': avgScore,
+        Captures: hourLogs.length,
+      };
+    }).filter(Boolean) as { hour: string; 'Focus Rating': number; Captures: number }[];
+  }, [logs]);
+
+  // App Usage Breakdown calculation
+  const appData = useMemo(() => {
+    const appMap: Record<string, { count: number; category: string; totalScore: number }> = {};
+    logs.forEach(l => {
+      const app = l.app_name || 'Other';
+      if (!appMap[app]) {
+        appMap[app] = { count: 0, category: l.app_category || 'Application', totalScore: 0 };
+      }
+      appMap[app].count++;
+      appMap[app].totalScore += l.productive_score !== undefined && l.productive_score > 0 ? l.productive_score : l.is_productive ? 100 : 0;
+    });
+
+    const total = logs.length || 1;
+    return Object.entries(appMap)
+      .map(([name, d]) => ({
+        name,
+        category: d.category,
+        count: d.count,
+        percent: Math.round((d.count / total) * 100),
+        avgScore: Math.round(d.totalScore / d.count),
+      }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 6);
+  }, [logs]);
+
+  // Entropy & Typing Line Chart Data
+  const entropyData = useMemo(() => {
+    return [...logs]
+      .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime())
+      .map(l => ({
+        time: format(new Date(l.timestamp), 'HH:mm'),
+        Entropy: parseFloat(l.entropy_score.toFixed(1)),
+        FocusScore: l.productive_score !== undefined ? Math.round(l.productive_score) : l.is_productive ? 100 : 0,
+      }));
+  }, [logs]);
+
+  // Category breakdown for pie chart
+  const categoryData = useMemo(() => {
+    const catMap = new Map<string, number>();
+    logs.filter(l => l.ai_category && l.ai_category !== 'Unknown').forEach(l => {
+      catMap.set(l.ai_category, (catMap.get(l.ai_category) ?? 0) + 1);
+    });
+    return Array.from(catMap.entries())
+      .sort((a, b) => b[1] - a[1])
+      .map(([name, value]) => ({ name, value }));
+  }, [logs]);
 
   const PIE_COLORS = [
     COLORS.entropy, COLORS.teal, COLORS.amber, COLORS.productive,
     '#8b5cf6', '#ec4899', '#f97316', '#06b6d4',
   ];
-
-  const productiveMin = stats?.productive_minutes ?? 0;
-  const unproductiveMin = stats?.unproductive_minutes ?? 0;
-  const totalAnalyzed = productiveMin + unproductiveMin;
-  const donutData = totalAnalyzed > 0
-    ? [
-        { name: 'Productive', value: productiveMin },
-        { name: 'Unproductive', value: unproductiveMin },
-      ]
-    : null;
 
   const dateLabel = startDate && endDate && startDate !== endDate
     ? `${format(new Date(startDate + 'T00:00:00'), 'MMM d, yyyy')} - ${format(new Date(endDate + 'T00:00:00'), 'MMM d, yyyy')}`
@@ -127,22 +170,30 @@ export default function Analytics({
 
   return (
     <div>
-      <div className="page-header fade-in-up" style={{ flexWrap: 'wrap', gap: 16 }}>
+      <div className="page-header" style={{ flexWrap: 'wrap', gap: 16, marginBottom: 24 }}>
         <div>
-          <h1 className="page-title">Analytics</h1>
-          <div className="page-subtitle">
-            {dateLabel} · {selectedUserId ? 'Single User Deep Dive' : 'Team / All Users Overview'}
+          <h1 className="page-title" style={{ fontSize: 24, fontWeight: 700, letterSpacing: '-0.4px', color: 'var(--text-primary)' }}>
+            Productivity Analytics & Deep Dive
+          </h1>
+          <div className="page-subtitle" style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: 4 }}>
+            {dateLabel} · {selectedUserId ? 'Single User Deep Dive' : 'Team / Organization Overview'}
           </div>
         </div>
 
         <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-          {/* User selector for Admin/Owner */}
           {(currentUser?.role === 'admin' || currentUser?.role === 'owner') && members.length > 0 && (
             <select
               className="date-input"
               value={selectedUserId || ''}
               onChange={(e) => onUserChange?.(e.target.value ? Number(e.target.value) : null)}
-              style={{ padding: '6px 12px', borderRadius: 8, background: 'var(--bg-elevated)', color: 'var(--text-primary)', border: '1px solid var(--border-medium)' }}
+              style={{
+                padding: '6px 12px',
+                borderRadius: 'var(--radius-md)',
+                background: 'var(--bg-surface)',
+                color: 'var(--text-primary)',
+                border: '1px solid var(--border-medium)',
+                fontSize: 13,
+              }}
             >
               <option value="">👥 All Organization Users</option>
               {members.map(m => (
@@ -153,7 +204,6 @@ export default function Analytics({
             </select>
           )}
 
-          {/* Date range filter */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
             <input
               type="date"
@@ -164,6 +214,14 @@ export default function Analytics({
                 const s = e.target.value;
                 onDateRangeChange?.(s, endDate || s);
                 onDateChange(s);
+              }}
+              style={{
+                padding: '6px 12px',
+                borderRadius: 'var(--radius-md)',
+                background: 'var(--bg-surface)',
+                color: 'var(--text-primary)',
+                border: '1px solid var(--border-medium)',
+                fontSize: 13,
               }}
             />
             <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>to</span>
@@ -176,6 +234,14 @@ export default function Analytics({
                 const ed = e.target.value;
                 onDateRangeChange?.(startDate || today, ed);
               }}
+              style={{
+                padding: '6px 12px',
+                borderRadius: 'var(--radius-md)',
+                background: 'var(--bg-surface)',
+                color: 'var(--text-primary)',
+                border: '1px solid var(--border-medium)',
+                fontSize: 13,
+              }}
             />
           </div>
         </div>
@@ -183,91 +249,140 @@ export default function Analytics({
 
       {loading ? (
         <div className="card" style={{ padding: 32 }}>
-          <div className="skeleton" style={{ width: '100%', height: 200 }} />
+          <div className="skeleton" style={{ width: '100%', height: 240 }} />
         </div>
       ) : logs.length === 0 ? (
         <div className="card">
           <div className="empty-state">
-            <div className="empty-state-icon">📊</div>
-            <div className="empty-state-title">No data yet</div>
-            <div className="empty-state-desc">Analytics will appear once you have captures for this date.</div>
+            <div className="empty-state-icon" style={{ fontSize: 32, marginBottom: 12 }}>📊</div>
+            <div className="empty-state-title">No analytics data recorded yet</div>
+            <div className="empty-state-desc">Analytics will populate automatically as background captures are analyzed.</div>
           </div>
         </div>
       ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
 
-          {/* Productive vs Unproductive donut + summary */}
-          <div className="charts-grid-2col">
-            <div className="card fade-in-up fade-in-up-delay-1">
-              <div className="card-header">
-                <span className="card-title">Productivity Split</span>
+          {/* Top Summary Banner */}
+          <div className="stats-grid">
+            <div className="stat-card">
+              <span className="stat-label">AI Focus Rating</span>
+              <div className="stat-value" style={{ color: avgFocusScore >= 70 ? '#10b981' : '#6366f1' }}>
+                {avgFocusScore}%
               </div>
-              <div className="chart-container">
-                {donutData ? (
-                  <div className="donut-row">
-                    <ResponsiveContainer width={140} height={140}>
-                      <PieChart>
-                        <Pie
-                          data={donutData}
-                          cx="50%"
-                          cy="50%"
-                          innerRadius={40}
-                          outerRadius={60}
-                          paddingAngle={3}
-                          dataKey="value"
-                        >
-                          <Cell fill={COLORS.productive} />
-                          <Cell fill={COLORS.unproductive} />
-                        </Pie>
-                      </PieChart>
-                    </ResponsiveContainer>
-                    <div className="donut-legend">
-                      <div className="donut-legend-item">
-                        <div className="legend-dot" style={{ background: COLORS.productive }} />
-                        <span>Productive</span>
-                        <span className="legend-value">{productiveMin}</span>
+              <div className="stat-sub">Average AI evaluation across all captures</div>
+            </div>
+
+            <div className="stat-card">
+              <span className="stat-label">Total Captures</span>
+              <div className="stat-value">{logs.length}</div>
+              <div className="stat-sub">{analyzedLogs.length} analyzed by AI vision</div>
+            </div>
+
+            <div className="stat-card">
+              <span className="stat-label">Top Desktop App</span>
+              <div className="stat-value">{appData[0]?.name || '—'}</div>
+              <div className="stat-sub">{appData[0] ? `${appData[0].percent}% of total work time` : '—'}</div>
+            </div>
+          </div>
+
+          {/* Hourly Focus Score Chart */}
+          <div className="card" style={{ padding: 20 }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+              <div>
+                <h3 style={{ fontSize: 15, fontWeight: 600, color: 'var(--text-primary)', margin: 0 }}>
+                  Hourly AI Focus Rating (0-100%)
+                </h3>
+                <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: '2px 0 0 0' }}>
+                  Average AI productivity percentage score for each active hour
+                </p>
+              </div>
+              <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--accent-purple)' }}>
+                Overall Focus: {avgFocusScore}%
+              </span>
+            </div>
+
+            <div style={{ width: '100%', height: 200 }}>
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={hourlyData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="var(--border-subtle)" vertical={false} />
+                  <XAxis dataKey="hour" tick={{ fontSize: 11, fill: 'var(--text-muted)' }} axisLine={false} tickLine={false} />
+                  <YAxis domain={[0, 100]} tick={{ fontSize: 11, fill: 'var(--text-muted)' }} axisLine={false} tickLine={false} />
+                  <Tooltip content={<CustomTooltip />} />
+                  <Bar dataKey="Focus Rating" fill="var(--accent-purple)" radius={[4, 4, 0, 0]} unit="%" />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+
+          {/* Grid: App Breakdown & Category Pie */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(360px, 1fr))', gap: 24 }}>
+            
+            {/* Top Applications Share */}
+            <div className="card" style={{ padding: 20 }}>
+              <div style={{ marginBottom: 16 }}>
+                <h3 style={{ fontSize: 15, fontWeight: 600, color: 'var(--text-primary)', margin: 0 }}>
+                  Desktop App Time & Focus Ratings
+                </h3>
+                <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: '2px 0 0 0' }}>
+                  Breakdown of time share & AI evaluation per application
+                </p>
+              </div>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                {appData.map((app) => (
+                  <div key={app.name} style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: 13 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>💻 {app.name}</span>
+                        <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>({app.category})</span>
                       </div>
-                      <div className="donut-legend-item">
-                        <div className="legend-dot" style={{ background: COLORS.unproductive }} />
-                        <span>Not Productive</span>
-                        <span className="legend-value">{unproductiveMin}</span>
-                      </div>
-                      <div className="donut-legend-item" style={{ marginTop: 4 }}>
-                        <div className="legend-dot" style={{ background: 'var(--accent-teal)' }} />
-                        <span>Avg Entropy</span>
-                        <span className="legend-value">{stats?.avg_entropy_score?.toFixed(1) ?? '—'}</span>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                        <span style={{ fontSize: 12, fontWeight: 600, color: app.avgScore >= 60 ? 'var(--accent-green)' : 'var(--accent-red)' }}>
+                          {app.avgScore}% Focus
+                        </span>
+                        <span style={{ fontSize: 12, color: 'var(--text-muted)', width: 36, textAlign: 'right' }}>
+                          {app.percent}%
+                        </span>
                       </div>
                     </div>
-                  </div>
-                ) : (
-                  <div className="empty-state" style={{ padding: '24px 0' }}>
-                    <div style={{ color: 'var(--text-muted)', fontSize: 13 }}>
-                      AI analysis pending…
+                    <div style={{ width: '100%', height: 6, background: 'var(--bg-elevated)', borderRadius: 99, overflow: 'hidden' }}>
+                      <div
+                        style={{
+                          width: `${app.percent}%`,
+                          height: '100%',
+                          backgroundColor: app.avgScore >= 70 ? '#10b981' : app.avgScore >= 50 ? '#6366f1' : '#ef4444',
+                          borderRadius: 99,
+                        }}
+                      />
                     </div>
                   </div>
-                )}
+                ))}
               </div>
             </div>
 
-            {/* Category pie */}
-            <div className="card fade-in-up fade-in-up-delay-2">
-              <div className="card-header">
-                <span className="card-title">Activity Categories</span>
+            {/* Category Pie Chart */}
+            <div className="card" style={{ padding: 20 }}>
+              <div style={{ marginBottom: 16 }}>
+                <h3 style={{ fontSize: 15, fontWeight: 600, color: 'var(--text-primary)', margin: 0 }}>
+                  Work Categories Breakdown
+                </h3>
+                <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: '2px 0 0 0' }}>
+                  Distribution across AI categories
+                </p>
               </div>
-              <div className="chart-container">
+
+              <div style={{ width: '100%', height: 180 }}>
                 {categoryData.length > 0 ? (
-                  <ResponsiveContainer width="100%" height={140}>
+                  <ResponsiveContainer width="100%" height="100%">
                     <PieChart>
                       <Pie
                         data={categoryData}
                         cx="50%"
                         cy="50%"
-                        outerRadius={55}
-                        paddingAngle={2}
+                        outerRadius={65}
+                        paddingAngle={3}
                         dataKey="value"
-                        label={({ name, percent }) =>
-                          `${name} ${((percent ?? 0) * 100).toFixed(0)}%`
-                        }
+                        label={({ name, percent }) => `${name} (${((percent ?? 0) * 100).toFixed(0)}%)`}
                         labelLine={false}
                       >
                         {categoryData.map((_, i) => (
@@ -278,83 +393,58 @@ export default function Analytics({
                     </PieChart>
                   </ResponsiveContainer>
                 ) : (
-                  <div className="empty-state" style={{ padding: '24px 0' }}>
-                    <div style={{ color: 'var(--text-muted)', fontSize: 13 }}>No categories yet</div>
+                  <div style={{ fontSize: 13, color: 'var(--text-muted)', textAlign: 'center', padding: '40px 0' }}>
+                    No categories logged yet
                   </div>
                 )}
               </div>
             </div>
+
           </div>
 
-          {/* Hourly bar chart */}
-          {hourlyData.length > 0 && (
-            <div className="card fade-in-up fade-in-up-delay-3">
-              <div className="card-header">
-                <span className="card-title">Hourly Activity</span>
-              </div>
-              <div className="chart-container">
-                <ResponsiveContainer width="100%" height={180}>
-                  <BarChart data={hourlyData} barCategoryGap="30%">
-                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(99,102,241,0.08)" />
-                    <XAxis
-                      dataKey="hour"
-                      tick={{ fontSize: 10, fill: 'var(--text-muted)' }}
-                      axisLine={false}
-                      tickLine={false}
-                    />
-                    <YAxis
-                      tick={{ fontSize: 10, fill: 'var(--text-muted)' }}
-                      axisLine={false}
-                      tickLine={false}
-                      width={24}
-                    />
-                    <Tooltip content={<CustomTooltip />} />
-                    <Bar dataKey="Productive" fill={COLORS.productive} radius={[3, 3, 0, 0]} />
-                    <Bar dataKey="Unproductive" fill={COLORS.unproductive} radius={[3, 3, 0, 0]} />
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
-            </div>
-          )}
-
-          {/* Entropy line chart */}
+          {/* Keystroke Entropy & Focus Trend Line Chart */}
           {entropyData.length > 1 && (
-            <div className="card fade-in-up fade-in-up-delay-4">
-              <div className="card-header">
-                <span className="card-title">Keystroke Entropy Over Time</span>
+            <div className="card" style={{ padding: 20 }}>
+              <div style={{ marginBottom: 16 }}>
+                <h3 style={{ fontSize: 15, fontWeight: 600, color: 'var(--text-primary)', margin: 0 }}>
+                  Continuous Keystroke Variety & Focus Score Timeline
+                </h3>
+                <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: '2px 0 0 0' }}>
+                  Keystroke entropy vs AI-evaluated focus percentage over time
+                </p>
               </div>
-              <div className="chart-container">
-                <ResponsiveContainer width="100%" height={160}>
-                  <LineChart data={entropyData}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(99,102,241,0.08)" />
-                    <XAxis
-                      dataKey="time"
-                      tick={{ fontSize: 10, fill: 'var(--text-muted)' }}
-                      axisLine={false}
-                      tickLine={false}
-                      interval="preserveStartEnd"
-                    />
-                    <YAxis
-                      tick={{ fontSize: 10, fill: 'var(--text-muted)' }}
-                      axisLine={false}
-                      tickLine={false}
-                      domain={[0, 100]}
-                      width={28}
-                    />
+
+              <div style={{ width: '100%', height: 180 }}>
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart data={entropyData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="var(--border-subtle)" vertical={false} />
+                    <XAxis dataKey="time" tick={{ fontSize: 10, fill: 'var(--text-muted)' }} axisLine={false} tickLine={false} />
+                    <YAxis domain={[0, 100]} tick={{ fontSize: 10, fill: 'var(--text-muted)' }} axisLine={false} tickLine={false} />
                     <Tooltip content={<CustomTooltip />} />
                     <Line
                       type="monotone"
-                      dataKey="Entropy"
-                      stroke={COLORS.entropy}
+                      dataKey="FocusScore"
+                      name="Focus Rating (%)"
+                      stroke="var(--accent-purple)"
                       strokeWidth={2}
                       dot={false}
-                      activeDot={{ r: 4, fill: COLORS.entropy }}
+                      activeDot={{ r: 4, fill: 'var(--accent-purple)' }}
+                    />
+                    <Line
+                      type="monotone"
+                      dataKey="Entropy"
+                      name="Keystroke Entropy"
+                      stroke="#06b6d4"
+                      strokeWidth={1.5}
+                      strokeDasharray="4 4"
+                      dot={false}
                     />
                   </LineChart>
                 </ResponsiveContainer>
               </div>
             </div>
           )}
+
         </div>
       )}
     </div>

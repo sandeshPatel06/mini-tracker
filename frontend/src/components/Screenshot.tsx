@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { buildApiUrl } from '../api';
+import { Modal } from './Modal';
 
 declare const window: Window & {
   go?: {
@@ -44,11 +45,27 @@ export function ScreenshotThumb({ imagePath, onClick, className }: ThumbProps) {
   }, [imagePath]);
 
   if (loading) {
-    return <div className="timeline-thumb-placeholder skeleton">🖥️</div>;
+    return (
+      <div className="timeline-thumb-placeholder skeleton">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.5">
+          <rect x="2" y="3" width="20" height="14" rx="2" />
+          <line x1="8" y1="21" x2="16" y2="21" />
+          <line x1="12" y1="17" x2="12" y2="21" />
+        </svg>
+      </div>
+    );
   }
 
   if (!src) {
-    return <div className="timeline-thumb-placeholder">🖥️</div>;
+    return (
+      <div className="timeline-thumb-placeholder">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.5">
+          <rect x="2" y="3" width="20" height="14" rx="2" />
+          <line x1="8" y1="21" x2="16" y2="21" />
+          <line x1="12" y1="17" x2="12" y2="21" />
+        </svg>
+      </div>
+    );
   }
 
   return (
@@ -63,110 +80,52 @@ export function ScreenshotThumb({ imagePath, onClick, className }: ThumbProps) {
   );
 }
 
-interface ModalProps {
+interface ImageModalProps {
   imagePath: string | null;
   onClose: () => void;
 }
 
-export function ImageModal({ imagePath, onClose }: ModalProps) {
+export function ImageModal({ imagePath, onClose }: ImageModalProps) {
   const [src, setSrc] = useState<string | null>(null);
 
   useEffect(() => {
     if (!imagePath) return;
     if (window.go?.main?.App?.GetImageBase64) {
-      window.go.main.App.GetImageBase64(imagePath).then(res => setSrc(res));
+      window.go.main.App.GetImageBase64(imagePath).then((res) => setSrc(res));
     } else {
       setSrc(buildApiUrl(`/api/image?path=${encodeURIComponent(imagePath)}`));
     }
   }, [imagePath]);
 
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [onClose]);
-
-  if (!imagePath) return null;
-
   return (
-    <div
-      style={{
-        position: 'fixed',
-        top: 0,
-        left: 0,
-        right: 0,
-        bottom: 0,
-        background: 'rgba(10, 10, 18, 0.88)',
-        backdropFilter: 'blur(12px)',
-        zIndex: 99999,
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'center',
-        justifyContent: 'center',
-        padding: '32px 24px',
-        animation: 'fadeIn 0.2s ease-out'
-      }}
-      onClick={onClose}
+    <Modal
+      isOpen={Boolean(imagePath)}
+      onClose={onClose}
+      title="Desktop Screenshot Inspection"
+      maxWidth={1000}
     >
-      <div
-        style={{
-          position: 'relative',
-          maxWidth: '92vw',
-          maxHeight: '88vh',
-          background: 'var(--bg-surface)',
-          borderRadius: 16,
-          padding: 12,
-          border: '1px solid var(--border-medium)',
-          boxShadow: '0 25px 60px rgba(0, 0, 0, 0.6)',
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'center'
-        }}
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%', marginBottom: 10, padding: '4px 8px' }}>
-          <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-secondary)' }}>
-            🖥️ Desktop Screenshot Inspection
-          </span>
-          <button
-            onClick={onClose}
-            className="btn btn-secondary"
-            style={{
-              padding: '4px 12px',
-              fontSize: 12,
-              borderRadius: 20,
-              cursor: 'pointer'
-            }}
-          >
-            ✕ Close (ESC)
-          </button>
+      {src ? (
+        <img
+          src={src}
+          alt="Desktop Screenshot Inspection"
+          style={{
+            maxWidth: '100%',
+            maxHeight: '75vh',
+            borderRadius: 8,
+            display: 'block',
+            objectFit: 'contain',
+            border: '1px solid var(--border-subtle)',
+            margin: '0 auto',
+          }}
+        />
+      ) : (
+        <div style={{ padding: '60px 100px', color: 'var(--text-muted)', fontSize: 14, textAlign: 'center' }}>
+          Loading full-resolution screenshot...
         </div>
-
-        {src ? (
-          <img
-            src={src}
-            alt="Desktop Screenshot Inspection"
-            style={{
-              maxWidth: '100%',
-              maxHeight: '78vh',
-              borderRadius: 10,
-              display: 'block',
-              objectFit: 'contain',
-              border: '1px solid var(--border-subtle)'
-            }}
-          />
-        ) : (
-          <div style={{ padding: '60px 100px', color: 'var(--text-muted)', fontSize: 14 }}>
-            ⏳ Loading full-resolution screenshot…
-          </div>
-        )}
-
-        <div style={{ marginTop: 10, fontSize: 11, fontFamily: 'monospace', color: 'var(--text-muted)', textAlign: 'center', wordBreak: 'break-all' }}>
-          {imagePath}
-        </div>
+      )}
+      <div style={{ marginTop: 12, fontSize: 11, fontFamily: 'monospace', color: 'var(--text-muted)', textAlign: 'center', wordBreak: 'break-all' }}>
+        {imagePath}
       </div>
-    </div>
+    </Modal>
   );
 }

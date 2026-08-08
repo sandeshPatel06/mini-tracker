@@ -1,0 +1,17 @@
+# Mini Tracker Application Configuration Example (Viper)
+# Copy this file to config.yaml and customize for your environment.
+
+# Database Connection (PostgreSQL for corporate backend, or leave blank for local SQLite)
+database_url: "postgres://user:password@localhost:5432/tracker?sslmode=disable"
+
+# Google Gemini Vision API Configuration
+gemini_api_key: "YOUR_GEMINI_API_KEY_HERE"
+gemini_model: "models/gemma-4-31b-it"
+
+# Intervals & Schedules
+screenshot_interval_seconds: 30s
+ai_analysis_interval_seconds: 3h
+
+# Network & Server Port Settings
+backend_port: 8080
+backend_endpoint: "http://localhost:8080"

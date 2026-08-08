@@ -20,7 +20,7 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.22'
+          go-version-file: 'go.mod'
           cache: true
 
       - name: Setup Node.js
@@ -36,16 +36,65 @@ jobs:
           npm ci
           npm run build
 
-      - name: Build Server Binary
+      - name: Build Desktop & Server Binaries
         run: |
           mkdir -p bin
-          go build -o bin/mini-tracker-server ./cmd/server
+          log_info() { echo -e "\033[1;32m[BUILD]\033[0m $1"; }
 
-      - name: Create Date Tag & Release
+          log_info "Building Desktop Application Binary (get-hike)..."
+          go build -ldflags="-s -w" -o bin/get-hike .
+          cp -f bin/get-hike bin/mini-tracker
+
+          log_info "Building Backend Server Binary (get-hike-server)..."
+          go build -ldflags="-s -w" -o bin/get-hike-server ./cmd/server
+          cp -f bin/get-hike-server bin/mini-tracker-server
+
+          log_info "Generating SHA-256 Checksums..."
+          (cd bin && sha256sum get-hike get-hike-server mini-tracker mini-tracker-server > checksums.txt)
+
+      - name: Create Release Notes & Publish Release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          TAG_NAME="build-$(date +'%Y%m%d-%H%M%S')"
-          git tag $TAG_NAME
-          git push origin $TAG_NAME
-          gh release create $TAG_NAME bin/mini-tracker-server --title "Release $TAG_NAME" --notes "Automated build binary for main branch"
+          TAG_NAME="v$(date +'%Y.%m.%d-%H%M')"
+          SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
+          BUILD_DATE=$(date -u +"%Y-%m-%d %H:%M:%S UTC")
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "$TAG_NAME" -m "Automated build release $TAG_NAME"
+          git push origin "$TAG_NAME"
+
+          cat << EOF > release_notes.md
+          # 📍 get-Hike Release \`${TAG_NAME}\`
+
+          Automated production build generated from commit [\`${SHORT_SHA}\`](${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }}).
+
+          ### 📦 Included Release Artifacts
+          | Binary / File | Description | Target Environment |
+          | :--- | :--- | :--- |
+          | \`get-hike\` | Native Desktop Application | Client Desktop UI & 100% Offline Guest Mode |
+          | \`get-hike-server\` | HTTP API & Analytics Server | Corporate Multi-User Backend Server |
+          | \`checksums.txt\` | SHA-256 File Checksums | Security & Integrity Audit |
+
+          ### ⚡ Quick Desktop Installation
+          Run the one-line automated Linux installer:
+          \`\`\`bash
+          curl -sSL https://raw.githubusercontent.com/${{ github.repository }}/main/install.sh | bash
+          \`\`\`
+
+          ---
+          **Commit SHA**: \`${{ github.sha }}\`
+          **Build Timestamp**: \`${BUILD_DATE}\`
+          **Branch**: \`main\`
+          EOF
+
+          gh release create "$TAG_NAME" \
+            bin/get-hike \
+            bin/get-hike-server \
+            bin/mini-tracker \
+            bin/mini-tracker-server \
+            bin/checksums.txt \
+            --title "get-Hike $TAG_NAME ($SHORT_SHA)" \
+            --notes-file release_notes.md
+

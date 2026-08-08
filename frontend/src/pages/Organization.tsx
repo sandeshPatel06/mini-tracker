@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Organization, User, Invitation } from '../types';
 import { apiFetch } from '../api';
+import { Modal } from '../components/Modal';
 
 export const OrganizationPage: React.FC = () => {
   const [org, setOrg] = useState<Organization | null>(null);
@@ -235,108 +236,96 @@ export const OrganizationPage: React.FC = () => {
       )}
 
       {/* Invite Modal */}
-      {showInviteModal && (
-        <div className="modal-backdrop">
-          <div className="modal-card">
-            <div className="modal-header">
-              <h3 className="modal-title">Invite Team Member</h3>
-              <button
-                onClick={() => setShowInviteModal(false)}
-                className="modal-close"
+      <Modal
+        isOpen={showInviteModal}
+        onClose={() => setShowInviteModal(false)}
+        title="Invite Team Member"
+      >
+        {errorMessage && (
+          <div className="alert alert-error" style={{ marginBottom: 16 }}>
+            {errorMessage}
+          </div>
+        )}
+
+        {inviteUrl ? (
+          <div className="flex flex-col gap-16">
+            <div className="alert alert-success">
+              ✓ Invitation created successfully! Email dispatched (or copy link below).
+            </div>
+            <div className="form-group">
+              <label className="form-label">Direct Invitation Link</label>
+              <div className="flex gap-8">
+                <input
+                  type="text"
+                  readOnly
+                  value={inviteUrl}
+                  className="form-input"
+                  style={{ fontFamily: 'monospace', fontSize: 12 }}
+                />
+                <button
+                  onClick={() => copyToClipboard(inviteUrl, 'modal')}
+                  className="btn btn-primary btn-sm"
+                  style={{ whiteSpace: 'nowrap' }}
+                >
+                  {copiedToken === 'modal' ? 'Copied!' : 'Copy Link'}
+                </button>
+              </div>
+            </div>
+            <button
+              onClick={() => {
+                setInviteEmail('');
+                setInviteUrl(null);
+              }}
+              className="btn btn-secondary w-full"
+            >
+              Invite Another Member
+            </button>
+          </div>
+        ) : (
+          <form onSubmit={handleSendInvite}>
+            <div className="form-group">
+              <label className="form-label">Email Address</label>
+              <input
+                type="email"
+                required
+                placeholder="colleague@company.com"
+                value={inviteEmail}
+                onChange={(e) => setInviteEmail(e.target.value)}
+                className="form-input"
+              />
+            </div>
+
+            <div className="form-group" style={{ marginBottom: 20 }}>
+              <label className="form-label">Role & Permissions</label>
+              <select
+                value={inviteRole}
+                onChange={(e) => setInviteRole(e.target.value as 'admin' | 'member')}
+                className="form-select"
               >
-                ✕
+                <option value="member">Member — Standard User Access</option>
+                <option value="admin">Admin — Team Management Access</option>
+              </select>
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, paddingTop: 12, borderTop: '1px solid var(--border-subtle)' }}>
+              <button
+                type="button"
+                onClick={() => setShowInviteModal(false)}
+                className="btn btn-secondary"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={sending}
+                className="btn btn-primary"
+              >
+                {sending ? 'Sending...' : 'Send Invitation'}
               </button>
             </div>
-
-            <div className="modal-body">
-              {errorMessage && (
-                <div className="alert alert-error">
-                  {errorMessage}
-                </div>
-              )}
-
-              {inviteUrl ? (
-                <div className="flex flex-col gap-16">
-                  <div className="alert alert-success">
-                    ✓ Invitation created successfully! Email dispatched (or copy link below).
-                  </div>
-                  <div className="form-group">
-                    <label className="form-label">Direct Invitation Link</label>
-                    <div className="flex gap-8">
-                      <input
-                        type="text"
-                        readOnly
-                        value={inviteUrl}
-                        className="form-input"
-                        style={{ fontFamily: 'monospace', fontSize: 12 }}
-                      />
-                      <button
-                        onClick={() => copyToClipboard(inviteUrl, 'modal')}
-                        className="btn btn-primary btn-sm"
-                        style={{ whiteSpace: 'nowrap' }}
-                      >
-                        {copiedToken === 'modal' ? 'Copied!' : 'Copy Link'}
-                      </button>
-                    </div>
-                  </div>
-                  <button
-                    onClick={() => {
-                      setInviteEmail('');
-                      setInviteUrl(null);
-                    }}
-                    className="btn btn-secondary w-full"
-                  >
-                    Invite Another Member
-                  </button>
-                </div>
-              ) : (
-                <form onSubmit={handleSendInvite}>
-                  <div className="form-group">
-                    <label className="form-label">Email Address</label>
-                    <input
-                      type="email"
-                      required
-                      placeholder="colleague@company.com"
-                      value={inviteEmail}
-                      onChange={(e) => setInviteEmail(e.target.value)}
-                      className="form-input"
-                    />
-                  </div>
-
-                  <div className="form-group">
-                    <label className="form-label">Role & Permissions</label>
-                    <select
-                      value={inviteRole}
-                      onChange={(e) => setInviteRole(e.target.value as 'admin' | 'member')}
-                      className="form-select"
-                    >
-                      <option value="member">Member — Standard User Access</option>
-                      <option value="admin">Admin — Team Management Access</option>
-                    </select>
-                  </div>
-
-                  <div className="modal-footer" style={{ border: 'none', padding: '16px 0 0' }}>
-                    <button
-                      type="button"
-                      onClick={() => setShowInviteModal(false)}
-                      className="btn btn-secondary"
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      type="submit"
-                      disabled={sending}
-                      className="btn btn-primary"
-                    >
-                      {sending ? 'Sending...' : 'Send Invitation'}
-                    </button>
-                  </div>
-                </form>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
+          </form>
+        )}
+      </Modal>
     </div>
   );
 };

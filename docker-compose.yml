@@ -1,13 +1,13 @@
 services:
-  mini-tracker-api:
+  get-hike-api:
     build: .
-    container_name: mini-tracker-api
+    container_name: get-hike-api
     restart: unless-stopped
     ports:
       - "8080:8080"
     volumes:
       # Mount the same data directory the desktop app uses
-      - "${HOME}/.local/share/mini-tracker:/data"
+      - "${HOME}/.local/share/get-hike:/data"
     environment:
       - GEMINI_API_KEY=${GEMINI_API_KEY}
       - DATA_DIR=/data

@@ -4,67 +4,58 @@ interface CategoryBadgeProps {
   category: string;
 }
 
-const CATEGORY_STYLES: Record<string, { icon: string; bg: string; color: string; border: string }> = {
+const CATEGORY_STYLES: Record<string, { bg: string; color: string; border: string }> = {
   Coding: {
-    icon: '💻',
-    bg: 'rgba(99, 102, 241, 0.15)',
+    bg: 'rgba(99, 102, 241, 0.12)',
     color: '#818cf8',
-    border: 'rgba(99, 102, 241, 0.3)',
+    border: 'rgba(99, 102, 241, 0.25)',
   },
   Writing: {
-    icon: '📝',
-    bg: 'rgba(59, 130, 246, 0.15)',
+    bg: 'rgba(59, 130, 246, 0.12)',
     color: '#60a5fa',
-    border: 'rgba(59, 130, 246, 0.3)',
+    border: 'rgba(59, 130, 246, 0.25)',
   },
   Browsing: {
-    icon: '🌐',
-    bg: 'rgba(45, 212, 191, 0.15)',
+    bg: 'rgba(20, 184, 166, 0.12)',
     color: '#2dd4bf',
-    border: 'rgba(45, 212, 191, 0.3)',
+    border: 'rgba(20, 184, 166, 0.25)',
   },
   Communication: {
-    icon: '💬',
-    bg: 'rgba(16, 185, 129, 0.15)',
+    bg: 'rgba(16, 185, 129, 0.12)',
     color: '#34d399',
-    border: 'rgba(16, 185, 129, 0.3)',
+    border: 'rgba(16, 185, 129, 0.25)',
   },
   Design: {
-    icon: '🎨',
-    bg: 'rgba(236, 72, 153, 0.15)',
+    bg: 'rgba(236, 72, 153, 0.12)',
     color: '#f472b6',
-    border: 'rgba(236, 72, 153, 0.3)',
+    border: 'rgba(236, 72, 153, 0.25)',
   },
   'Social Media': {
-    icon: '📲',
-    bg: 'rgba(245, 158, 11, 0.15)',
+    bg: 'rgba(245, 158, 11, 0.12)',
     color: '#fbbf24',
-    border: 'rgba(245, 158, 11, 0.3)',
+    border: 'rgba(245, 158, 11, 0.25)',
   },
   'Video/Entertainment': {
-    icon: '🍿',
-    bg: 'rgba(249, 115, 22, 0.15)',
+    bg: 'rgba(249, 115, 22, 0.12)',
     color: '#fb923c',
-    border: 'rgba(249, 115, 22, 0.3)',
+    border: 'rgba(249, 115, 22, 0.25)',
   },
   Idle: {
-    icon: '💤',
-    bg: 'rgba(148, 163, 184, 0.12)',
+    bg: 'rgba(148, 163, 184, 0.1)',
     color: '#94a3b8',
-    border: 'rgba(148, 163, 184, 0.25)',
+    border: 'rgba(148, 163, 184, 0.2)',
   },
   Other: {
-    icon: '📁',
-    bg: 'rgba(148, 163, 184, 0.12)',
+    bg: 'rgba(148, 163, 184, 0.1)',
     color: '#cbd5e1',
-    border: 'rgba(148, 163, 184, 0.25)',
+    border: 'rgba(148, 163, 184, 0.2)',
   },
 };
 
 export function CategoryBadge({ category }: CategoryBadgeProps) {
   if (!category || category === 'Unknown') {
     return (
-      <span style={{ color: 'var(--text-muted)', fontSize: 12, fontStyle: 'italic' }}>
+      <span style={{ color: 'var(--text-muted)', fontSize: 12, fontStyle: 'normal' }}>
         Pending AI analysis…
       </span>
     );
@@ -77,9 +68,9 @@ export function CategoryBadge({ category }: CategoryBadgeProps) {
       style={{
         display: 'inline-flex',
         alignItems: 'center',
-        gap: 5,
-        padding: '2px 8px',
-        borderRadius: 6,
+        gap: 6,
+        padding: '3px 9px',
+        borderRadius: 4,
         fontSize: 11,
         fontWeight: 600,
         backgroundColor: style.bg,
@@ -88,8 +79,9 @@ export function CategoryBadge({ category }: CategoryBadgeProps) {
         letterSpacing: '0.2px',
       }}
     >
-      <span>{style.icon}</span>
+      <span style={{ width: 6, height: 6, borderRadius: '50%', backgroundColor: style.color }} />
       <span>{category}</span>
     </span>
   );
 }
+

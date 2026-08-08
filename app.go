@@ -3,20 +3,20 @@ package main
 import (
 	"context"
 	"encoding/base64"
+	"fmt"
 	"log"
 	"os"
-	"path/filepath"
-	"time"
-	"fmt"
 	"os/exec"
+	"path/filepath"
 	"runtime"
+	"time"
 
-	"github.com/reak/mini-tracker/internal/ai"
-	"github.com/reak/mini-tracker/internal/config"
-	"github.com/reak/mini-tracker/internal/db"
-	"github.com/reak/mini-tracker/internal/tracker"
+	"github.com/reak/get-hike/internal/ai"
+	"github.com/reak/get-hike/internal/config"
+	"github.com/reak/get-hike/internal/db"
+	"github.com/reak/get-hike/internal/sync"
+	"github.com/reak/get-hike/internal/tracker"
 )
-
 
 // App is the Wails application struct — all public methods are bound to the frontend.
 type App struct {
@@ -27,6 +27,10 @@ type App struct {
 	database   *db.DB
 	gemini     *ai.GeminiClient
 	keyTracker *tracker.KeystrokeTracker
+	syncEngine *sync.SyncEngine
+
+	isGuest   bool
+	authToken string
 
 	// latest keystroke stats (updated by the tracker goroutine)
 	latestKeyStats tracker.KeystrokeStats
@@ -45,7 +49,7 @@ func (a *App) startup(ctx context.Context) {
 	cfg, err := config.Load()
 	if err != nil {
 		log.Printf("[app] config load error: %v", err)
-		cfg = &config.Config{ScreenshotInterval: 30 * time.Second, DataDir: "/tmp/mini-tracker"}
+		cfg = &config.Config{ScreenshotInterval: 30 * time.Second, DataDir: "/tmp/get-hike"}
 	}
 	a.cfg = cfg
 
@@ -57,8 +61,11 @@ func (a *App) startup(ctx context.Context) {
 		a.database = dbConn
 	}
 
-	// Gemini client
+	// Gemini client (used for Guest Mode or direct client-side requests)
 	a.gemini = ai.NewGeminiClient(cfg.GeminiAPIKey, cfg.GeminiModel)
+
+	// Sync Engine (used for Authenticated / Org Mode)
+	a.syncEngine = sync.NewSyncEngine(a.database, cfg.BackendEndpoint)
 
 	// Start keystroke tracker
 	a.keyTracker = tracker.NewKeystrokeTracker(cfg.ScreenshotInterval)
@@ -87,7 +94,10 @@ func (a *App) startup(ctx context.Context) {
 		}
 	}()
 
-	// Auto-process any pending/unanalyzed logs if Gemini key is set
+	// Start 3-hour background pull cron if connected to backend
+	a.syncEngine.StartBackgroundPullCron(a.ctx, 3*time.Hour)
+
+	// Auto-process any pending/unanalyzed logs if Gemini key is set (Guest mode)
 	if a.gemini.HasKey() {
 		go func() {
 			count, err := a.ProcessPendingLogs()
@@ -149,7 +159,7 @@ func (a *App) cleanOldScreenshots() {
 }
 
 // collect captures a screenshot + uses latest keystroke stats, persists the
-// entry, then fires async Gemini analysis.
+// entry, then fires async Gemini analysis (in Guest mode) or queues for backend sync (in Auth mode).
 func (a *App) collect() {
 	keyStats := a.latestKeyStats
 	a.latestKeyStats = tracker.KeystrokeStats{} // reset
@@ -161,12 +171,18 @@ func (a *App) collect() {
 		shot = &tracker.ScreenshotResult{}
 	}
 
+	syncStatus := "pending_upload"
+	if a.isGuest {
+		syncStatus = "local_only"
+	}
+
 	entry := &db.LogEntry{
 		Timestamp:    time.Now(),
 		ImagePath:    shot.FilePath,
 		TotalKeys:    keyStats.TotalKeys,
 		UniqueKeys:   keyStats.UniqueKeys,
 		EntropyScore: keyStats.EntropyScore,
+		SyncStatus:   syncStatus,
 	}
 
 	if a.database == nil {
@@ -179,20 +195,79 @@ func (a *App) collect() {
 		return
 	}
 
-	// Fire async AI analysis
-	go func(logID int64, filePath, b64Data string, score float64) {
-		ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
-		defer cancel()
+	if a.isGuest {
+		// Guest Mode: Perform direct client-side local Gemini AI analysis
+		go func(logID int64, filePath, b64Data string, score float64) {
+			ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+			defer cancel()
 
-		// Async AI analysis
-		if result, err := a.gemini.Analyze(ctx, b64Data, score); err == nil {
-			if err := a.database.UpdateAIResult(logID, result.Category, result.Productive, result.Confidence, result.Reason); err != nil {
-				log.Printf("[app] update AI result error: %v", err)
+			if result, err := a.gemini.Analyze(ctx, b64Data, score); err == nil {
+				if err := a.database.UpdateAIResult(logID, result.Category, result.Productive, result.Confidence, result.Reason); err != nil {
+					log.Printf("[app] update local AI result error: %v", err)
+				}
+				log.Printf("[app] guest logged #%d — category=%s productive=%v",
+					logID, result.Category, result.Productive)
 			}
-			log.Printf("[app] logged #%d — category=%s productive=%v",
-				logID, result.Category, result.Productive)
+		}(id, shot.FilePath, shot.Base64Data, keyStats.EntropyScore)
+	} else {
+		// Authenticated Mode: Push raw telemetry to backend
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			_, _ = a.syncEngine.PushTelemetry(ctx)
+		}()
+	}
+}
+
+// SetAuthSession updates active session authentication token and mode (Guest vs Authenticated).
+func (a *App) SetAuthSession(token string, isGuest bool) {
+	a.authToken = token
+	a.isGuest = isGuest
+	if a.syncEngine != nil {
+		a.syncEngine.SetAuthToken(token)
+	}
+	log.Printf("[app] session updated — isGuest: %v", isGuest)
+}
+
+// TriggerSyncNow initiates an immediate Push + Pull cycle on demand.
+func (a *App) TriggerSyncNow() (bool, error) {
+	if a.isGuest {
+		return true, nil // Guest mode is local-only
+	}
+	if a.syncEngine == nil {
+		return false, fmt.Errorf("sync engine unavailable")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+
+	err := a.syncEngine.TriggerSyncNow(ctx)
+	if err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// SetUserPersonalKey sets personal Gemini API Key for solo users.
+func (a *App) SetUserPersonalKey(apiKey string) (bool, error) {
+	if a.cfg != nil {
+		a.cfg.GeminiAPIKey = apiKey
+		_ = config.Save(a.cfg)
+	}
+	if a.gemini != nil {
+		a.gemini.SetAPIKey(apiKey)
+	}
+	return true, nil
+}
+
+// SetOrgGeminiKey updates the organization Gemini API key in backend DB.
+func (a *App) SetOrgGeminiKey(orgID int64, apiKey string) (bool, error) {
+	if a.database != nil && orgID > 0 {
+		if err := a.database.SetOrgGeminiConfig(orgID, apiKey, "models/gemma-4-31b-it"); err != nil {
+			return false, err
 		}
-	}(id, shot.FilePath, shot.Base64Data, keyStats.EntropyScore)
+	}
+	return true, nil
 }
 
 // shutdown is called when the app terminates.

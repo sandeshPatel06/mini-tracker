@@ -17,3 +17,9 @@ body:json {
     "full_name": "Team Member"
   }
 }
+
+script:post-response {
+  if (res.status === 200 && res.body && res.body.token) {
+    bru.setEnvVar("token", res.body.token);
+  }
+}

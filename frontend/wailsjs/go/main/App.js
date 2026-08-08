@@ -38,6 +38,22 @@ export function RecordInputActivity(arg1, arg2) {
   return window['go']['main']['App']['RecordInputActivity'](arg1, arg2);
 }
 
+export function SetAuthSession(arg1, arg2) {
+  return window['go']['main']['App']['SetAuthSession'](arg1, arg2);
+}
+
+export function SetOrgGeminiKey(arg1, arg2) {
+  return window['go']['main']['App']['SetOrgGeminiKey'](arg1, arg2);
+}
+
+export function SetUserPersonalKey(arg1) {
+  return window['go']['main']['App']['SetUserPersonalKey'](arg1);
+}
+
+export function TriggerSyncNow() {
+  return window['go']['main']['App']['TriggerSyncNow']();
+}
+
 export function UpdateAIModel(arg1) {
   return window['go']['main']['App']['UpdateAIModel'](arg1);
 }

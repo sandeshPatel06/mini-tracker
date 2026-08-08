@@ -16,11 +16,12 @@ jobs:
           npm run build
           cd ..
           mkdir -p bin
-          go build -o bin/mini-tracker-server ./cmd/server
+          go build -o bin/get-hike .
+          go build -o bin/get-hike-server ./cmd/server
         useContainer: true
       - type: PublishArtifactStep
         name: publish artifact
-        artifacts: bin/mini-tracker-server
+        artifacts: bin/get-hike, bin/get-hike-server
     triggers:
       - branchTriggers:
           - branches: main

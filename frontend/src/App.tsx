@@ -8,7 +8,7 @@ import { OrganizationPage } from './pages/Organization';
 import { AcceptInvitePage } from './pages/AcceptInvite';
 import { AuthPage } from './pages/Auth';
 import { SettingsPage } from './pages/Settings';
-// MiniTrackerWizard is now opened via window.open('/wizard') as a real OS window
+import { Icon, IconName } from './components/Icon';
 import logoAsset from './assets/logo.png';
 import './style.css';
 
@@ -199,6 +199,28 @@ export default function App() {
   const [selectedUserId, setSelectedUserId] = useState<number | null>(null);
   const [startDate, setStartDate] = useState<string>(today);
   const [endDate, setEndDate] = useState<string>(today);
+  const [isSyncing, setIsSyncing] = useState<boolean>(false);
+  const [syncMessage, setSyncMessage] = useState<string>('');
+
+  const handleSyncNow = async () => {
+    setIsSyncing(true);
+    setSyncMessage('Syncing...');
+    try {
+      const w = window as any;
+      if (w.go?.main?.App?.TriggerSyncNow) {
+        await w.go.main.App.TriggerSyncNow();
+      } else {
+        await apiFetch('/api/telemetry/pull');
+      }
+      await loadData(today);
+      setSyncMessage('Synced just now');
+    } catch (err) {
+      setSyncMessage('Sync failed');
+    } finally {
+      setIsSyncing(false);
+      setTimeout(() => setSyncMessage(''), 4000);
+    }
+  };
 
   const loadData = useCallback(async (date: string, filterUserId?: number | null, sDate?: string, eDate?: string) => {
     setLoading(true);
@@ -520,13 +542,13 @@ Respond ONLY with a valid JSON array of objects, one per item, strictly in this 
     setIsMobileMenuOpen(false);
   };
 
-  const navItems: { id: Page; icon: string; label: string }[] = [
-    { id: 'dashboard', icon: '⚡', label: 'Dashboard' },
-    { id: 'timeline',  icon: '📋', label: 'Timeline'  },
-    { id: 'analytics', icon: '📊', label: 'Analytics' },
+  const navItems: { id: Page; iconName: IconName; label: string }[] = [
+    { id: 'dashboard', iconName: 'target', label: 'Dashboard' },
+    { id: 'timeline',  iconName: 'clock', label: 'Timeline'  },
+    { id: 'analytics', iconName: 'activity', label: 'Analytics' },
     ...(currentUser?.role === 'admin' || currentUser?.role === 'owner' || isGuestMode ? [
-      { id: 'organization' as Page, icon: '🏢', label: 'Team / Org' },
-      { id: 'settings' as Page, icon: '⚙️', label: 'AI Settings' },
+      { id: 'organization' as Page, iconName: 'building' as IconName, label: 'Team / Org' },
+      { id: 'settings' as Page, iconName: 'settings' as IconName, label: 'AI Settings' },
     ] : []),
   ];
 
@@ -596,8 +618,21 @@ Respond ONLY with a valid JSON array of objects, one per item, strictly in this 
 
         {/* Work Clock & Tracking Control Widget */}
         <div className="sidebar-widget">
-          <div className="sidebar-widget-label">
-            Work Session
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+            <span className="sidebar-widget-label">Work Session</span>
+            <span
+              style={{
+                fontSize: 10,
+                padding: '2px 6px',
+                borderRadius: 4,
+                fontWeight: 600,
+                background: isGuestMode ? 'rgba(168, 85, 247, 0.15)' : 'rgba(16, 185, 129, 0.15)',
+                color: isGuestMode ? '#c084fc' : '#34d399',
+                border: isGuestMode ? '1px solid rgba(168, 85, 247, 0.3)' : '1px solid rgba(16, 185, 129, 0.3)',
+              }}
+            >
+              {isGuestMode ? '100% Offline Guest' : 'Backend Synced'}
+            </span>
           </div>
           <div className="sidebar-widget-timer">
             {formatTimer(elapsedSeconds)}
@@ -605,10 +640,36 @@ Respond ONLY with a valid JSON array of objects, one per item, strictly in this 
           <button
             onClick={handleToggleTracking}
             className={`btn-tracker-toggle ${isTrackingActive ? 'active' : ''}`}
+            style={{ marginBottom: isGuestMode ? 0 : 8 }}
           >
-            <span>{isTrackingActive ? '⏸️' : '▶️'}</span>
+            <Icon name={isTrackingActive ? 'x' : 'check'} size={14} />
             <span>{isTrackingActive ? 'Pause Tracker' : 'Start Tracker'}</span>
           </button>
+          {!isGuestMode && (
+            <button
+              onClick={handleSyncNow}
+              disabled={isSyncing}
+              style={{
+                width: '100%',
+                padding: '7px 12px',
+                background: 'rgba(99, 102, 241, 0.15)',
+                border: '1px solid rgba(99, 102, 241, 0.3)',
+                borderRadius: '8px',
+                color: '#818cf8',
+                fontSize: '11px',
+                fontWeight: 600,
+                cursor: isSyncing ? 'not-allowed' : 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '6px',
+                transition: 'all 0.2s ease',
+              }}
+            >
+              <Icon name="refresh" size={12} className={isSyncing ? 'spin' : ''} />
+              <span>{isSyncing ? 'Syncing...' : (syncMessage || 'Sync Now')}</span>
+            </button>
+          )}
         </div>
 
         <div className="sidebar-section-label">Navigation</div>
@@ -619,7 +680,7 @@ Respond ONLY with a valid JSON array of objects, one per item, strictly in this 
             className={`nav-item ${page === item.id ? 'active' : ''}`}
             onClick={() => navigateTo(item.id)}
           >
-            <span className="nav-icon">{item.icon}</span>
+            <Icon name={item.iconName} size={16} className="nav-icon" />
             <span className="nav-text">{item.label}</span>
           </div>
         ))}
@@ -627,10 +688,11 @@ Respond ONLY with a valid JSON array of objects, one per item, strictly in this 
         <div className="sidebar-footer">
           {currentUser ? (
             <div style={{ marginBottom: 12, paddingBottom: 10, borderBottom: '1px solid var(--border-subtle)' }}>
-              <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                👤 {currentUser.full_name || currentUser.email}
+              <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', display: 'flex', alignItems: 'center', gap: 6 }}>
+                <Icon name="user" size={14} color="var(--text-secondary)" />
+                <span>{currentUser.full_name || currentUser.email}</span>
               </div>
-              <div style={{ fontSize: 10, color: 'var(--text-muted)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 4 }}>
+              <div style={{ fontSize: 11, color: 'var(--text-muted)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 6 }}>
                 <span style={{ textTransform: 'capitalize' }}>Role: {currentUser.role}</span>
                 <button
                   onClick={handleLogout}
@@ -638,12 +700,16 @@ Respond ONLY with a valid JSON array of objects, one per item, strictly in this 
                     background: 'transparent',
                     border: 'none',
                     color: 'var(--accent-red)',
-                    fontSize: 10,
-                    fontWeight: 700,
+                    fontSize: 11,
+                    fontWeight: 600,
                     cursor: 'pointer',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 4,
                   }}
                 >
-                  Logout 🚪
+                  <span>Logout</span>
+                  <Icon name="logout" size={12} />
                 </button>
               </div>
             </div>

@@ -1,0 +1,3 @@
+# Grant read permissions on input event devices to the active desktop user via systemd-logind (uaccess)
+# Eliminates the need to add users to the 'input' group or log out / reboot.
+KERNEL=="event*", SUBSYSTEM=="input", TAG+="uaccess"

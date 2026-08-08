@@ -16,10 +16,14 @@ import (
 
 // AnalysisResult is the structured response from Gemini.
 type AnalysisResult struct {
-	Category   string  `json:"category"`
-	Productive bool    `json:"productive"`
-	Confidence float64 `json:"confidence"`
-	Reason     string  `json:"brief_reason"`
+	Category        string  `json:"category"`
+	AppName         string  `json:"app_name"`
+	AppCategory     string  `json:"app_category"`
+	WindowTitle     string  `json:"window_title"`
+	Productive      bool    `json:"productive"`
+	ProductiveScore float64 `json:"productivity_score"`
+	Confidence      float64 `json:"confidence"`
+	Reason          string  `json:"brief_reason"`
 }
 
 // GeminiModelInfo represents a model returned by ListModels API.
@@ -52,7 +56,7 @@ func NewGeminiClient(apiKey string, initialModel ...string) *GeminiClient {
 	return &GeminiClient{
 		apiKey:    apiKey,
 		modelName: m,
-		client:    &http.Client{Timeout: 45 * time.Second},
+		client:    &http.Client{Timeout: 60 * time.Second},
 	}
 }
 
@@ -137,28 +141,28 @@ func (g *GeminiClient) FetchAvailableModels(ctx context.Context) ([]string, erro
 		return nil, fmt.Errorf("no models with generateContent support found")
 	}
 
-	// Rank models by cost/efficiency/capability
+	// Rank models by cost/efficiency/capability (preferring Flash models for 1-2s response times)
 	scoreModel := func(name string) int {
 		lName := strings.ToLower(name)
-		if strings.Contains(lName, "gemma-4-31b-it") || strings.Contains(lName, "gemma-4") {
-			return 120
-		}
-		if strings.Contains(lName, "gemini-2.5-flash") || strings.Contains(lName, "2.5-flash") {
-			return 115
+		if strings.Contains(lName, "gemma-4-31b-it") || strings.Contains(lName, "2.5-flash") {
+			return 150
 		}
 		if strings.Contains(lName, "gemini-2.0-flash") || strings.Contains(lName, "2.0-flash") {
-			return 90
+			return 140
 		}
 		if strings.Contains(lName, "gemini-1.5-flash") || strings.Contains(lName, "1.5-flash") {
-			return 85
+			return 130
 		}
 		if strings.Contains(lName, "flash") {
-			return 80
+			return 120
+		}
+		if strings.Contains(lName, "gemma-4-31b-it") || strings.Contains(lName, "gemma-4") {
+			return 20
 		}
 		if strings.Contains(lName, "gemma") {
-			return 50
+			return 10
 		}
-		return 10
+		return 5
 	}
 
 	// Sort candidates descending by score
@@ -253,11 +257,13 @@ Context:
   * Low entropy (0.0 - 15.0) indicates reading code/logs, reviewing build errors, inspecting terminal output, or idling.
 
 Instructions:
-1. Identify visible application windows, IDEs (VS Code, JetBrains), active code files (.go, .tsx, .css, Makefile), terminal commands (go build, make, npm), or browser pages.
-2. Determine if the user is engaged in productive work (software engineering, debugging, code review, documentation reading, terminal operations) vs unproductive activities (leisure, social media, entertainment). Note: Reading build errors or code with 0.0 entropy is productive.
-3. Select the most accurate category from: [Coding, Writing, Browsing, Social Media, Video/Entertainment, Communication, Design, Idle, Other].
-4. Return ONLY a valid JSON object without markdown fences or extra text:
-{"category": "Coding", "productive": true, "confidence": 0.95, "brief_reason": "Editing Makefile & inspecting Go build output in VS Code terminal"}`,
+1. Identify the primary application open on screen (app_name, e.g. VS Code, Chrome, Terminal, Slack, Spotify, JetBrains).
+2. Classify the app category (app_category, e.g. IDE / Code Editor, Web Browser, Terminal / CLI, Communication, Entertainment).
+3. Identify the active window title or file path visible (window_title, e.g. "db.go - mini-tracker", "Google Search").
+4. Select the primary category from: [Coding, Writing, Browsing, Social Media, Video/Entertainment, Communication, Design, Idle, Other].
+5. Evaluate productivity percentage score (productivity_score: 0 to 100). Software engineering, coding, debugging, terminal ops, build inspection = 85-100. Leisure/social media = 0-20.
+6. Return ONLY a valid JSON object without markdown fences:
+{"category": "Coding", "app_name": "VS Code", "app_category": "IDE / Code Editor", "window_title": "db.go - mini-tracker", "productivity_score": 95, "productive": true, "confidence": 0.95, "brief_reason": "Editing Go database logic in VS Code terminal"}`,
 		entropyScore,
 	)
 
@@ -281,8 +287,8 @@ Instructions:
 
 	// Attempt request
 	res, err := g.executeAnalysis(ctx, model, reqBody)
-	if err != nil && (strings.Contains(err.Error(), "404") || strings.Contains(err.Error(), "NOT_FOUND") || strings.Contains(err.Error(), "429") || strings.Contains(err.Error(), "RESOURCE_EXHAUSTED")) {
-		// Model not found or rate-limited: mark excluded and retry with failover model
+	if err != nil && (strings.Contains(err.Error(), "404") || strings.Contains(err.Error(), "NOT_FOUND") || strings.Contains(err.Error(), "429") || strings.Contains(err.Error(), "RESOURCE_EXHAUSTED") || strings.Contains(err.Error(), "deadline exceeded") || strings.Contains(err.Error(), "Timeout exceeded")) {
+		// Model failed or timed out: mark excluded and retry with failover model
 		log.Printf("[ai/gemini] Model %s failed (%v), retrying with failover model...", model, err)
 		excluded[model] = true
 
@@ -308,11 +314,15 @@ type BatchAnalysisItem struct {
 
 // BatchAnalysisResult represents the result for a single item in a batch.
 type BatchAnalysisResult struct {
-	LogID      int64
-	Category   string  `json:"category"`
-	Productive bool    `json:"productive"`
-	Confidence float64 `json:"confidence"`
-	Reason     string  `json:"reason"`
+	LogID           int64
+	Category        string  `json:"category"`
+	AppName         string  `json:"app_name"`
+	AppCategory     string  `json:"app_category"`
+	WindowTitle     string  `json:"window_title"`
+	Productive      bool    `json:"productive"`
+	ProductiveScore float64 `json:"productivity_score"`
+	Confidence      float64 `json:"confidence"`
+	Reason          string  `json:"reason"`
 }
 
 // AnalyzeBatch sends multiple screenshots in a single Gemini API request.
@@ -322,14 +332,14 @@ func (g *GeminiClient) AnalyzeBatch(ctx context.Context, items []BatchAnalysisIt
 	}
 
 	prompt := fmt.Sprintf(`You are an expert developer productivity analyst inspecting a sequence of %d desktop screenshots.
-For EACH screenshot item (Item 1 to Item %d), analyze the open application windows, web pages, IDEs, document text, and active work context.
+For EACH screenshot item (Item 1 to Item %d), analyze the primary open application (app_name), app category (app_category), window title (window_title), work category, productivity status, and concise reason.
 
 Respond ONLY with a valid JSON array of objects, one per item, strictly in this format:
 [
 `, len(items), len(items))
 
 	for i, item := range items {
-		prompt += fmt.Sprintf(`  {"item_index": %d, "category": "Coding" | "Writing" | "Browsing" | "Social Media" | "Video/Entertainment" | "Communication" | "Design" | "Idle" | "Other", "is_productive": true | false, "confidence": 0.95, "reason": "concise explanation (Entropy: %.1f)"}%s
+		prompt += fmt.Sprintf(`  {"item_index": %d, "app_name": "VS Code", "app_category": "IDE / Code Editor", "window_title": "active window", "category": "Coding", "productivity_score": 95, "is_productive": true, "confidence": 0.95, "reason": "concise explanation (Entropy: %.1f)"}%s
 `, i+1, item.EntropyScore, func() string {
 			if i < len(items)-1 {
 				return ","
@@ -382,7 +392,8 @@ Respond ONLY with a valid JSON array of objects, one per item, strictly in this 
 		model = m
 	}
 
-	url := fmt.Sprintf("https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent?key=%s", model, g.apiKey)
+	cleanModel := strings.TrimPrefix(model, "models/")
+	url := fmt.Sprintf("https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent?key=%s", cleanModel, g.apiKey)
 	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(reqBody))
 	if err != nil {
 		return nil, err
@@ -415,34 +426,59 @@ Respond ONLY with a valid JSON array of objects, one per item, strictly in this 
 	}
 
 	rawText := strings.TrimSpace(geminiResp.Candidates[0].Content.Parts[0].Text)
+	jsonArrayStr := extractJSONArrayString(rawText)
 	var rawResults []struct {
-		ItemIndex    int     `json:"item_index"`
-		Category     string  `json:"category"`
-		IsProductive bool    `json:"is_productive"`
-		Productive   bool    `json:"productive"`
-		Confidence   float64 `json:"confidence"`
-		Reason       string  `json:"reason"`
+		ItemIndex         int     `json:"item_index"`
+		AppName           string  `json:"app_name"`
+		AppCategory       string  `json:"app_category"`
+		WindowTitle       string  `json:"window_title"`
+		Category          string  `json:"category"`
+		ProductivityScore float64 `json:"productivity_score"`
+		ProductiveScore   float64 `json:"productive_score"`
+		IsProductive      bool    `json:"is_productive"`
+		Productive        bool    `json:"productive"`
+		Confidence        float64 `json:"confidence"`
+		Reason            string  `json:"reason"`
 	}
 
-	if err := json.Unmarshal([]byte(rawText), &rawResults); err != nil {
+	if err := json.Unmarshal([]byte(jsonArrayStr), &rawResults); err != nil {
 		return nil, fmt.Errorf("parse batch JSON (%q): %w", truncateString(rawText, 100), err)
 	}
 
 	var results []BatchAnalysisResult
 	for i, item := range items {
 		resItem := BatchAnalysisResult{
-			LogID:      item.LogID,
-			Category:   "Coding",
-			Productive: true,
-			Confidence: 0.9,
-			Reason:     "Analyzed via screenshot batching",
+			LogID:           item.LogID,
+			Category:        "Coding",
+			Productive:      true,
+			ProductiveScore: 95.0,
+			Confidence:      0.9,
+			Reason:          "Analyzed via screenshot batching",
 		}
 		if i < len(rawResults) {
 			r := rawResults[i]
 			if r.Category != "" {
 				resItem.Category = r.Category
 			}
-			resItem.Productive = r.IsProductive || r.Productive
+			if r.AppName != "" {
+				resItem.AppName = r.AppName
+			}
+			if r.AppCategory != "" {
+				resItem.AppCategory = r.AppCategory
+			}
+			if r.WindowTitle != "" {
+				resItem.WindowTitle = r.WindowTitle
+			}
+			if r.ProductivityScore > 0 {
+				resItem.ProductiveScore = r.ProductivityScore
+			} else if r.ProductiveScore > 0 {
+				resItem.ProductiveScore = r.ProductiveScore
+			} else if r.IsProductive || r.Productive {
+				resItem.ProductiveScore = 95.0
+			} else {
+				resItem.ProductiveScore = 10.0
+			}
+			resItem.Productive = r.IsProductive || r.Productive || resItem.ProductiveScore >= 50
 			if r.Confidence > 0 {
 				resItem.Confidence = r.Confidence
 			}
@@ -457,7 +493,8 @@ Respond ONLY with a valid JSON array of objects, one per item, strictly in this 
 }
 
 func (g *GeminiClient) executeAnalysis(ctx context.Context, modelName string, reqBody []byte) (*AnalysisResult, error) {
-	url := fmt.Sprintf("https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent?key=%s", modelName, g.apiKey)
+	cleanModelName := strings.TrimPrefix(modelName, "models/")
+	url := fmt.Sprintf("https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent?key=%s", cleanModelName, g.apiKey)
 
 	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(reqBody))
 	if err != nil {
@@ -590,4 +627,28 @@ func truncateString(s string, maxLen int) string {
 		return s
 	}
 	return s[:maxLen] + "..."
+}
+
+func extractJSONArrayString(rawText string) string {
+	rawText = strings.TrimSpace(rawText)
+	if strings.HasPrefix(rawText, "```") {
+		lines := strings.Split(rawText, "\n")
+		if len(lines) >= 2 {
+			if strings.HasPrefix(lines[0], "```") {
+				lines = lines[1:]
+			}
+			if len(lines) > 0 && strings.HasPrefix(lines[len(lines)-1], "```") {
+				lines = lines[:len(lines)-1]
+			}
+			rawText = strings.Join(lines, "\n")
+		}
+	}
+	rawText = strings.TrimSpace(rawText)
+
+	start := strings.Index(rawText, "[")
+	end := strings.LastIndex(rawText, "]")
+	if start >= 0 && end > start {
+		return rawText[start : end+1]
+	}
+	return rawText
 }

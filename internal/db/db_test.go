@@ -221,3 +221,29 @@ func TestLogEntryCRUD(t *testing.T) {
 		t.Errorf("unexpected stats: %+v", stats)
 	}
 }
+
+func TestKeyResolutionHierarchy(t *testing.T) {
+	database, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	// 1. Fallback to Global Key
+	key, model, source, err := database.ResolveEffectiveGeminiKey(1, 1, "global-key-123", "gemma-4-31b-it")
+	if err != nil || key != "global-key-123" || source != "global_system" {
+		t.Errorf("expected global_system key fallback, got key=%s source=%s err=%v", key, source, err)
+	}
+
+	// 2. Solo user sets personal key
+	_ = database.SetUserPersonalKey(1, "user-personal-key-456")
+	key, model, source, err = database.ResolveEffectiveGeminiKey(1, 0, "global-key-123", "gemma-4-31b-it")
+	if err != nil || key != "user-personal-key-456" || source != "user_personal" {
+		t.Errorf("expected user_personal key, got key=%s source=%s err=%v", key, source, err)
+	}
+
+	// 3. Org Admin sets Org key
+	_ = database.SetOrgGeminiConfig(1, "org-admin-key-789", "gemma-4-31b-it")
+	key, model, source, err = database.ResolveEffectiveGeminiKey(1, 1, "global-key-123", "gemma-4-31b-it")
+	if err != nil || key != "org-admin-key-789" || source != "org_admin" {
+		t.Errorf("expected org_admin key priority, got key=%s source=%s err=%v", key, source, err)
+	}
+	_ = model
+}

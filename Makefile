@@ -21,7 +21,7 @@ default: help
 all: help
 
 help: ## Show this help message
-	@echo "Mini Tracker Makefile commands:"
+	@echo "get-Hike Makefile commands:"
 	@echo ""
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}'
 	@echo ""
@@ -29,7 +29,7 @@ help: ## Show this help message
 install: ## Run automated Linux installer (builds app & configures systemd daemon)
 	./install.sh
 
-uninstall: ## Remove Mini Tracker app, systemd daemon, desktop entries, and user data from local system
+uninstall: ## Remove get-Hike app, systemd daemon, desktop entries, and user data from local system
 	./uninstall.sh
 
 setup-debs: ## Install GTK3/WebKit2GTK dependencies without sudo into ~/.local
@@ -65,9 +65,10 @@ endif
 doctor: ## Check Wails environment dependencies
 	wails doctor
 
-setup-input: ## Add user to 'input' group for keystroke tracking (requires logout after)
-	sudo usermod -aG input $$USER
-	@echo "✓ Added to input group. Please log out and back in."
+setup-input: ## Configure udev rules for zero-logout hardware input access (no usermod -aG input required)
+	sudo cp scripts/99-get-hike-input.rules /etc/udev/rules.d/99-get-hike-input.rules
+	sudo udevadm control --reload-rules && sudo udevadm trigger
+	@echo "✓ Zero-logout input udev rule installed and activated instantly."
 
 docker-up: ## Run backend-only API server using Docker
 	docker compose up --build -d

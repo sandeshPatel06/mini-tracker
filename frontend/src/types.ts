@@ -6,10 +6,30 @@ export interface LogEntry {
   total_keys: number;
   unique_keys: number;
   entropy_score: number;
+  app_name?: string;
+  app_category?: string;
+  window_title?: string;
+  session_id?: number;
+  session_title?: string;
   ai_category: string;
   is_productive: boolean;
+  productive_score?: number;
   ai_confidence: number;
   ai_reason: string;
+}
+
+export interface WorkSession {
+  id: number;
+  org_id?: number;
+  user_id?: number;
+  title: string;
+  summary: string;
+  start_time: string;
+  end_time: string;
+  log_count: number;
+  productive_pct: number;
+  top_app_name?: string;
+  top_category?: string;
 }
 
 export interface ProductivityStats {

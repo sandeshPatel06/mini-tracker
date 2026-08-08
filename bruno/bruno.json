@@ -1,3 +1,9 @@
-name: Mini Tracker API
-type: collection
-version: "1"
+{
+  "version": "1",
+  "name": "Mini Tracker API",
+  "type": "collection",
+  "ignore": [
+    "node_modules",
+    ".git"
+  ]
+}

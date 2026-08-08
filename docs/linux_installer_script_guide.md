@@ -198,10 +198,10 @@ else
 fi
 ```
 
-### 6.2 Hardware Group Membership Automation
-If the desktop app interacts with Linux hardware events (e.g. `/dev/input/event*` for key entropy or `/dev/video*` for camera input):
-- Under `sudo`: Automatically execute `usermod -aG input "${REAL_USER}"`.
-- Under non-`sudo`: Prompt the user with the exact command to run: `sudo usermod -aG input $USER`.
+### 6.2 Hardware Input Permissions & Zero-Sudo Automation
+If the desktop app interacts with Linux hardware events (e.g. `/dev/input/event*` for key entropy):
+- Under `sudo`: Automatically install the zero-logout udev rule (`/etc/udev/rules.d/99-mini-tracker-input.rules`) or set capabilities (`setcap cap_dac_read_search+ep`), eliminating `usermod -aG input` and reboot requirements.
+- Under non-`sudo`: Automatically operate in **Zero-Sudo Application & API Input Tracking Mode** without requiring root privileges.
 
 ---
 

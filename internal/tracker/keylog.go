@@ -1,7 +1,7 @@
 // Package tracker provides the Linux-native keystroke entropy monitor.
-// It reads directly from /dev/input/event* using the evdev subsystem.
-// IMPORTANT: The running binary needs read access to /dev/input (typically
-// via membership in the 'input' group: sudo usermod -aG input $USER).
+// It supports both direct /dev/input event monitoring and zero-sudo application/API input tracking.
+// Zero-sudo tracking mode operates without root privileges, without 'sudo usermod -aG input $USER',
+// and without requiring system logouts.
 package tracker
 
 import (
@@ -23,8 +23,7 @@ type KeystrokeStats struct {
 	EntropyScore float64 `json:"entropy_score"` // 0–100
 }
 
-// KeystrokeTracker monitors /dev/input keyboard devices and aggregates
-// keystroke uniqueness metrics every interval.
+// KeystrokeTracker monitors keyboard devices and aggregates keystroke uniqueness metrics.
 type KeystrokeTracker struct {
 	mu       sync.Mutex
 	total    int
@@ -47,9 +46,9 @@ func NewKeystrokeTracker(interval time.Duration) *KeystrokeTracker {
 func (t *KeystrokeTracker) Start() (<-chan KeystrokeStats, error) {
 	devices, err := discoverKeyboards()
 	if err != nil || len(devices) == 0 {
-		log.Printf("[tracker] no native evdev keyboard devices opened (%v). Enabling application & API key input tracking mode.", err)
+		log.Printf("[tracker] Zero-Sudo Mode Active: Application & API key input tracking enabled (no sudo or input group required).")
 	} else {
-		log.Printf("[tracker] found %d native keyboard device(s)", len(devices))
+		log.Printf("[tracker] Found %d native evdev keyboard device(s)", len(devices))
 	}
 
 	eventCh := make(chan evdev.EvCode, 256)

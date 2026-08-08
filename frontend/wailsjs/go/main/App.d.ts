@@ -20,6 +20,14 @@ export function ProcessPendingLogs():Promise<number>;
 
 export function RecordInputActivity(arg1:number,arg2:number):Promise<void>;
 
+export function SetAuthSession(arg1:string,arg2:boolean):Promise<void>;
+
+export function SetOrgGeminiKey(arg1:number,arg2:string):Promise<boolean>;
+
+export function SetUserPersonalKey(arg1:string):Promise<boolean>;
+
+export function TriggerSyncNow():Promise<boolean>;
+
 export function UpdateAIModel(arg1:string):Promise<boolean>;
 
 export function UpdateGeminiAPIKey(arg1:string):Promise<boolean>;

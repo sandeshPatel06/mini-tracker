@@ -4,6 +4,7 @@
 package main
 
 import (
+	"compress/gzip"
 	"context"
 	"crypto/hmac"
 	"crypto/rand"
@@ -12,6 +13,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"net/url"
@@ -23,11 +25,11 @@ import (
 	"time"
 
 	"github.com/holoplot/go-evdev"
-	"github.com/reak/mini-tracker/internal/ai"
-	"github.com/reak/mini-tracker/internal/config"
-	"github.com/reak/mini-tracker/internal/db"
-	"github.com/reak/mini-tracker/internal/email"
-	"github.com/reak/mini-tracker/internal/tracker"
+	"github.com/reak/get-hike/internal/ai"
+	"github.com/reak/get-hike/internal/config"
+	"github.com/reak/get-hike/internal/db"
+	"github.com/reak/get-hike/internal/email"
+	"github.com/reak/get-hike/internal/tracker"
 )
 
 func main() {
@@ -36,12 +38,12 @@ func main() {
 		log.Printf("[server] config load error: %v", err)
 		cfg = &config.Config{
 			ScreenshotInterval: 30 * time.Second,
-			DataDir:            filepath.Join(os.Getenv("HOME"), ".local/share/mini-tracker"),
+			DataDir:            filepath.Join(os.Getenv("HOME"), ".local/share/get-hike"),
 			BackendPort:        8080,
 		}
 	}
 
-	database, err := db.Open(cfg.DataDir)
+	database, err := db.Open(cfg.DataDir, cfg.DatabaseURL)
 	if err != nil {
 		log.Fatalf("[server] database error: %v", err)
 	}
@@ -141,18 +143,30 @@ func main() {
 					if err != nil {
 						log.Printf("[server] AI analysis error: %v", err)
 					} else {
-						_ = database.UpdateAIResult(logID, res.Category, res.Productive, res.Confidence, res.Reason)
-						log.Printf("[server] logged #%d — category=%s productive=%v reason=%s", logID, res.Category, res.Productive, res.Reason)
-					}
-
-					// Ensure screenshot file is deleted after processing/sending to backend
-					if filePath != "" {
-						if err := os.Remove(filePath); err == nil {
-							log.Printf("[server] deleted temporary screenshot: %s", filePath)
-						}
+						_ = database.UpdateLogAnalysis(logID, res.Category, res.AppName, res.AppCategory, res.WindowTitle, 0, "", res.Productive, res.ProductiveScore, res.Confidence, res.Reason)
+						log.Printf("[server] logged #%d — app=%s category=%s productive_score=%.0f%% reason=%s", logID, res.AppName, res.Category, res.ProductiveScore, res.Reason)
 					}
 				}(id, shot.FilePath, shot.Base64Data, ks.EntropyScore)
 			}
+		}
+	}()
+
+	// Background cleanup routine: Retain screenshots for 7 days (168 hours)
+	go func() {
+		ticker := time.NewTicker(6 * time.Hour)
+		defer ticker.Stop()
+		for range ticker.C {
+			imgDir := filepath.Join(cfg.DataDir, "images")
+			cutoff := time.Now().Add(-7 * 24 * time.Hour)
+			_ = filepath.Walk(imgDir, func(path string, info os.FileInfo, err error) error {
+				if err == nil && !info.IsDir() && info.ModTime().Before(cutoff) {
+					if strings.HasSuffix(path, ".png") || strings.HasSuffix(path, ".jpg") || strings.HasSuffix(path, ".jpeg") {
+						_ = os.Remove(path)
+						log.Printf("[server] 7-day retention cleanup: deleted old screenshot %s", path)
+					}
+				}
+				return nil
+			})
 		}
 	}()
 
@@ -193,12 +207,61 @@ func main() {
 		})
 	})
 
-	// GET /api/logs?date=YYYY-MM-DD&start_date=...&end_date=...&user_id=...
+	// Helper to resolve and enforce multi-tenant user & organization data isolation:
+	// 1. Standard team members ('member') are hard-restricted to viewing ONLY their own user_id and org_id.
+	// 2. Admins/Owners ('admin', 'owner') can view their own logs or logs of team members in their org.
+	// 3. If requested user_id belongs to a different organization, returns HTTP 403 Forbidden.
+	getAuthContext := func(r *http.Request, database *db.DB) (userID int64, orgID int64, statusCode int, errMsg string) {
+		sessUser := getSessionUser(r, database)
+
+		reqUserIDStr := r.URL.Query().Get("user_id")
+		var reqUserID int64
+		if reqUserIDStr != "" {
+			reqUserID, _ = strconv.ParseInt(reqUserIDStr, 10, 64)
+		}
+
+		if sessUser == nil {
+			// Unauthenticated fallback for desktop standalone app mode
+			if reqUserID > 0 {
+				return reqUserID, 1, http.StatusOK, ""
+			}
+			return 0, 1, http.StatusOK, ""
+		}
+
+		// 1. Standard member: strictly isolated to own user_id & org_id
+		if sessUser.Role != "owner" && sessUser.Role != "admin" {
+			return sessUser.ID, sessUser.OrgID, http.StatusOK, ""
+		}
+
+		// 2. Admin / Owner: if specific user_id requested, verify same organization
+		if reqUserID > 0 {
+			targetUser, err := database.GetUserByID(reqUserID)
+			if err != nil || targetUser == nil {
+				return 0, 0, http.StatusNotFound, "Requested user not found"
+			}
+			if targetUser.OrgID != sessUser.OrgID {
+				return 0, 0, http.StatusForbidden, "Forbidden: Requested user belongs to another organization"
+			}
+			return reqUserID, sessUser.OrgID, http.StatusOK, ""
+		}
+
+		// 3. Admin / Owner: viewing org-wide activity
+		return 0, sessUser.OrgID, http.StatusOK, ""
+	}
+
+	// GET /api/logs?date=YYYY-MM-DD&start_date=...&end_date=...&user_id=...&page=1&limit=50
 	mux.HandleFunc("/api/logs", func(w http.ResponseWriter, r *http.Request) {
+		userID, orgID, status, errMsg := getAuthContext(r, database)
+		if status != http.StatusOK {
+			jsonError(w, errMsg, status)
+			return
+		}
+
 		date := r.URL.Query().Get("date")
 		startDate := r.URL.Query().Get("start_date")
 		endDate := r.URL.Query().Get("end_date")
-		userIDStr := r.URL.Query().Get("user_id")
+		pageStr := r.URL.Query().Get("page")
+		limitStr := r.URL.Query().Get("limit")
 
 		if startDate == "" && endDate == "" {
 			if date == "" {
@@ -208,8 +271,19 @@ func main() {
 			endDate = date
 		}
 
-		userID, _ := strconv.ParseInt(userIDStr, 10, 64)
-		logs, err := database.GetLogsFiltered(userID, startDate, endDate)
+		if pageStr != "" || limitStr != "" {
+			page, _ := strconv.Atoi(pageStr)
+			limit, _ := strconv.Atoi(limitStr)
+			res, err := database.GetLogsFilteredPaginated(userID, orgID, startDate, endDate, page, limit)
+			if err != nil {
+				http.Error(w, err.Error(), 500)
+				return
+			}
+			jsonResp(w, res)
+			return
+		}
+
+		logs, err := database.GetLogsFiltered(userID, orgID, startDate, endDate)
 		if err != nil {
 			http.Error(w, err.Error(), 500)
 			return
@@ -219,10 +293,15 @@ func main() {
 
 	// GET /api/stats?date=YYYY-MM-DD&start_date=...&end_date=...&user_id=...
 	mux.HandleFunc("/api/stats", func(w http.ResponseWriter, r *http.Request) {
+		userID, orgID, status, errMsg := getAuthContext(r, database)
+		if status != http.StatusOK {
+			jsonError(w, errMsg, status)
+			return
+		}
+
 		date := r.URL.Query().Get("date")
 		startDate := r.URL.Query().Get("start_date")
 		endDate := r.URL.Query().Get("end_date")
-		userIDStr := r.URL.Query().Get("user_id")
 
 		if startDate == "" && endDate == "" {
 			if date == "" {
@@ -232,13 +311,43 @@ func main() {
 			endDate = date
 		}
 
-		userID, _ := strconv.ParseInt(userIDStr, 10, 64)
-		stats, err := database.GetProductivityStatsFiltered(userID, startDate, endDate)
+		stats, err := database.GetProductivityStatsFiltered(userID, orgID, startDate, endDate)
 		if err != nil {
 			http.Error(w, err.Error(), 500)
 			return
 		}
 		jsonResp(w, stats)
+	})
+
+	// GET /api/work-sessions?date=YYYY-MM-DD
+	mux.HandleFunc("/api/work-sessions", func(w http.ResponseWriter, r *http.Request) {
+		userID, orgID, status, errMsg := getAuthContext(r, database)
+		if status != http.StatusOK {
+			jsonError(w, errMsg, status)
+			return
+		}
+
+		date := r.URL.Query().Get("date")
+		startDate := r.URL.Query().Get("start_date")
+		endDate := r.URL.Query().Get("end_date")
+
+		if startDate == "" && endDate == "" {
+			if date == "" {
+				date = time.Now().Format("2006-01-02")
+			}
+			startDate = date
+			endDate = date
+		}
+
+		sessions, err := database.GetWorkSessionsFiltered(userID, orgID, startDate, endDate)
+		if err != nil {
+			http.Error(w, err.Error(), 500)
+			return
+		}
+		if sessions == nil {
+			sessions = []db.WorkSession{}
+		}
+		jsonResp(w, sessions)
 	})
 
 	// GET /api/image?path=...
@@ -389,9 +498,7 @@ func main() {
 			productive = res.Productive
 			confidence = res.Confidence
 			reason = res.Reason
-			_ = database.UpdateAIResult(logID, category, productive, confidence, reason)
-			// Remove screenshot file after AI analysis is complete
-			_ = os.Remove(filePath)
+			_ = database.UpdateLogAnalysis(logID, res.Category, res.AppName, res.AppCategory, res.WindowTitle, 0, "", res.Productive, res.ProductiveScore, res.Confidence, res.Reason)
 		} else {
 			log.Printf("[server] API screenshot upload AI processing deferred for log #%d: %v", logID, err)
 		}
@@ -406,6 +513,198 @@ func main() {
 			"success": true,
 			"log":     entry,
 		})
+	})
+
+	// POST /api/telemetry/push — Authenticated telemetry upload endpoint
+	mux.HandleFunc("/api/telemetry/push", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			jsonError(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		userID, orgID, status, errMsg := getAuthContext(r, database)
+		if status != http.StatusOK {
+			jsonError(w, errMsg, status)
+			return
+		}
+
+		var payload struct {
+			LocalID      int64   `json:"local_id"`
+			Timestamp    string  `json:"timestamp"`
+			ImageBase64  string  `json:"image_base64"`
+			TotalKeys    int     `json:"total_keys"`
+			UniqueKeys   int     `json:"unique_keys"`
+			EntropyScore float64 `json:"entropy_score"`
+			AppName      string  `json:"app_name"`
+			WindowTitle  string  `json:"window_title"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			jsonError(w, "Invalid telemetry payload", http.StatusBadRequest)
+			return
+		}
+
+		ts, err := time.Parse(time.RFC3339, payload.Timestamp)
+		if err != nil {
+			ts = time.Now()
+		}
+
+		filePath := ""
+		if payload.ImageBase64 != "" {
+			todayDir := filepath.Join(cfg.DataDir, "images", ts.Format("2006-01-02"))
+			_ = os.MkdirAll(todayDir, 0755)
+			filePath = filepath.Join(todayDir, fmt.Sprintf("ss_%d.jpg", time.Now().UnixNano()))
+			if rawImg, err := base64.StdEncoding.DecodeString(payload.ImageBase64); err == nil {
+				_ = os.WriteFile(filePath, rawImg, 0644)
+			}
+		}
+
+		entropy := payload.EntropyScore
+		if entropy == 0 && payload.TotalKeys > 0 {
+			entropy = tracker.ComputeEntropyScore(payload.TotalKeys, payload.UniqueKeys)
+		}
+
+		entry := &db.LogEntry{
+			OrgID:        orgID,
+			UserID:       userID,
+			Timestamp:    ts,
+			ImagePath:    filePath,
+			TotalKeys:    payload.TotalKeys,
+			UniqueKeys:   payload.UniqueKeys,
+			EntropyScore: entropy,
+			AppName:      payload.AppName,
+			WindowTitle:  payload.WindowTitle,
+		}
+
+		logID, err := database.InsertLog(entry)
+		if err != nil {
+			jsonError(w, "Database error saving telemetry", http.StatusInternalServerError)
+			return
+		}
+
+		// Resolve effective Gemini API Key based on Hierarchy:
+		// 1. Org Admin Key in DB -> 2. User Personal Key in DB -> 3. Global System Key
+		go func(id int64, imgPath, b64Data string, score float64, uID, oID int64) {
+			effKey, effModel, keySource, err := database.ResolveEffectiveGeminiKey(uID, oID, cfg.GeminiAPIKey, cfg.GeminiModel)
+			if err != nil || effKey == "" {
+				log.Printf("[server] telemetry AI processing skipped for log #%d (no valid key found, source=%s)", id, keySource)
+				return
+			}
+
+			ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+			defer cancel()
+
+			tempGemini := ai.NewGeminiClient(effKey, effModel)
+			res, err := tempGemini.Analyze(ctx, b64Data, score)
+			if err == nil {
+				_ = database.UpdateLogAnalysis(id, res.Category, res.AppName, res.AppCategory, res.WindowTitle, 0, "", res.Productive, res.ProductiveScore, res.Confidence, res.Reason)
+				log.Printf("[server] processed telemetry #%d via AI key source [%s] — category=%s productive=%v", id, keySource, res.Category, res.Productive)
+			} else {
+				log.Printf("[server] telemetry AI error for log #%d (source=%s): %v", id, keySource, err)
+			}
+		}(logID, filePath, payload.ImageBase64, entropy, userID, orgID)
+
+		jsonResp(w, map[string]interface{}{
+			"success":   true,
+			"local_id":  payload.LocalID,
+			"remote_id": logID,
+		})
+	})
+
+	// GET /api/telemetry/pull — Download newly analyzed AI logs for desktop client sync
+	mux.HandleFunc("/api/telemetry/pull", func(w http.ResponseWriter, r *http.Request) {
+		userID, orgID, status, errMsg := getAuthContext(r, database)
+		if status != http.StatusOK {
+			jsonError(w, errMsg, status)
+			return
+		}
+
+		sinceStr := r.URL.Query().Get("since")
+		startDate := time.Now().Add(-24 * time.Hour).Format("2006-01-02")
+		endDate := time.Now().Format("2006-01-02")
+
+		if sinceStr != "" {
+			if t, err := time.Parse(time.RFC3339, sinceStr); err == nil {
+				startDate = t.Format("2006-01-02")
+			}
+		}
+
+		logs, err := database.GetLogsFiltered(userID, orgID, startDate, endDate)
+		if err != nil {
+			jsonError(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		jsonResp(w, logs)
+	})
+
+	// POST /api/org/settings — Save Organization Admin Gemini API key in database
+	mux.HandleFunc("/api/org/settings", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			jsonError(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		user := getSessionUser(r, database)
+		if user == nil {
+			jsonError(w, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
+
+		if user.Role != "owner" && user.Role != "admin" {
+			jsonError(w, "Forbidden: Only Org Admins or Owners can configure Org API keys", http.StatusForbidden)
+			return
+		}
+
+		var payload struct {
+			GeminiAPIKey string `json:"gemini_api_key"`
+			GeminiModel  string `json:"gemini_model"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			jsonError(w, "Invalid payload", http.StatusBadRequest)
+			return
+		}
+
+		if payload.GeminiModel == "" {
+			payload.GeminiModel = "models/gemma-4-31b-it"
+		}
+
+		if err := database.SetOrgGeminiConfig(user.OrgID, payload.GeminiAPIKey, payload.GeminiModel); err != nil {
+			jsonError(w, fmt.Sprintf("Failed to save org key: %v", err), http.StatusInternalServerError)
+			return
+		}
+
+		log.Printf("[server] updated Org #%d Gemini API key in DB by admin User #%d", user.OrgID, user.ID)
+		jsonResp(w, map[string]interface{}{"success": true})
+	})
+
+	// POST /api/user/settings — Save Personal Gemini API key for solo accounts
+	mux.HandleFunc("/api/user/settings", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			jsonError(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		user := getSessionUser(r, database)
+		if user == nil {
+			jsonError(w, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
+
+		var payload struct {
+			PersonalGeminiAPIKey string `json:"personal_gemini_api_key"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			jsonError(w, "Invalid payload", http.StatusBadRequest)
+			return
+		}
+
+		if err := database.SetUserPersonalKey(user.ID, payload.PersonalGeminiAPIKey); err != nil {
+			jsonError(w, fmt.Sprintf("Failed to save personal key: %v", err), http.StatusInternalServerError)
+			return
+		}
+
+		log.Printf("[server] updated personal Gemini API key in DB for User #%d", user.ID)
+		jsonResp(w, map[string]interface{}{"success": true})
 	})
 
 	mailer := email.NewMailer()
@@ -646,47 +945,67 @@ func main() {
 		})
 	})
 
-	// GET /api/auth/oauth/google — Google OAuth Single Sign-On Endpoint
-	mux.HandleFunc("/api/auth/oauth/google", func(w http.ResponseWriter, r *http.Request) {
+	// GET /api/auth/oauth/google & /api/auth/google/login — Google OAuth Single Sign-On Endpoint
+	handleGoogleLogin := func(w http.ResponseWriter, r *http.Request) {
 		redirectTarget := getRedirectTarget(r)
 
-		clientID := os.Getenv("GOOGLE_CLIENT_ID")
-		clientSecret := os.Getenv("GOOGLE_CLIENT_SECRET")
+		clientID := cfg.GoogleClientID
+		if clientID == "" {
+			clientID = os.Getenv("GOOGLE_CLIENT_ID")
+		}
 		redirectURI := resolveOAuthCallbackURL(r, "GOOGLE_REDIRECT_URI", "/api/auth/oauth/google/callback")
 
-		// Real OAuth Flow if Client ID & Secret are configured
-		if clientID != "" && clientSecret != "" {
-			authURL := fmt.Sprintf("https://accounts.google.com/o/oauth2/v2/auth?client_id=%s&redirect_uri=%s&response_type=code&scope=openid%%20email%%20profile&state=%s",
-				url.QueryEscape(clientID),
-				url.QueryEscape(redirectURI),
-				url.QueryEscape(redirectTarget),
-			)
-			http.Redirect(w, r, authURL, http.StatusFound)
+		// If explicit mock query parameter ?mock=true or ?test=true is supplied, perform local test login bypass
+		if r.URL.Query().Get("mock") == "true" || r.URL.Query().Get("test") == "true" {
+			emailParam := r.URL.Query().Get("email")
+			if emailParam == "" {
+				emailParam = "google.user@company.com"
+			}
+			nameParam := r.URL.Query().Get("name")
+			if nameParam == "" {
+				nameParam = "Google Workspace User"
+			}
+
+			user, err := provisionOAuthUser("Google Workspace Org", "google-org", emailParam, nameParam)
+			if err != nil {
+				http.Error(w, fmt.Sprintf("Google OAuth Authentication Error: %v", err), http.StatusInternalServerError)
+				return
+			}
+
+			setSessionCookie(w, user.ID)
+			http.Redirect(w, r, redirectTarget, http.StatusFound)
 			return
 		}
 
-		// Default local / test SSO provision flow
-		emailParam := r.URL.Query().Get("email")
-		if emailParam == "" {
-			emailParam = "google.user@company.com"
-		}
-		nameParam := r.URL.Query().Get("name")
-		if nameParam == "" {
-			nameParam = "Google Workspace User"
+		effectiveClientID := clientID
+		if effectiveClientID == "" {
+			effectiveClientID = "YOUR_GOOGLE_CLIENT_ID"
 		}
 
-		user, err := provisionOAuthUser("Google Workspace Org", "google-org", emailParam, nameParam)
-		if err != nil {
-			http.Error(w, fmt.Sprintf("Google OAuth Authentication Error: %v", err), http.StatusInternalServerError)
+		authURL := fmt.Sprintf("https://accounts.google.com/o/oauth2/v2/auth?client_id=%s&redirect_uri=%s&response_type=code&scope=openid%%20email%%20profile&state=%s",
+			url.QueryEscape(effectiveClientID),
+			url.QueryEscape(redirectURI),
+			url.QueryEscape(redirectTarget),
+		)
+
+		if r.URL.Query().Get("json") == "true" || strings.Contains(r.Header.Get("Accept"), "application/json") {
+			jsonResp(w, map[string]interface{}{
+				"provider":                    "google",
+				"url":                         authURL,
+				"google_client_id_configured": clientID != "",
+				"redirect_uri":                redirectURI,
+			})
 			return
 		}
 
-		setSessionCookie(w, user.ID)
-		http.Redirect(w, r, redirectTarget, http.StatusFound)
-	})
+		http.Redirect(w, r, authURL, http.StatusFound)
+	}
 
-	// GET /api/auth/oauth/google/callback — Google OAuth 2.0 Callback Handler
-	mux.HandleFunc("/api/auth/oauth/google/callback", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/api/auth/oauth/google", handleGoogleLogin)
+	mux.HandleFunc("/api/auth/google/login", handleGoogleLogin)
+
+	// GET /api/auth/oauth/google/callback & /api/auth/google/callback — Google OAuth 2.0 Callback Handler
+	handleGoogleCallback := func(w http.ResponseWriter, r *http.Request) {
 		code := r.URL.Query().Get("code")
 		stateTarget := r.URL.Query().Get("state")
 		if stateTarget == "" {
@@ -697,8 +1016,14 @@ func main() {
 			return
 		}
 
-		clientID := os.Getenv("GOOGLE_CLIENT_ID")
-		clientSecret := os.Getenv("GOOGLE_CLIENT_SECRET")
+		clientID := cfg.GoogleClientID
+		if clientID == "" {
+			clientID = os.Getenv("GOOGLE_CLIENT_ID")
+		}
+		clientSecret := cfg.GoogleClientSecret
+		if clientSecret == "" {
+			clientSecret = os.Getenv("GOOGLE_CLIENT_SECRET")
+		}
 		redirectURI := resolveOAuthCallbackURL(r, "GOOGLE_REDIRECT_URI", "/api/auth/oauth/google/callback")
 
 		resp, err := http.PostForm("https://oauth2.googleapis.com/token", url.Values{
@@ -748,54 +1073,80 @@ func main() {
 
 		setSessionCookie(w, user.ID)
 		http.Redirect(w, r, stateTarget, http.StatusFound)
-	})
+	}
 
-	// GET /api/auth/oauth/azure — Microsoft Azure AD / Entra ID SSO Endpoint
-	mux.HandleFunc("/api/auth/oauth/azure", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/api/auth/oauth/google/callback", handleGoogleCallback)
+	mux.HandleFunc("/api/auth/google/callback", handleGoogleCallback)
+
+	// GET /api/auth/oauth/azure & /api/auth/azure/login — Microsoft Azure AD / Entra ID SSO Endpoint
+	handleAzureLogin := func(w http.ResponseWriter, r *http.Request) {
 		redirectTarget := getRedirectTarget(r)
 
-		clientID := os.Getenv("AZURE_CLIENT_ID")
-		clientSecret := os.Getenv("AZURE_CLIENT_SECRET")
-		tenantID := os.Getenv("AZURE_TENANT_ID")
+		clientID := cfg.AzureClientID
+		if clientID == "" {
+			clientID = os.Getenv("AZURE_CLIENT_ID")
+		}
+		tenantID := cfg.AzureTenantID
+		if tenantID == "" {
+			tenantID = os.Getenv("AZURE_TENANT_ID")
+		}
 		if tenantID == "" {
 			tenantID = "common"
 		}
 		redirectURI := resolveOAuthCallbackURL(r, "AZURE_REDIRECT_URI", "/api/auth/oauth/azure/callback")
 
-		// Real OAuth Flow if Client ID & Secret are configured
-		if clientID != "" && clientSecret != "" {
-			authURL := fmt.Sprintf("https://login.microsoftonline.com/%s/oauth2/v2.0/authorize?client_id=%s&response_type=code&redirect_uri=%s&scope=openid%%20email%%20profile%%20User.Read&state=%s",
-				tenantID,
-				url.QueryEscape(clientID),
-				url.QueryEscape(redirectURI),
-				url.QueryEscape(redirectTarget),
-			)
-			http.Redirect(w, r, authURL, http.StatusFound)
+		// If explicit mock query parameter ?mock=true or ?test=true is supplied, perform local test login bypass
+		if r.URL.Query().Get("mock") == "true" || r.URL.Query().Get("test") == "true" {
+			emailParam := r.URL.Query().Get("email")
+			if emailParam == "" {
+				emailParam = "azure.user@company.com"
+			}
+			nameParam := r.URL.Query().Get("name")
+			if nameParam == "" {
+				nameParam = "Azure AD User"
+			}
+
+			user, err := provisionOAuthUser("Azure Enterprise Org", "azure-org", emailParam, nameParam)
+			if err != nil {
+				http.Error(w, fmt.Sprintf("Azure OAuth Authentication Error: %v", err), http.StatusInternalServerError)
+				return
+			}
+
+			setSessionCookie(w, user.ID)
+			http.Redirect(w, r, redirectTarget, http.StatusFound)
 			return
 		}
 
-		// Default local / test SSO provision flow
-		emailParam := r.URL.Query().Get("email")
-		if emailParam == "" {
-			emailParam = "azure.user@company.com"
-		}
-		nameParam := r.URL.Query().Get("name")
-		if nameParam == "" {
-			nameParam = "Azure AD User"
+		effectiveClientID := clientID
+		if effectiveClientID == "" {
+			effectiveClientID = "YOUR_AZURE_CLIENT_ID"
 		}
 
-		user, err := provisionOAuthUser("Azure Enterprise Org", "azure-org", emailParam, nameParam)
-		if err != nil {
-			http.Error(w, fmt.Sprintf("Azure OAuth Authentication Error: %v", err), http.StatusInternalServerError)
+		authURL := fmt.Sprintf("https://login.microsoftonline.com/%s/oauth2/v2.0/authorize?client_id=%s&response_type=code&redirect_uri=%s&scope=openid%%20email%%20profile%%20User.Read&state=%s",
+			tenantID,
+			url.QueryEscape(effectiveClientID),
+			url.QueryEscape(redirectURI),
+			url.QueryEscape(redirectTarget),
+		)
+
+		if r.URL.Query().Get("json") == "true" || strings.Contains(r.Header.Get("Accept"), "application/json") {
+			jsonResp(w, map[string]interface{}{
+				"provider":                   "azure",
+				"url":                        authURL,
+				"azure_client_id_configured": clientID != "",
+				"redirect_uri":               redirectURI,
+			})
 			return
 		}
 
-		setSessionCookie(w, user.ID)
-		http.Redirect(w, r, redirectTarget, http.StatusFound)
-	})
+		http.Redirect(w, r, authURL, http.StatusFound)
+	}
 
-	// GET /api/auth/oauth/azure/callback — Azure AD OAuth 2.0 Callback Handler
-	mux.HandleFunc("/api/auth/oauth/azure/callback", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/api/auth/oauth/azure", handleAzureLogin)
+	mux.HandleFunc("/api/auth/azure/login", handleAzureLogin)
+
+	// GET /api/auth/oauth/azure/callback & /api/auth/azure/callback — Azure AD OAuth 2.0 Callback Handler
+	handleAzureCallback := func(w http.ResponseWriter, r *http.Request) {
 		code := r.URL.Query().Get("code")
 		stateTarget := r.URL.Query().Get("state")
 		if stateTarget == "" {
@@ -806,9 +1157,18 @@ func main() {
 			return
 		}
 
-		clientID := os.Getenv("AZURE_CLIENT_ID")
-		clientSecret := os.Getenv("AZURE_CLIENT_SECRET")
-		tenantID := os.Getenv("AZURE_TENANT_ID")
+		clientID := cfg.AzureClientID
+		if clientID == "" {
+			clientID = os.Getenv("AZURE_CLIENT_ID")
+		}
+		clientSecret := cfg.AzureClientSecret
+		if clientSecret == "" {
+			clientSecret = os.Getenv("AZURE_CLIENT_SECRET")
+		}
+		tenantID := cfg.AzureTenantID
+		if tenantID == "" {
+			tenantID = os.Getenv("AZURE_TENANT_ID")
+		}
 		if tenantID == "" {
 			tenantID = "common"
 		}
@@ -859,12 +1219,12 @@ func main() {
 		if userEmail == "" {
 			userEmail = profile.UserPrincipalName
 		}
-		if userEmail == "" {
-			http.Error(w, "No email address found for Azure AD user", http.StatusBadRequest)
-			return
+		userName := profile.DisplayName
+		if userName == "" {
+			userName = "Azure AD User"
 		}
 
-		user, err := provisionOAuthUser("Azure Enterprise Org", "azure-org", userEmail, profile.DisplayName)
+		user, err := provisionOAuthUser("Azure Enterprise Org", "azure-org", userEmail, userName)
 		if err != nil {
 			http.Error(w, fmt.Sprintf("User Provisioning Error: %v", err), http.StatusInternalServerError)
 			return
@@ -872,7 +1232,10 @@ func main() {
 
 		setSessionCookie(w, user.ID)
 		http.Redirect(w, r, stateTarget, http.StatusFound)
-	})
+	}
+
+	mux.HandleFunc("/api/auth/oauth/azure/callback", handleAzureCallback)
+	mux.HandleFunc("/api/auth/azure/callback", handleAzureCallback)
 
 	// GET /api/org/members — Get team roster and pending invitations
 	mux.HandleFunc("/api/org/members", func(w http.ResponseWriter, r *http.Request) {
@@ -1112,7 +1475,15 @@ func main() {
 	log.Printf("   Corporate Beta Platform Enabled")
 	log.Printf("=====================================================")
 
-	if err := http.ListenAndServe(":"+port, cors(mux)); err != nil {
+	srv := &http.Server{
+		Addr:              ":" + port,
+		Handler:           gzipMiddleware(cors(mux)),
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       15 * time.Second,
+		WriteTimeout:      60 * time.Second,
+		IdleTimeout:       120 * time.Second,
+	}
+	if err := srv.ListenAndServe(); err != nil {
 		log.Fatalf("server error: %v", err)
 	}
 }
@@ -1130,6 +1501,28 @@ func generateToken() string {
 func jsonResp(w http.ResponseWriter, v interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(v)
+}
+
+type gzipResponseWriter struct {
+	io.Writer
+	http.ResponseWriter
+}
+
+func (w gzipResponseWriter) Write(b []byte) (int, error) {
+	return w.Writer.Write(b)
+}
+
+func gzipMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.Contains(r.Header.Get("Accept-Encoding"), "gzip") {
+			next.ServeHTTP(w, r)
+			return
+		}
+		w.Header().Set("Content-Encoding", "gzip")
+		gz := gzip.NewWriter(w)
+		defer gz.Close()
+		next.ServeHTTP(gzipResponseWriter{Writer: gz, ResponseWriter: w}, r)
+	})
 }
 
 func jsonError(w http.ResponseWriter, msg string, status int) {
@@ -1213,24 +1606,16 @@ func processPendingLogs(database *db.DB, gemini *ai.GeminiClient) int {
 				res, sErr := gemini.Analyze(sCtx, b64, entry.EntropyScore)
 				sCancel()
 				if sErr == nil {
-					_ = database.UpdateAIResult(entry.ID, res.Category, res.Productive, res.Confidence, res.Reason)
+					_ = database.UpdateLogAnalysis(entry.ID, res.Category, res.AppName, res.AppCategory, res.WindowTitle, 0, "", res.Productive, res.ProductiveScore, res.Confidence, res.Reason)
 					processed++
-					if entry.ImagePath != "" {
-						_ = os.Remove(entry.ImagePath)
-					}
 				}
 			}
 			continue
 		}
 
 		for _, res := range results {
-			if err := database.UpdateAIResult(res.LogID, res.Category, res.Productive, res.Confidence, res.Reason); err == nil {
+			if err := database.UpdateLogAnalysis(res.LogID, res.Category, res.AppName, res.AppCategory, res.WindowTitle, 0, "", res.Productive, res.ProductiveScore, res.Confidence, res.Reason); err == nil {
 				processed++
-				for _, item := range batchItems {
-					if item.LogID == res.LogID && item.ImagePath != "" {
-						_ = os.Remove(item.ImagePath)
-					}
-				}
 			}
 		}
 
@@ -1477,14 +1862,12 @@ const wizardHTML = `<!DOCTYPE html>
   /* ── Project strip ─────────────────────────── */
   #project-strip {
     padding: 10px 14px;
-    background: linear-gradient(135deg, rgba(99,102,241,0.08) 0%, rgba(45,212,191,0.06) 100%);
+    background: var(--bg-card);
     border-bottom: 1px solid var(--border-subtle);
   }
   #project-name {
     font-size: 13px; font-weight: 700;
-    background: linear-gradient(90deg, var(--accent), var(--teal));
-    -webkit-background-clip: text; -webkit-text-fill-color: transparent;
-    background-clip: text;
+    color: var(--accent);
     margin-bottom: 2px;
   }
   #org-name { font-size: 11px; color: var(--text-muted); }
@@ -1572,7 +1955,7 @@ const wizardHTML = `<!DOCTYPE html>
   }
   #prog-bar {
     height: 100%; border-radius: 99px;
-    background: linear-gradient(90deg, var(--accent), var(--teal));
+    background: var(--accent);
     transition: width 0.8s ease;
   }
 
@@ -1585,9 +1968,7 @@ const wizardHTML = `<!DOCTYPE html>
   }
   #footer-brand {
     font-size: 11px; font-weight: 600;
-    background: linear-gradient(90deg, var(--accent), var(--teal));
-    -webkit-background-clip: text; -webkit-text-fill-color: transparent;
-    background-clip: text;
+    color: var(--accent);
   }
   .foot-btn {
     background: none; border: none; color: var(--text-muted); cursor: pointer;

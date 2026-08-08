@@ -19,17 +19,30 @@ export function SettingsPage({ theme = 'auto', onThemeChange }: SettingsPageProp
   const [model, setModel] = useState(() => localStorage.getItem('mini_ai_model') || 'models/gemma-4-31b-it');
   const [availableModels, setAvailableModels] = useState<AIModel[]>([]);
   const [fetchingModels, setFetchingModels] = useState<boolean>(false);
+  const [usageSummary, setUsageSummary] = useState<{ total_requests: number; prompt_tokens: number; candidate_tokens: number; total_tokens: number } | null>(null);
   const [usageCount, setUsageCount] = useState<number>(() => {
     return parseInt(localStorage.getItem('mini_ai_usage_count') || '0', 10);
   });
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [nextSyncSeconds, setNextSyncSeconds] = useState<number>(30);
 
+  const fetchUsageSummary = useCallback(async () => {
+    try {
+      const res = await apiFetch('/api/user/usage');
+      if (res.ok) {
+        const data = await res.json();
+        setUsageSummary(data);
+      }
+    } catch {}
+  }, []);
+
   // 1-second countdown timer for next AI sync interval & usage count sync
   useEffect(() => {
+    fetchUsageSummary();
     const syncUsage = () => {
       const stored = parseInt(localStorage.getItem('mini_ai_usage_count') || '0', 10);
       setUsageCount(stored);
+      fetchUsageSummary();
     };
     syncUsage();
 
@@ -55,7 +68,7 @@ export function SettingsPage({ theme = 'auto', onThemeChange }: SettingsPageProp
       window.removeEventListener('ai_usage_updated', handleCustomUsageEvent);
       window.removeEventListener('storage', syncUsage);
     };
-  }, []);
+  }, [fetchUsageSummary]);
 
   const fetchAvailableModels = useCallback(async (key: string) => {
     if (!key.trim()) return;
@@ -391,24 +404,24 @@ export function SettingsPage({ theme = 'auto', onThemeChange }: SettingsPageProp
                   <div className="stat-sub">Auto screenshot analysis sync</div>
                 </div>
                 <div className="stat-card">
-                  <span className="stat-label">Daily Usage Used</span>
-                  <div className="stat-value text-purple" style={{ fontSize: 24 }}>{usageCount} / {rpdLimit}</div>
-                  <div className="stat-sub">{usedPercent}% of daily limit consumed</div>
+                  <span className="stat-label">Total AI Requests</span>
+                  <div className="stat-value text-purple" style={{ fontSize: 24 }}>{usageSummary?.total_requests ?? usageCount}</div>
+                  <div className="stat-sub">Tracked API requests</div>
                 </div>
                 <div className="stat-card">
-                  <span className="stat-label">Daily Usage Remaining</span>
-                  <div className="stat-value text-green" style={{ fontSize: 24 }}>{remainingRpd.toLocaleString()}</div>
-                  <div className="stat-sub">Requests left for today</div>
+                  <span className="stat-label">Prompt Tokens</span>
+                  <div className="stat-value text-cyan" style={{ fontSize: 24 }}>{(usageSummary?.prompt_tokens ?? 0).toLocaleString()}</div>
+                  <div className="stat-sub">Input prompt tokens</div>
                 </div>
                 <div className="stat-card">
-                  <span className="stat-label">Rate Limit per Minute</span>
-                  <div className="stat-value text-cyan" style={{ fontSize: 24 }}>{rpmLimit} RPM</div>
-                  <div className="stat-sub">Max requests per minute</div>
+                  <span className="stat-label">Candidate Tokens</span>
+                  <div className="stat-value text-amber" style={{ fontSize: 24 }}>{(usageSummary?.candidate_tokens ?? 0).toLocaleString()}</div>
+                  <div className="stat-sub">AI output tokens</div>
                 </div>
                 <div className="stat-card">
-                  <span className="stat-label">Context Limit</span>
-                  <div className="stat-value text-amber" style={{ fontSize: 24 }}>{contextLimit}</div>
-                  <div className="stat-sub">Max input tokens</div>
+                  <span className="stat-label">Total Tokens Tracked</span>
+                  <div className="stat-value text-green" style={{ fontSize: 24 }}>{(usageSummary?.total_tokens ?? 0).toLocaleString()}</div>
+                  <div className="stat-sub">Combined API tokens</div>
                 </div>
               </div>
 

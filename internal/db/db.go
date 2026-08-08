@@ -101,6 +101,41 @@ type Invitation struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
+// APIUsageLog stores individual Gemini AI REST API token usage records.
+type APIUsageLog struct {
+	ID              int64     `json:"id"`
+	OrgID           int64     `json:"org_id"`
+	UserID          int64     `json:"user_id"`
+	KeySource       string    `json:"key_source"` // 'org_admin', 'user_personal', 'global_system', 'guest'
+	PromptTokens    int       `json:"prompt_tokens"`
+	CandidateTokens int       `json:"candidate_tokens"`
+	TotalTokens     int       `json:"total_tokens"`
+	ModelName       string    `json:"model_name"`
+	CreatedAt       time.Time `json:"created_at"`
+}
+
+// UserUsageBreakdown holds aggregated usage stats for a specific user.
+type UserUsageBreakdown struct {
+	UserID          int64  `json:"user_id"`
+	FullName        string `json:"full_name"`
+	Email           string `json:"email"`
+	Role            string `json:"role"`
+	TotalRequests   int    `json:"total_requests"`
+	PromptTokens    int64  `json:"prompt_tokens"`
+	CandidateTokens int64  `json:"candidate_tokens"`
+	TotalTokens     int64  `json:"total_tokens"`
+}
+
+// APIUsageSummary holds aggregated token metrics for org admins or individual users.
+type APIUsageSummary struct {
+	TotalRequests   int                  `json:"total_requests"`
+	PromptTokens    int64                `json:"prompt_tokens"`
+	CandidateTokens int64                `json:"candidate_tokens"`
+	TotalTokens     int64                `json:"total_tokens"`
+	ByKeySource     map[string]int64     `json:"by_key_source"`
+	UserBreakdown   []UserUsageBreakdown `json:"user_breakdown,omitempty"`
+}
+
 // DB wraps Ent ORM driver and database connections.
 type DB struct {
 	entDriver *entsql.Driver
@@ -245,6 +280,19 @@ func (db *DB) migrate() error {
 			created_at     TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 		);`,
 		`CREATE INDEX IF NOT EXISTS idx_work_sessions_user_time ON work_sessions(user_id, start_time, end_time);`,
+		`CREATE TABLE IF NOT EXISTS api_usage_logs (
+			id               SERIAL PRIMARY KEY,
+			org_id           INTEGER DEFAULT 0,
+			user_id          INTEGER DEFAULT 0,
+			key_source       TEXT DEFAULT 'global_system',
+			prompt_tokens    INTEGER DEFAULT 0,
+			candidate_tokens INTEGER DEFAULT 0,
+			total_tokens     INTEGER DEFAULT 0,
+			model_name       TEXT DEFAULT '',
+			created_at       TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+		);`,
+		`CREATE INDEX IF NOT EXISTS idx_api_usage_org ON api_usage_logs(org_id);`,
+		`CREATE INDEX IF NOT EXISTS idx_api_usage_user ON api_usage_logs(user_id);`,
 	}
 
 	if db.dialect == dialect.SQLite {
@@ -322,6 +370,19 @@ func (db *DB) migrate() error {
 				created_at     DATETIME DEFAULT CURRENT_TIMESTAMP
 			);`,
 			`CREATE INDEX IF NOT EXISTS idx_work_sessions_user_time ON work_sessions(user_id, start_time, end_time);`,
+			`CREATE TABLE IF NOT EXISTS api_usage_logs (
+				id               INTEGER PRIMARY KEY AUTOINCREMENT,
+				org_id           INTEGER DEFAULT 0,
+				user_id          INTEGER DEFAULT 0,
+				key_source       TEXT DEFAULT 'global_system',
+				prompt_tokens    INTEGER DEFAULT 0,
+				candidate_tokens INTEGER DEFAULT 0,
+				total_tokens     INTEGER DEFAULT 0,
+				model_name       TEXT DEFAULT '',
+				created_at       DATETIME DEFAULT CURRENT_TIMESTAMP
+			);`,
+			`CREATE INDEX IF NOT EXISTS idx_api_usage_org ON api_usage_logs(org_id);`,
+			`CREATE INDEX IF NOT EXISTS idx_api_usage_user ON api_usage_logs(user_id);`,
 		}
 	}
 
@@ -1317,6 +1378,144 @@ func (db *DB) ResolveEffectiveGeminiKey(userID, orgID int64, defaultKey, default
 	}
 
 	return "", defaultModel, "none", nil
+}
+
+// RecordAPIUsage saves a new API usage record into the database.
+func (db *DB) RecordAPIUsage(orgID, userID int64, keySource string, promptTokens, candidateTokens, totalTokens int, modelName string) error {
+	if keySource == "" {
+		keySource = "global_system"
+	}
+	if totalTokens == 0 && (promptTokens > 0 || candidateTokens > 0) {
+		totalTokens = promptTokens + candidateTokens
+	}
+
+	builder := entsql.Dialect(db.dialect).Insert("api_usage_logs").
+		Columns("org_id", "user_id", "key_source", "prompt_tokens", "candidate_tokens", "total_tokens", "model_name").
+		Values(orgID, userID, keySource, promptTokens, candidateTokens, totalTokens, modelName)
+
+	query, args := builder.Query()
+	_, err := db.rawDB.Exec(query, args...)
+	return err
+}
+
+// ResetAPIUsage deletes usage logs when quota is reset (e.g. from Google API side or manually).
+func (db *DB) ResetAPIUsage(orgID, userID int64) error {
+	builder := entsql.Dialect(db.dialect).Delete("api_usage_logs")
+	if orgID > 0 {
+		builder.Where(entsql.EQ("org_id", orgID))
+	} else if userID > 0 {
+		builder.Where(entsql.EQ("user_id", userID))
+	}
+	query, args := builder.Query()
+	_, err := db.rawDB.Exec(query, args...)
+	return err
+}
+
+// GetOrgUsageSummary aggregates all API key usage for an organization (for Admins).
+func (db *DB) GetOrgUsageSummary(orgID int64) (*APIUsageSummary, error) {
+	summary := &APIUsageSummary{
+		ByKeySource:   make(map[string]int64),
+		UserBreakdown: []UserUsageBreakdown{},
+	}
+
+	if orgID <= 0 {
+		orgID = 1
+	}
+
+	// 1. Total & key source aggregation for org
+	rows, err := db.rawDB.Query(`
+		SELECT key_source, COUNT(*), COALESCE(SUM(prompt_tokens), 0), COALESCE(SUM(candidate_tokens), 0), COALESCE(SUM(total_tokens), 0)
+		FROM api_usage_logs
+		WHERE org_id = $1 OR key_source = 'org_admin'
+		GROUP BY key_source
+	`, orgID)
+	if err == nil {
+		defer rows.Close()
+		for rows.Next() {
+			var ks string
+			var count int
+			var pTokens, cTokens, tTokens int64
+			if err := rows.Scan(&ks, &count, &pTokens, &cTokens, &tTokens); err == nil {
+				summary.TotalRequests += count
+				summary.PromptTokens += pTokens
+				summary.CandidateTokens += cTokens
+				summary.TotalTokens += tTokens
+				summary.ByKeySource[ks] = tTokens
+			}
+		}
+	}
+
+	// 2. Per-user breakdown in organization
+	userRows, err := db.rawDB.Query(`
+		SELECT u.id, u.full_name, u.email, u.role,
+		       COALESCE(COUNT(a.id), 0) as req_count,
+		       COALESCE(SUM(a.prompt_tokens), 0) as p_tokens,
+		       COALESCE(SUM(a.candidate_tokens), 0) as c_tokens,
+		       COALESCE(SUM(a.total_tokens), 0) as t_tokens
+		FROM users u
+		LEFT JOIN api_usage_logs a ON u.id = a.user_id
+		WHERE u.org_id = $1
+		GROUP BY u.id, u.full_name, u.email, u.role
+		ORDER BY t_tokens DESC
+	`, orgID)
+	if err == nil {
+		defer userRows.Close()
+		for userRows.Next() {
+			var ub UserUsageBreakdown
+			if err := userRows.Scan(&ub.UserID, &ub.FullName, &ub.Email, &ub.Role, &ub.TotalRequests, &ub.PromptTokens, &ub.CandidateTokens, &ub.TotalTokens); err == nil {
+				summary.UserBreakdown = append(summary.UserBreakdown, ub)
+			}
+		}
+	}
+
+	return summary, nil
+}
+
+// GetUserUsageSummary aggregates API token usage for an individual user or guest.
+func (db *DB) GetUserUsageSummary(userID int64) (*APIUsageSummary, error) {
+	summary := &APIUsageSummary{
+		ByKeySource: make(map[string]int64),
+	}
+
+	var query string
+	var args []interface{}
+
+	if userID > 0 {
+		query = `
+			SELECT key_source, COUNT(*), COALESCE(SUM(prompt_tokens), 0), COALESCE(SUM(candidate_tokens), 0), COALESCE(SUM(total_tokens), 0)
+			FROM api_usage_logs
+			WHERE user_id = $1
+			GROUP BY key_source
+		`
+		args = append(args, userID)
+	} else {
+		query = `
+			SELECT key_source, COUNT(*), COALESCE(SUM(prompt_tokens), 0), COALESCE(SUM(candidate_tokens), 0), COALESCE(SUM(total_tokens), 0)
+			FROM api_usage_logs
+			GROUP BY key_source
+		`
+	}
+
+	rows, err := db.rawDB.Query(query, args...)
+	if err != nil {
+		return summary, nil
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var ks string
+		var count int
+		var pTokens, cTokens, tTokens int64
+		if err := rows.Scan(&ks, &count, &pTokens, &cTokens, &tTokens); err == nil {
+			summary.TotalRequests += count
+			summary.PromptTokens += pTokens
+			summary.CandidateTokens += cTokens
+			summary.TotalTokens += tTokens
+			summary.ByKeySource[ks] = tTokens
+		}
+	}
+
+	return summary, nil
 }
 
 // Close closes the database connection.

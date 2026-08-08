@@ -75,4 +75,30 @@ export interface Invitation {
   created_at: string;
 }
 
+export interface UsageMetadata {
+  promptTokenCount: number;
+  candidatesTokenCount: number;
+  totalTokenCount: number;
+}
+
+export interface UserUsageBreakdown {
+  user_id: number;
+  full_name: string;
+  email: string;
+  role: string;
+  total_requests: number;
+  prompt_tokens: number;
+  candidate_tokens: number;
+  total_tokens: number;
+}
+
+export interface APIUsageSummary {
+  total_requests: number;
+  prompt_tokens: number;
+  candidate_tokens: number;
+  total_tokens: number;
+  by_key_source: Record<string, number>;
+  user_breakdown?: UserUsageBreakdown[];
+}
+
 export type Page = 'dashboard' | 'timeline' | 'analytics' | 'organization' | 'accept-invite' | 'auth' | 'settings';

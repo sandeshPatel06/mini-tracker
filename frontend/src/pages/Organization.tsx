@@ -18,6 +18,40 @@ export const OrganizationPage: React.FC = () => {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [copiedToken, setCopiedToken] = useState<string | null>(null);
 
+  // Admin usage tracking state
+  const [orgUsage, setOrgUsage] = useState<any>(null);
+  const [usageForbidden, setUsageForbidden] = useState(false);
+  const [resettingUsage, setResettingUsage] = useState(false);
+
+  const fetchUsageData = async () => {
+    try {
+      const res = await apiFetch('/api/org/usage');
+      if (res.status === 403) {
+        setUsageForbidden(true);
+        return;
+      }
+      if (res.ok) {
+        const data = await res.json();
+        setOrgUsage(data);
+      }
+    } catch {}
+  };
+
+  const handleResetUsage = async () => {
+    if (!window.confirm('Reset organization API usage counters? This is recommended if Google reset your API key quota.')) {
+      return;
+    }
+    setResettingUsage(true);
+    try {
+      const res = await apiFetch('/api/org/usage/reset', { method: 'POST' });
+      if (res.ok) {
+        fetchUsageData();
+      }
+    } catch {} finally {
+      setResettingUsage(false);
+    }
+  };
+
   const fetchTeamData = async () => {
     setLoading(true);
     try {
@@ -28,6 +62,7 @@ export const OrganizationPage: React.FC = () => {
         setMembers(data.members || []);
         setInvitations(data.invitations || []);
       }
+      fetchUsageData();
     } catch (err) {
       console.error('Failed to fetch team data:', err);
     } finally {
@@ -128,10 +163,94 @@ export const OrganizationPage: React.FC = () => {
           <div className="stat-value text-amber">{invitations.length}</div>
         </div>
         <div className="stat-card">
-          <span className="stat-label">Beta Plan Status</span>
-          <div className="stat-value text-green">Unlimited Beta</div>
+          <span className="stat-label">Org Token Usage</span>
+          <div className="stat-value text-purple">
+            {orgUsage ? (orgUsage.total_tokens || 0).toLocaleString() : '—'}
+          </div>
+          <div className="stat-sub">Tokens across all key sources</div>
         </div>
       </div>
+
+      {/* Admin-Only Organization API Key & Token Usage Section */}
+      {!usageForbidden && orgUsage && (
+        <div className="card" style={{ marginBottom: 24, border: '1px solid var(--accent-purple)' }}>
+          <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <h2 className="card-title flex items-center gap-8 text-purple">
+              ⚡ Organization API Key & Token Usage (Admin View)
+            </h2>
+            <button
+              onClick={handleResetUsage}
+              disabled={resettingUsage}
+              className="btn btn-secondary"
+              style={{ fontSize: 12, padding: '4px 12px' }}
+            >
+              {resettingUsage ? 'Resetting...' : '🔄 Reset Usage (Google Quota Reset)'}
+            </button>
+          </div>
+
+          <div className="card-body">
+            <div className="stats-grid" style={{ marginBottom: 16 }}>
+              <div className="stat-card">
+                <span className="stat-label">Total Requests</span>
+                <div className="stat-value">{orgUsage.total_requests || 0}</div>
+              </div>
+              <div className="stat-card">
+                <span className="stat-label">Prompt Tokens</span>
+                <div className="stat-value text-cyan">{(orgUsage.prompt_tokens || 0).toLocaleString()}</div>
+              </div>
+              <div className="stat-card">
+                <span className="stat-label">Candidate Tokens</span>
+                <div className="stat-value text-amber">{(orgUsage.candidate_tokens || 0).toLocaleString()}</div>
+              </div>
+              <div className="stat-card">
+                <span className="stat-label">Total Tokens</span>
+                <div className="stat-value text-green">{(orgUsage.total_tokens || 0).toLocaleString()}</div>
+              </div>
+            </div>
+
+            {/* Member Token Usage Breakdown */}
+            {orgUsage.user_breakdown && orgUsage.user_breakdown.length > 0 && (
+              <div style={{ marginTop: 16 }}>
+                <h4 style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 8 }}>
+                  Member API Usage Breakdown
+                </h4>
+                <div className="table-container">
+                  <table className="data-table">
+                    <thead>
+                      <tr>
+                        <th>Member</th>
+                        <th>Email</th>
+                        <th>Role</th>
+                        <th>API Requests</th>
+                        <th>Prompt Tokens</th>
+                        <th>Output Tokens</th>
+                        <th>Total Tokens</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {orgUsage.user_breakdown.map((u: any) => (
+                        <tr key={u.user_id}>
+                          <td style={{ fontWeight: 600 }}>{u.full_name}</td>
+                          <td className="text-muted">{u.email}</td>
+                          <td>
+                            <span className="badge badge-pending">{u.role.toUpperCase()}</span>
+                          </td>
+                          <td>{u.total_requests}</td>
+                          <td className="text-muted">{u.prompt_tokens.toLocaleString()}</td>
+                          <td className="text-muted">{u.candidate_tokens.toLocaleString()}</td>
+                          <td style={{ fontWeight: 700, color: 'var(--accent-teal)' }}>
+                            {u.total_tokens.toLocaleString()}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Active Team Members List */}
       <div className="card" style={{ marginBottom: 24 }}>

@@ -94,19 +94,25 @@ func Load() (*Config, error) {
 	}
 
 	// Helper duration getters with fallback
-	cfg.ScreenshotInterval = v.GetDuration("screenshot_interval_seconds")
-	if cfg.ScreenshotInterval <= 0 {
+	dur := v.GetDuration("screenshot_interval_seconds")
+	if dur < time.Second {
 		if sec := v.GetInt("screenshot_interval_seconds"); sec > 0 {
-			cfg.ScreenshotInterval = time.Duration(sec) * time.Second
+			dur = time.Duration(sec) * time.Second
 		} else {
-			cfg.ScreenshotInterval = 30 * time.Second
+			dur = 30 * time.Second
 		}
 	}
+	cfg.ScreenshotInterval = dur
 
-	cfg.AIAnalysisInterval = v.GetDuration("ai_analysis_interval_seconds")
-	if cfg.AIAnalysisInterval <= 0 {
-		cfg.AIAnalysisInterval = 3 * time.Hour
+	aiDur := v.GetDuration("ai_analysis_interval_seconds")
+	if aiDur < time.Second {
+		if sec := v.GetInt("ai_analysis_interval_seconds"); sec > 0 {
+			aiDur = time.Duration(sec) * time.Second
+		} else {
+			aiDur = 3 * time.Hour
+		}
 	}
+	cfg.AIAnalysisInterval = aiDur
 
 	// Ensure DataDir fallback
 	if cfg.DataDir == "" {

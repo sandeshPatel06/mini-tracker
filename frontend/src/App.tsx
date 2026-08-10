@@ -25,6 +25,8 @@ declare const window: Window & {
         ClearAllLocalData: () => Promise<boolean>;
         UpdateGeminiAPIKey: (apiKey: string) => Promise<boolean>;
         UpdateAIModel: (modelName: string) => Promise<boolean>;
+        UpdateScreenshotInterval: (seconds: number) => Promise<boolean>;
+        SetAuthSession: (token: string, isGuest: boolean) => Promise<void>;
       };
     };
   };
@@ -113,6 +115,13 @@ export default function App() {
         setAuthChecked(true);
       });
   }, []);
+
+  // Keep Wails backend session mode (isGuest) in sync with frontend state
+  useEffect(() => {
+    if (window.go?.main?.App?.SetAuthSession) {
+      callGo(() => window.go!.main.App.SetAuthSession('', isGuestMode));
+    }
+  }, [isGuestMode]);
 
   const handleLogout = async () => {
     try {

@@ -289,7 +289,12 @@ export default function App() {
     const intervalSec = configData?.screenshot_interval_seconds || 30;
 
     if (localApiKey && logsData && logsData.length > 0) {
-      const pendingLogs = logsData.filter(log => !log.ai_category || log.ai_category === 'Unknown' || log.ai_reason.includes('No Gemini API key'));
+      const pendingLogs = logsData.filter(log => 
+        !log.ai_category || 
+        log.ai_category === 'Unknown' || 
+        log.ai_reason.includes('No Gemini API key') ||
+        log.ai_reason.includes('Offline Mode')
+      );
 
       // Wait until at least 3 pending logs are accumulated before sending batch AI analytics request
       if (pendingLogs.length >= 3) {
@@ -301,18 +306,20 @@ export default function App() {
         const bundle = pendingLogs.slice(0, Math.min(Math.max(3, targetBundleSize), 6));
 
         // Prepare enhanced multimodal contents array for Google Gemini REST API v1beta
-        const promptText = `You are a world-class developer productivity analyst inspecting a sequence of ${bundle.length} desktop screenshots captured from a Linux workstation in chronological order.
+        const promptText = `You are an expert, objective developer productivity analyst inspecting a sequence of ${bundle.length} desktop screenshots captured from a Linux workstation in chronological order.
 
-INSTRUCTIONS FOR EACH SCREENSHOT ITEM:
+CRITICAL INSTRUCTIONS FOR EACH SCREENSHOT ITEM:
 1. Multi-Monitor Grid Inspection: Each image may be a composite grid of multiple monitors. Inspect ALL screens visible in the grid.
-2. Application & Context Identification: Identify the primary open app (e.g., VS Code, Terminal, Chrome, Slack), visible file paths/code snippets, documentation, or active window title.
-3. Keystroke Telemetry Integration:
-   - High Keystroke Entropy (>15.0) + Total Keys (>20): Active input mode (coding, writing, active CLI execution).
-   - Low Keystroke Entropy (0.0 - 15.0): Passive input mode (reading code/docs, reviewing build outputs, idling).
-4. Productivity Classification:
-   - Categories: "Coding", "Writing", "Browsing", "Document Editing", "Communication", "Social Media", "Video/Entertainment", "Idle", "Other"
-   - Mark is_productive=true (productivity_score 80-100) for software development, code editing, terminal execution, API testing, debugging, and tech documentation reading.
-   - Mark is_productive=false (productivity_score 0-30) for social media scrolling, non-work video streaming, or gaming.
+2. Application & Context Extraction: Identify the primary active application (app_name: e.g., VS Code, Terminal, Chrome, Slack, Spotify), open file paths/code snippet text, documentation title, or window title (window_title).
+3. Keystroke Telemetry & Activity Scoring:
+   - Calculate an exact, non-default productivity score (productivity_score: 0 to 100) based on actual visual evidence and typing entropy:
+     * Active Coding & Debugging (VS Code, JetBrains, Terminal builds, Git ops) with high entropy (>15.0): 85% to 100%.
+     * Technical Reading / Code Review / Docs (StackOverflow, GitHub PRs, API Docs) with low entropy (0.0-15.0): 65% to 85%.
+     * Team Work & Communication (Slack, Teams, Work Email): 50% to 75%.
+     * General Web Browsing / Mixed Activity: 35% to 60%.
+     * Leisure / Social Media / Video Streaming (YouTube, Reddit, Twitter): 0% to 25%.
+     * Idle / Lock Screen / Blank Desktop: 0%.
+   - Do NOT default every productive item to 100%. Provide nuanced, realistic percentage scores based on visual context!
 
 Return ONLY a valid JSON array of ${bundle.length} objects matching the exact input order, strictly in this schema:
 [
@@ -322,10 +329,10 @@ Return ONLY a valid JSON array of ${bundle.length} objects matching the exact in
     "app_category": "IDE / Code Editor",
     "window_title": "app.go - mini-tracker",
     "category": "Coding",
-    "productivity_score": 95,
+    "productivity_score": 92,
     "is_productive": true,
     "confidence": 0.95,
-    "reason": "Editing Go backend code in VS Code while reviewing build terminal"
+    "reason": "Editing Go backend database logic in VS Code while monitoring terminal build"
   }
 ]`;
 

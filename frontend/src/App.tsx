@@ -291,14 +291,14 @@ export default function App() {
     if (localApiKey && logsData && logsData.length > 0) {
       const pendingLogs = logsData.filter(log => !log.ai_category || log.ai_category === 'Unknown' || log.ai_reason.includes('No Gemini API key'));
 
-      if (pendingLogs.length > 0) {
-        // Calculate optimal bundle size to enforce maximum 1 request per minute (or safer) and prevent quota exhaustion
-        // e.g. 15s interval = bundle 4 items per 1 min req; 30s interval = bundle 2 items per 1 min req
+      // Wait until at least 3 pending logs are accumulated before sending batch AI analytics request
+      if (pendingLogs.length >= 3) {
+        // Calculate optimal bundle size (minimum 3 items per request)
         const targetRequestFrequencySec = Math.max(60, Math.ceil(60 / (localModel.includes('gemini-1.5-pro') ? 2 : 15)));
-        const targetBundleSize = Math.max(2, Math.floor(targetRequestFrequencySec / intervalSec));
+        const targetBundleSize = Math.max(3, Math.floor(targetRequestFrequencySec / intervalSec));
 
-        // Group pending items into bundles
-        const bundle = pendingLogs.slice(0, Math.min(targetBundleSize, 4));
+        // Group pending items into bundles (at least 3 items, up to 6)
+        const bundle = pendingLogs.slice(0, Math.min(Math.max(3, targetBundleSize), 6));
 
         // Prepare multimodal contents array for Google Gemini REST API v1beta
         const promptText = `You are an expert productivity analyst. Analyze these ${bundle.length} desktop screenshots in sequential chronological order.

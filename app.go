@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"time"
 
 	"github.com/reak/get-hike/internal/ai"
@@ -409,7 +410,14 @@ func (a *App) GetImageBase64(imagePath string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return "data:image/jpeg;base64," + base64.StdEncoding.EncodeToString(data), nil
+	mimeType := "image/jpeg"
+	ext := strings.ToLower(filepath.Ext(imagePath))
+	if ext == ".webp" {
+		mimeType = "image/webp"
+	} else if ext == ".png" {
+		mimeType = "image/png"
+	}
+	return fmt.Sprintf("data:%s;base64,%s", mimeType, base64.StdEncoding.EncodeToString(data)), nil
 }
 
 // UpdateScreenshotInterval updates and persists the screenshot interval, then resets the collection ticker.

@@ -5,11 +5,12 @@ import (
 	"encoding/base64"
 	"fmt"
 	"image"
-	"image/jpeg"
+	"log"
 	"os"
 	"path/filepath"
 	"time"
 
+	"github.com/chai2010/webp"
 	"github.com/kbinani/screenshot"
 	"golang.org/x/image/draw"
 )
@@ -26,57 +27,111 @@ type ScreenshotResult struct {
 const (
 	maxWidth    = 1280
 	maxHeight   = 720
-	jpegQuality = 60
+	webpQuality = 60
 )
 
-// CaptureScreenshot takes a screenshot of the primary display, compresses it
-// to JPEG at 60% quality (max 720p), saves it to disk, and returns a base64
-// encoded copy for AI analysis.
+// CaptureScreenshot takes a screenshot of all active displays, combines them into
+// a single grid image, compresses it to WebP at 60% quality (max 720p), saves it
+// to disk, and returns a base64 encoded copy for AI analysis.
 func CaptureScreenshot(dataDir string) (*ScreenshotResult, error) {
-	// Capture primary display (display index 0)
 	n := screenshot.NumActiveDisplays()
 	if n == 0 {
 		return nil, fmt.Errorf("no active displays detected")
 	}
 
-	bounds := screenshot.GetDisplayBounds(0)
-	img, err := screenshot.CaptureRect(bounds)
-	if err != nil {
-		return nil, fmt.Errorf("capture screen: %w", err)
+	var displayImgs []image.Image
+	for i := 0; i < n; i++ {
+		bounds := screenshot.GetDisplayBounds(i)
+		img, err := screenshot.CaptureRect(bounds)
+		if err != nil {
+			log.Printf("[tracker] capture screen display %d: %v", i, err)
+			continue
+		}
+		displayImgs = append(displayImgs, img)
 	}
+
+	if len(displayImgs) == 0 {
+		return nil, fmt.Errorf("failed to capture any active display")
+	}
+
+	// Combine display images into a single grid image
+	combined := stitchDisplayImages(displayImgs)
 
 	// Resize to max 720p maintaining aspect ratio
-	resized := resizeImage(img, maxWidth, maxHeight)
+	resized := resizeImage(combined, maxWidth, maxHeight)
 
-	// Encode to JPEG
+	// Encode to WebP
 	var buf bytes.Buffer
-	if err := jpeg.Encode(&buf, resized, &jpeg.Options{Quality: jpegQuality}); err != nil {
-		return nil, fmt.Errorf("encode jpeg: %w", err)
+	if err := webp.Encode(&buf, resized, &webp.Options{Quality: webpQuality}); err != nil {
+		return nil, fmt.Errorf("encode webp: %w", err)
 	}
 
-	jpegData := buf.Bytes()
+	webpData := buf.Bytes()
 
-	// Determine save path: dataDir/images/YYYY-MM-DD/HH-MM-SS.jpg
+	// Determine save path: dataDir/images/YYYY-MM-DD/HH-MM-SS.webp
 	now := time.Now()
 	dateDir := filepath.Join(dataDir, "images", now.Format("2006-01-02"))
 	if err := os.MkdirAll(dateDir, 0755); err != nil {
 		return nil, fmt.Errorf("create image dir: %w", err)
 	}
-	filename := now.Format("15-04-05") + ".jpg"
+	filename := now.Format("15-04-05") + ".webp"
 	filePath := filepath.Join(dateDir, filename)
 
-	if err := os.WriteFile(filePath, jpegData, 0644); err != nil {
+	if err := os.WriteFile(filePath, webpData, 0644); err != nil {
 		return nil, fmt.Errorf("write screenshot: %w", err)
 	}
 
 	b := resized.Bounds()
 	return &ScreenshotResult{
 		FilePath:   filePath,
-		Base64Data: base64.StdEncoding.EncodeToString(jpegData),
+		Base64Data: base64.StdEncoding.EncodeToString(webpData),
 		Width:      b.Dx(),
 		Height:     b.Dy(),
-		SizeBytes:  len(jpegData),
+		SizeBytes:  len(webpData),
 	}, nil
+}
+
+// stitchDisplayImages combines multiple display images into a single grid image.
+func stitchDisplayImages(imgs []image.Image) image.Image {
+	if len(imgs) == 1 {
+		return imgs[0]
+	}
+
+	cols := 2
+	if len(imgs) < 2 {
+		cols = len(imgs)
+	}
+	rows := (len(imgs) + cols - 1) / cols
+
+	// Find max cell width and height among displays
+	cellW := 0
+	cellH := 0
+	for _, img := range imgs {
+		b := img.Bounds()
+		if b.Dx() > cellW {
+			cellW = b.Dx()
+		}
+		if b.Dy() > cellH {
+			cellH = b.Dy()
+		}
+	}
+
+	totalW := cellW * cols
+	totalH := cellH * rows
+
+	dst := image.NewRGBA(image.Rect(0, 0, totalW, totalH))
+
+	for idx, img := range imgs {
+		r := idx / cols
+		c := idx % cols
+		xOffset := c * cellW
+		yOffset := r * cellH
+
+		targetRect := image.Rect(xOffset, yOffset, xOffset+cellW, yOffset+cellH)
+		draw.CatmullRom.Scale(dst, targetRect, img, img.Bounds(), draw.Over, nil)
+	}
+
+	return dst
 }
 
 // resizeImage resizes the image to fit within maxW×maxH, preserving aspect ratio.

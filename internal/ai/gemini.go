@@ -369,7 +369,7 @@ Respond ONLY with a valid JSON array of objects, one per item, strictly in this 
 		if item.Base64Image != "" {
 			parts = append(parts, map[string]interface{}{
 				"inline_data": map[string]interface{}{
-					"mime_type": "image/jpeg",
+					"mime_type": "image/webp",
 					"data":      item.Base64Image,
 				},
 			})
@@ -535,7 +535,7 @@ func buildGeminiRequest(prompt, base64Image string) map[string]interface{} {
 	if base64Image != "" {
 		parts = append(parts, map[string]interface{}{
 			"inline_data": map[string]interface{}{
-				"mime_type": "image/jpeg",
+				"mime_type": "image/webp",
 				"data":      base64Image,
 			},
 		})

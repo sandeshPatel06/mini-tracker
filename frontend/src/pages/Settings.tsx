@@ -123,6 +123,9 @@ export function SettingsPage({ theme = 'auto', onThemeChange }: SettingsPageProp
         if ((window as any).go.main.App.UpdateAIModel) {
           await (window as any).go.main.App.UpdateAIModel(cleanModel);
         }
+        if ((window as any).go.main.App.UpdateScreenshotInterval) {
+          await (window as any).go.main.App.UpdateScreenshotInterval(screenshotInterval);
+        }
       } catch { }
     } else {
       try {

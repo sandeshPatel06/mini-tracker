@@ -61,3 +61,7 @@ export function UpdateAIModel(arg1) {
 export function UpdateGeminiAPIKey(arg1) {
   return window['go']['main']['App']['UpdateGeminiAPIKey'](arg1);
 }
+
+export function UpdateScreenshotInterval(arg1) {
+  return window['go']['main']['App']['UpdateScreenshotInterval'](arg1);
+}

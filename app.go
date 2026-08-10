@@ -14,6 +14,7 @@ import (
 	"github.com/reak/get-hike/internal/ai"
 	"github.com/reak/get-hike/internal/config"
 	"github.com/reak/get-hike/internal/db"
+	"github.com/reak/get-hike/internal/logger"
 	"github.com/reak/get-hike/internal/sync"
 	"github.com/reak/get-hike/internal/tracker"
 )
@@ -23,11 +24,12 @@ type App struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 
-	cfg        *config.Config
-	database   *db.DB
-	gemini     *ai.GeminiClient
-	keyTracker *tracker.KeystrokeTracker
-	syncEngine *sync.SyncEngine
+	cfg            *config.Config
+	database       *db.DB
+	gemini         *ai.GeminiClient
+	keyTracker     *tracker.KeystrokeTracker
+	syncEngine     *sync.SyncEngine
+	tickerResetCh  chan time.Duration
 
 	isGuest   bool
 	authToken string
@@ -78,15 +80,23 @@ func (a *App) startup(ctx context.Context) {
 		statsCh = nil
 	}
 
+	a.tickerResetCh = make(chan time.Duration, 1)
+
 	// Main collection loop — fires every ScreenshotInterval
 	go func() {
-		ticker := time.NewTicker(cfg.ScreenshotInterval)
+		dur := cfg.ScreenshotInterval
+		ticker := time.NewTicker(dur)
 		defer ticker.Stop()
 
 		for {
 			select {
 			case <-a.ctx.Done():
 				return
+			case newDur := <-a.tickerResetCh:
+				ticker.Stop()
+				dur = newDur
+				ticker = time.NewTicker(dur)
+				log.Printf("[app] screenshot collection loop reset to %v", dur)
 			case stats, ok := <-statsCh:
 				if ok {
 					a.latestKeyStats = stats
@@ -211,6 +221,13 @@ func (a *App) collect() {
 				_ = a.database.RecordAPIUsage(0, 0, "guest", result.Usage.PromptTokenCount, result.Usage.CandidatesTokenCount, result.Usage.TotalTokenCount, a.gemini.GetModel())
 				log.Printf("[app] guest logged #%d — category=%s productive=%v tokens=%d",
 					logID, result.Category, result.Productive, result.Usage.TotalTokenCount)
+			} else {
+				log.Printf("[app] guest AI analysis offline/error for #%d: %v — applying local fallback", logID, err)
+				fallbackReason := "Offline Mode (Local Log)"
+				if !a.gemini.HasKey() {
+					fallbackReason = "No Gemini API key set"
+				}
+				_ = a.database.UpdateAIResult(logID, "Browsing", true, 0.8, fallbackReason)
 			}
 		}(id, shot.FilePath, shot.Base64Data, keyStats.EntropyScore)
 	} else {
@@ -395,6 +412,28 @@ func (a *App) GetImageBase64(imagePath string) (string, error) {
 	return "data:image/jpeg;base64," + base64.StdEncoding.EncodeToString(data), nil
 }
 
+// UpdateScreenshotInterval updates and persists the screenshot interval, then resets the collection ticker.
+func (a *App) UpdateScreenshotInterval(seconds int) (bool, error) {
+	if seconds < 5 {
+		seconds = 5
+	}
+	dur := time.Duration(seconds) * time.Second
+	if a.cfg != nil {
+		a.cfg.ScreenshotInterval = dur
+		if err := config.Save(a.cfg); err != nil {
+			log.Printf("[app] save config error: %v", err)
+		}
+	}
+	if a.tickerResetCh != nil {
+		select {
+		case a.tickerResetCh <- dur:
+		default:
+		}
+	}
+	log.Printf("[app] Screenshot interval updated to %d seconds", seconds)
+	return true, nil
+}
+
 // ProcessPendingLogs scans for unanalyzed logs and processes them with Gemini.
 func (a *App) ProcessPendingLogs() (int, error) {
 	if a.database == nil || a.gemini == nil || !a.gemini.HasKey() {
@@ -423,7 +462,8 @@ func (a *App) ProcessPendingLogs() (int, error) {
 		cancel()
 
 		if err != nil {
-			log.Printf("[app] re-analyze log #%d error: %v", entry.ID, err)
+			log.Printf("[app] re-analyze log #%d error: %v — applying offline fallback", entry.ID, err)
+			_ = a.database.UpdateAIResult(entry.ID, "Browsing", true, 0.8, "Offline Mode (Local Log)")
 			continue
 		}
 

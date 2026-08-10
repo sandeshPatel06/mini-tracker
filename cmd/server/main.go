@@ -94,12 +94,20 @@ func main() {
 		return accumulatedSec + int64(time.Since(trackerStartTime).Seconds())
 	}
 
+	serverTickerResetCh := make(chan time.Duration, 1)
+
 	var latestKeyStats tracker.KeystrokeStats
 	go func() {
-		ticker := time.NewTicker(cfg.ScreenshotInterval)
+		dur := cfg.ScreenshotInterval
+		ticker := time.NewTicker(dur)
 		defer ticker.Stop()
 		for {
 			select {
+			case newDur := <-serverTickerResetCh:
+				ticker.Stop()
+				dur = newDur
+				ticker = time.NewTicker(dur)
+				log.Printf("[server] background collector ticker reset to %v", dur)
 			case stats, ok := <-statsCh:
 				if ok {
 					latestKeyStats = stats
@@ -141,7 +149,8 @@ func main() {
 
 					res, err := gemini.Analyze(ctx, b64, score)
 					if err != nil {
-						log.Printf("[server] AI analysis error: %v", err)
+						log.Printf("[server] AI analysis error for #%d: %v — applying local fallback", logID, err)
+						_ = database.UpdateLogAnalysis(logID, "Browsing", "Desktop", "Web Browser", "Offline", 0, "", true, 80, 0.8, "Offline Mode (Local Log)")
 					} else {
 						_ = database.UpdateLogAnalysis(logID, res.Category, res.AppName, res.AppCategory, res.WindowTitle, 0, "", res.Productive, res.ProductiveScore, res.Confidence, res.Reason)
 						log.Printf("[server] logged #%d — app=%s category=%s productive_score=%.0f%% reason=%s", logID, res.AppName, res.Category, res.ProductiveScore, res.Reason)
@@ -357,12 +366,20 @@ func main() {
 			http.Error(w, "missing path", 400)
 			return
 		}
-		// Security check: ensure path is inside DataDir or user home
-		if !filepath.IsAbs(imgPath) {
+		cleanPath := filepath.Clean(imgPath)
+		if !filepath.IsAbs(cleanPath) {
 			http.Error(w, "invalid path", 400)
 			return
 		}
-		data, err := os.ReadFile(imgPath)
+		// Security check: ensure path is inside DataDir or user home
+		dataDirClean := filepath.Clean(cfg.DataDir)
+		userHome, _ := os.UserHomeDir()
+		userHomeClean := filepath.Clean(userHome)
+		if !strings.HasPrefix(cleanPath, dataDirClean) && (userHomeClean == "" || !strings.HasPrefix(cleanPath, userHomeClean)) {
+			http.Error(w, "forbidden path", 403)
+			return
+		}
+		data, err := os.ReadFile(cleanPath)
 		if err != nil {
 			http.Error(w, "image not found", 404)
 			return
@@ -376,11 +393,26 @@ func main() {
 	mux.HandleFunc("/api/config", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodPost {
 			var payload struct {
-				GeminiAPIKey string `json:"gemini_api_key"`
+				GeminiAPIKey              string  `json:"gemini_api_key"`
+				AIModel                   string  `json:"ai_model"`
+				ScreenshotIntervalSeconds float64 `json:"screenshot_interval_seconds"`
 			}
-			if err := json.NewDecoder(r.Body).Decode(&payload); err == nil && payload.GeminiAPIKey != "" {
-				cfg.GeminiAPIKey = payload.GeminiAPIKey
-				gemini.SetAPIKey(payload.GeminiAPIKey)
+			if err := json.NewDecoder(r.Body).Decode(&payload); err == nil {
+				if payload.GeminiAPIKey != "" {
+					cfg.GeminiAPIKey = payload.GeminiAPIKey
+					gemini.SetAPIKey(payload.GeminiAPIKey)
+				}
+				if payload.AIModel != "" {
+					cfg.GeminiModel = payload.AIModel
+					gemini.SetModel(payload.AIModel)
+				}
+				if payload.ScreenshotIntervalSeconds >= 5 {
+					cfg.ScreenshotInterval = time.Duration(payload.ScreenshotIntervalSeconds) * time.Second
+					select {
+					case serverTickerResetCh <- cfg.ScreenshotInterval:
+					default:
+					}
+				}
 				_ = config.Save(cfg)
 				go processPendingLogs(database, gemini)
 			}
@@ -672,19 +704,19 @@ func main() {
 			return
 		}
 		user := getSessionUser(r, database)
-		var orgID, userID int64
-		if user != nil {
-			if user.Role != "owner" && user.Role != "admin" {
-				jsonError(w, "Forbidden: Only Organization Admins can reset org usage", http.StatusForbidden)
-				return
-			}
-			orgID = user.OrgID
+		if user == nil {
+			jsonError(w, "Unauthorized", http.StatusUnauthorized)
+			return
 		}
-		if err := database.ResetAPIUsage(orgID, userID); err != nil {
+		if user.Role != "owner" && user.Role != "admin" {
+			jsonError(w, "Forbidden: Only Organization Admins can reset org usage", http.StatusForbidden)
+			return
+		}
+		if err := database.ResetAPIUsage(user.OrgID, user.ID); err != nil {
 			jsonError(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		log.Printf("[server] API usage counter reset for org #%d", orgID)
+		log.Printf("[server] API usage counter reset for org #%d", user.OrgID)
 		jsonResp(w, map[string]interface{}{"success": true})
 	})
 
@@ -1306,20 +1338,34 @@ func main() {
 	// GET /api/org/members — Get team roster and pending invitations
 	mux.HandleFunc("/api/org/members", func(w http.ResponseWriter, r *http.Request) {
 		sessUser := getSessionUser(r, database)
-		if sessUser != nil && sessUser.Role == "member" {
+		if sessUser == nil {
+			// Unauthenticated fallback: allowed in standalone guest desktop mode for default org 1
+			orgIDStr := r.URL.Query().Get("org_id")
+			orgID, _ := strconv.ParseInt(orgIDStr, 10, 64)
+			if orgID == 0 {
+				orgID = 1
+			}
+			members, err := database.GetOrgMembers(orgID)
+			if err != nil {
+				http.Error(w, err.Error(), 500)
+				return
+			}
+			invitations, _ := database.GetPendingInvitations(orgID)
+			org, _ := database.GetOrganization(orgID)
+			jsonResp(w, map[string]interface{}{
+				"org":         org,
+				"members":     members,
+				"invitations": invitations,
+			})
+			return
+		}
+
+		if sessUser.Role == "member" {
 			jsonError(w, "Forbidden: Only organization admins can access member roster", http.StatusForbidden)
 			return
 		}
 
-		orgIDStr := r.URL.Query().Get("org_id")
-		orgID, _ := strconv.ParseInt(orgIDStr, 10, 64)
-		if orgID == 0 && sessUser != nil {
-			orgID = sessUser.OrgID
-		}
-		if orgID == 0 {
-			orgID = 1
-		}
-
+		orgID := sessUser.OrgID
 		members, err := database.GetOrgMembers(orgID)
 		if err != nil {
 			http.Error(w, err.Error(), 500)
@@ -1356,7 +1402,9 @@ func main() {
 			http.Error(w, "Missing email address", http.StatusBadRequest)
 			return
 		}
-		if req.OrgID == 0 {
+		if sessUser != nil {
+			req.OrgID = sessUser.OrgID
+		} else if req.OrgID == 0 {
 			req.OrgID = 1
 		}
 		if req.Role == "" {
@@ -1673,6 +1721,10 @@ func processPendingLogs(database *db.DB, gemini *ai.GeminiClient) int {
 				sCancel()
 				if sErr == nil {
 					_ = database.UpdateLogAnalysis(entry.ID, res.Category, res.AppName, res.AppCategory, res.WindowTitle, 0, "", res.Productive, res.ProductiveScore, res.Confidence, res.Reason)
+					processed++
+				} else {
+					log.Printf("[server] single AI analysis error for log #%d: %v — applying offline fallback", entry.ID, sErr)
+					_ = database.UpdateLogAnalysis(entry.ID, "Browsing", "Desktop", "Web Browser", "Offline", 0, "", true, 80, 0.8, "Offline Mode (Local Log)")
 					processed++
 				}
 			}

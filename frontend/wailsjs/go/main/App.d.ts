@@ -31,3 +31,5 @@ export function TriggerSyncNow():Promise<boolean>;
 export function UpdateAIModel(arg1:string):Promise<boolean>;
 
 export function UpdateGeminiAPIKey(arg1:string):Promise<boolean>;
+
+export function UpdateScreenshotInterval(arg1:number):Promise<boolean>;

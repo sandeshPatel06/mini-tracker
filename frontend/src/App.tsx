@@ -358,6 +358,37 @@ Return ONLY a valid JSON array of ${bundle.length} objects matching the exact in
           }
         });
 
+        // Helper for robust parsing of AI responses (handles markdown fences & truncated JSON strings)
+        const parseAIJSONResponse = (raw: string): any[] | null => {
+          if (!raw) return null;
+          let clean = raw.trim();
+          if (clean.startsWith('```')) {
+            clean = clean.replace(/^```[a-z]*\n?/i, '').replace(/\n?```$/i, '').trim();
+          }
+          try {
+            const res = JSON.parse(clean);
+            if (Array.isArray(res)) return res;
+          } catch {
+            // Attempt auto-repair for truncated JSON array
+            const startIdx = clean.indexOf('[');
+            if (startIdx !== -1) {
+              let arrayStr = clean.substring(startIdx);
+              if (!arrayStr.endsWith(']')) {
+                // Remove trailing unclosed object/comma and close array
+                const lastObjEnd = arrayStr.lastIndexOf('}');
+                if (lastObjEnd !== -1) {
+                  arrayStr = arrayStr.substring(0, lastObjEnd + 1) + ']';
+                  try {
+                    const res = JSON.parse(arrayStr);
+                    if (Array.isArray(res)) return res;
+                  } catch {}
+                }
+              }
+            }
+          }
+          return null;
+        };
+
         // Trigger asynchronous direct Gemini REST API request without blocking UI render
         fetch(`https://generativelanguage.googleapis.com/v1beta/${localModel}:generateContent?key=${localApiKey}`, {
           method: 'POST',
@@ -366,7 +397,7 @@ Return ONLY a valid JSON array of ${bundle.length} objects matching the exact in
             contents: [{ parts }],
             generationConfig: {
               responseMimeType: 'application/json',
-              temperature: 0.2,
+              temperature: 0.1,
             }
           })
         })
@@ -374,42 +405,41 @@ Return ONLY a valid JSON array of ${bundle.length} objects matching the exact in
           if (!res.ok) throw new Error(`HTTP ${res.status}`);
           const json = await res.json();
           const responseText = json?.candidates?.[0]?.content?.parts?.[0]?.text;
-          if (responseText) {
-            const parsedResults = JSON.parse(responseText);
-            if (Array.isArray(parsedResults)) {
-              // Increment local AI usage count and notify UI components
-              const currentUsage = parseInt(localStorage.getItem('mini_ai_usage_count') || '0', 10);
-              const newUsage = currentUsage + 1;
-              localStorage.setItem('mini_ai_usage_count', newUsage.toString());
-              window.dispatchEvent(new CustomEvent('ai_usage_updated', { detail: newUsage }));
+          const parsedResults = parseAIJSONResponse(responseText);
 
-              // Map bundled results back to log entries
-              const resultMap = new Map<number, any>();
-              parsedResults.forEach((resItem: any, index: number) => {
-                const targetLog = bundle[index];
-                if (targetLog) {
-                  resultMap.set(targetLog.id, resItem);
-                }
-              });
+          if (parsedResults && Array.isArray(parsedResults)) {
+            // Increment local AI usage count and notify UI components
+            const currentUsage = parseInt(localStorage.getItem('mini_ai_usage_count') || '0', 10);
+            const newUsage = currentUsage + 1;
+            localStorage.setItem('mini_ai_usage_count', newUsage.toString());
+            window.dispatchEvent(new CustomEvent('ai_usage_updated', { detail: newUsage }));
 
-              setLogs(prev => prev.map(log => {
-                const resItem = resultMap.get(log.id);
-                if (resItem) {
-                  return {
-                    ...log,
-                    app_name: resItem.app_name || log.app_name,
-                    app_category: resItem.app_category || log.app_category,
-                    window_title: resItem.window_title || log.window_title,
-                    ai_category: resItem.category || 'Browsing',
-                    is_productive: Boolean(resItem.is_productive),
-                    productive_score: typeof resItem.productivity_score === 'number' ? resItem.productivity_score : (resItem.is_productive ? 90 : 20),
-                    ai_confidence: typeof resItem.confidence === 'number' ? resItem.confidence : 0.95,
-                    ai_reason: resItem.reason || `Analyzed via ${localModel} bundle`
-                  };
-                }
-                return log;
-              }));
-            }
+            // Map bundled results back to log entries
+            const resultMap = new Map<number, any>();
+            parsedResults.forEach((resItem: any, index: number) => {
+              const targetLog = bundle[index];
+              if (targetLog) {
+                resultMap.set(targetLog.id, resItem);
+              }
+            });
+
+            setLogs(prev => prev.map(log => {
+              const resItem = resultMap.get(log.id);
+              if (resItem) {
+                return {
+                  ...log,
+                  app_name: resItem.app_name || log.app_name,
+                  app_category: resItem.app_category || log.app_category,
+                  window_title: resItem.window_title || log.window_title,
+                  ai_category: resItem.category || 'Browsing',
+                  is_productive: Boolean(resItem.is_productive),
+                  productive_score: typeof resItem.productivity_score === 'number' ? resItem.productivity_score : (resItem.is_productive ? 90 : 20),
+                  ai_confidence: typeof resItem.confidence === 'number' ? resItem.confidence : 0.95,
+                  ai_reason: resItem.reason || `Analyzed via ${localModel} bundle`
+                };
+              }
+              return log;
+            }));
           }
         })
         .catch(async err => {
@@ -423,42 +453,44 @@ Return ONLY a valid JSON array of ${bundle.length} objects matching the exact in
                 contents: [{ parts }],
                 generationConfig: {
                   responseMimeType: 'application/json',
-                  temperature: 0.2,
+                  temperature: 0.1,
                 }
               })
             });
             if (fallbackRes.ok) {
               const fallbackJson = await fallbackRes.json();
               const responseText = fallbackJson?.candidates?.[0]?.content?.parts?.[0]?.text;
-              if (responseText) {
-                const parsedResults = JSON.parse(responseText);
-                if (Array.isArray(parsedResults)) {
-                  const currentUsage = parseInt(localStorage.getItem('mini_ai_usage_count') || '0', 10);
-                  const newUsage = currentUsage + 1;
-                  localStorage.setItem('mini_ai_usage_count', newUsage.toString());
-                  window.dispatchEvent(new CustomEvent('ai_usage_updated', { detail: newUsage }));
+              const parsedResults = parseAIJSONResponse(responseText);
 
-                  const resultMap = new Map<number, any>();
-                  parsedResults.forEach((resItem: any, index: number) => {
-                    const targetLog = bundle[index];
-                    if (targetLog) resultMap.set(targetLog.id, resItem);
-                  });
+              if (parsedResults && Array.isArray(parsedResults)) {
+                const currentUsage = parseInt(localStorage.getItem('mini_ai_usage_count') || '0', 10);
+                const newUsage = currentUsage + 1;
+                localStorage.setItem('mini_ai_usage_count', newUsage.toString());
+                window.dispatchEvent(new CustomEvent('ai_usage_updated', { detail: newUsage }));
 
-                  setLogs(prev => prev.map(log => {
-                    const resItem = resultMap.get(log.id);
-                    if (resItem) {
-                      return {
-                        ...log,
-                        ai_category: resItem.category || 'Browsing',
-                        is_productive: Boolean(resItem.is_productive),
-                        ai_confidence: typeof resItem.confidence === 'number' ? resItem.confidence : 0.9,
-                        ai_reason: resItem.reason || `Analyzed via Gemma (Gemma 4 31B IT Fallback)`
-                      };
-                    }
-                    return log;
-                  }));
-                  return;
-                }
+                const resultMap = new Map<number, any>();
+                parsedResults.forEach((resItem: any, index: number) => {
+                  const targetLog = bundle[index];
+                  if (targetLog) resultMap.set(targetLog.id, resItem);
+                });
+
+                setLogs(prev => prev.map(log => {
+                  const resItem = resultMap.get(log.id);
+                  if (resItem) {
+                    return {
+                      ...log,
+                      app_name: resItem.app_name || log.app_name,
+                      app_category: resItem.app_category || log.app_category,
+                      window_title: resItem.window_title || log.window_title,
+                      ai_category: resItem.category || 'Browsing',
+                      is_productive: Boolean(resItem.is_productive),
+                      productive_score: typeof resItem.productivity_score === 'number' ? resItem.productivity_score : (resItem.is_productive ? 90 : 20),
+                      ai_confidence: typeof resItem.confidence === 'number' ? resItem.confidence : 0.95,
+                      ai_reason: resItem.reason || `Analyzed via Gemma Fallback`
+                    };
+                  }
+                  return log;
+                }));
               }
             }
           } catch (fallbackErr) {

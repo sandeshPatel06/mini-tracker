@@ -557,7 +557,7 @@ func buildGeminiRequest(prompt, base64Image string) map[string]interface{} {
 		},
 		"generationConfig": map[string]interface{}{
 			"temperature":      0.1,
-			"maxOutputTokens":  512,
+			"maxOutputTokens":  1536,
 			"responseMimeType": "application/json",
 		},
 	}
@@ -606,18 +606,22 @@ func parseGeminiResponse(body io.Reader) (*AnalysisResult, error) {
 			return &direct, nil
 		}
 
-		// 2. Search all JSON object substrings '{' ... '}'
+		// 2. Search all JSON object substrings '{' ... '}' or attempt auto-closing broken/truncated JSON
 		starts := allIndices(rawText, "{")
 		for k := len(starts) - 1; k >= 0; k-- {
 			start := starts[k]
 			end := strings.LastIndex(rawText, "}")
+			var candidate string
 			if end > start {
-				candidate := sanitizeJSONString(rawText[start : end+1])
-				var res AnalysisResult
-				if err := json.Unmarshal([]byte(candidate), &res); err == nil && res.Category != "" {
-					res.Usage = resp.UsageMetadata
-					return &res, nil
-				}
+				candidate = sanitizeJSONString(rawText[start : end+1])
+			} else {
+				// Attempt to auto-repair truncated JSON object missing closing brace
+				candidate = sanitizeJSONString(rawText[start:]) + `"}`
+			}
+			var res AnalysisResult
+			if err := json.Unmarshal([]byte(candidate), &res); err == nil && res.Category != "" {
+				res.Usage = resp.UsageMetadata
+				return &res, nil
 			}
 		}
 		lastErr = fmt.Errorf("could not parse valid JSON object from candidate text")

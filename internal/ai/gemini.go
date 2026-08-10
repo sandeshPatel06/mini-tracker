@@ -340,15 +340,25 @@ func (g *GeminiClient) AnalyzeBatch(ctx context.Context, items []BatchAnalysisIt
 		return nil, fmt.Errorf("no API key set or empty batch")
 	}
 
-	prompt := fmt.Sprintf(`You are an expert developer productivity analyst inspecting a sequence of %d desktop screenshots.
-For EACH screenshot item (Item 1 to Item %d), analyze the primary open application (app_name), app category (app_category), window title (window_title), work category, productivity status, and concise reason.
+	prompt := fmt.Sprintf(`You are a world-class developer productivity analyst inspecting a sequence of %d desktop screenshots captured from a Linux workstation in chronological order.
 
-Respond ONLY with a valid JSON array of objects, one per item, strictly in this format:
+INSTRUCTIONS FOR EACH SCREENSHOT ITEM:
+1. Multi-Monitor Grid Inspection: Each image may be a composite grid of multiple monitors. Inspect ALL visible screens.
+2. Application & Context Identification: Identify the primary open app (app_name, e.g., VS Code, Terminal, Chrome, Slack), visible file paths/code snippets, documentation, or active window title (window_title).
+3. Keystroke Telemetry Integration:
+   - High Keystroke Entropy (>15.0): Active typing mode (coding, writing, terminal command execution).
+   - Low Keystroke Entropy (0.0 - 15.0): Passive reading mode (reviewing logs, build outputs, code reading, or idling).
+4. Productivity Classification:
+   - Categories: [Coding, Writing, Browsing, Document Editing, Communication, Social Media, Video/Entertainment, Idle, Other]
+   - Set is_productive=true (productivity_score 80-100) for software development, code editing, terminal execution, API testing, debugging, and technical reading.
+   - Set is_productive=false (productivity_score 0-30) for social media, non-work video streaming, or gaming.
+
+Respond ONLY with a valid JSON array of %d objects matching the exact input order, strictly in this schema:
 [
 `, len(items), len(items))
 
 	for i, item := range items {
-		prompt += fmt.Sprintf(`  {"item_index": %d, "app_name": "VS Code", "app_category": "IDE / Code Editor", "window_title": "active window", "category": "Coding", "productivity_score": 95, "is_productive": true, "confidence": 0.95, "reason": "concise explanation (Entropy: %.1f)"}%s
+		prompt += fmt.Sprintf(`  {"item_index": %d, "app_name": "VS Code", "app_category": "IDE / Code Editor", "window_title": "app.go - mini-tracker", "category": "Coding", "productivity_score": 95, "is_productive": true, "confidence": 0.95, "reason": "Editing Go database logic in VS Code while inspecting terminal (Entropy: %.1f)"}%s
 `, i+1, item.EntropyScore, func() string {
 			if i < len(items)-1 {
 				return ","
@@ -364,7 +374,7 @@ Respond ONLY with a valid JSON array of objects, one per item, strictly in this 
 
 	for i, item := range items {
 		parts = append(parts, map[string]interface{}{
-			"text": fmt.Sprintf("[Item %d - Entropy: %.1f]", i+1, item.EntropyScore),
+			"text": fmt.Sprintf("[Item %d | Keystroke Entropy Score: %.1f/100]", i+1, item.EntropyScore),
 		})
 		if item.Base64Image != "" {
 			parts = append(parts, map[string]interface{}{

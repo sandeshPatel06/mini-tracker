@@ -300,28 +300,42 @@ export default function App() {
         // Group pending items into bundles (at least 3 items, up to 6)
         const bundle = pendingLogs.slice(0, Math.min(Math.max(3, targetBundleSize), 6));
 
-        // Prepare multimodal contents array for Google Gemini REST API v1beta
-        const promptText = `You are an expert productivity analyst. Analyze these ${bundle.length} desktop screenshots in sequential chronological order.
-For EACH screenshot (Item 1 to Item ${bundle.length}), inspect the open application windows, web pages, IDE, document text, and active work context.
+        // Prepare enhanced multimodal contents array for Google Gemini REST API v1beta
+        const promptText = `You are a world-class developer productivity analyst inspecting a sequence of ${bundle.length} desktop screenshots captured from a Linux workstation in chronological order.
 
-Respond ONLY with a valid JSON array of objects, one per item, strictly in this format:
+INSTRUCTIONS FOR EACH SCREENSHOT ITEM:
+1. Multi-Monitor Grid Inspection: Each image may be a composite grid of multiple monitors. Inspect ALL screens visible in the grid.
+2. Application & Context Identification: Identify the primary open app (e.g., VS Code, Terminal, Chrome, Slack), visible file paths/code snippets, documentation, or active window title.
+3. Keystroke Telemetry Integration:
+   - High Keystroke Entropy (>15.0) + Total Keys (>20): Active input mode (coding, writing, active CLI execution).
+   - Low Keystroke Entropy (0.0 - 15.0): Passive input mode (reading code/docs, reviewing build outputs, idling).
+4. Productivity Classification:
+   - Categories: "Coding", "Writing", "Browsing", "Document Editing", "Communication", "Social Media", "Video/Entertainment", "Idle", "Other"
+   - Mark is_productive=true (productivity_score 80-100) for software development, code editing, terminal execution, API testing, debugging, and tech documentation reading.
+   - Mark is_productive=false (productivity_score 0-30) for social media scrolling, non-work video streaming, or gaming.
+
+Return ONLY a valid JSON array of ${bundle.length} objects matching the exact input order, strictly in this schema:
 [
   {
     "item_index": 1,
-    "category": "Coding" | "Browsing" | "Document Editing" | "Communication" | "Entertainment" | "Idle",
-    "is_productive": true | false,
+    "app_name": "VS Code",
+    "app_category": "IDE / Code Editor",
+    "window_title": "app.go - mini-tracker",
+    "category": "Coding",
+    "productivity_score": 95,
+    "is_productive": true,
     "confidence": 0.95,
-    "reason": "Clear concise explanation of user activity in screenshot"
+    "reason": "Editing Go backend code in VS Code while reviewing build terminal"
   }
 ]`;
 
         const parts: any[] = [{ text: promptText }];
 
-        // Attach image parts if available as base64 or reference
+        // Attach image parts with detailed telemetry metadata per item
         bundle.forEach((item, idx) => {
           if (item.image_path) {
             parts.push({
-              text: `[Screenshot Item ${idx + 1} - Recorded at ${item.timestamp}]`
+              text: `[Item ${idx + 1} | Timestamp: ${item.timestamp} | Total Keys: ${item.total_keys || 0} | Unique Keys: ${item.unique_keys || 0} | Keystroke Entropy: ${(item.entropy_score || 0).toFixed(1)}]`
             });
             // If image_path contains data URI or raw base64
             if (item.image_path.startsWith('data:image/')) {
@@ -329,7 +343,7 @@ Respond ONLY with a valid JSON array of objects, one per item, strictly in this 
               const mimeType = item.image_path.split(';')[0].split(':')[1];
               parts.push({
                 inlineData: {
-                  mimeType: mimeType || 'image/png',
+                  mimeType: mimeType || 'image/webp',
                   data: base64Data
                 }
               });
@@ -376,10 +390,14 @@ Respond ONLY with a valid JSON array of objects, one per item, strictly in this 
                 if (resItem) {
                   return {
                     ...log,
+                    app_name: resItem.app_name || log.app_name,
+                    app_category: resItem.app_category || log.app_category,
+                    window_title: resItem.window_title || log.window_title,
                     ai_category: resItem.category || 'Browsing',
                     is_productive: Boolean(resItem.is_productive),
-                    ai_confidence: typeof resItem.confidence === 'number' ? resItem.confidence : 0.9,
-                    ai_reason: resItem.reason || `Directly analyzed via ${localModel} bundle`
+                    productive_score: typeof resItem.productivity_score === 'number' ? resItem.productivity_score : (resItem.is_productive ? 90 : 20),
+                    ai_confidence: typeof resItem.confidence === 'number' ? resItem.confidence : 0.95,
+                    ai_reason: resItem.reason || `Analyzed via ${localModel} bundle`
                   };
                 }
                 return log;

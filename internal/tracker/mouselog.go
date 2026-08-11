@@ -20,15 +20,12 @@ type MouseStats struct {
 
 // MouseTracker monitors mouse/pointer input devices and aggregates click/movement metrics.
 type MouseTracker struct {
-	mu         sync.Mutex
-	stopOnce   sync.Once
-	clicks     int
-	distance   float64
-	stopCh     chan struct{}
-	interval   time.Duration
-	lastX      float64
-	lastY      float64
-	hasLastPos bool
+	mu            sync.Mutex
+	stopOnce      sync.Once
+	clicks        int
+	distanceSqAcc float64 // accumulated squared-distance components; sqrt taken only at flush
+	stopCh        chan struct{}
+	interval      time.Duration
 }
 
 // NewMouseTracker creates a new MouseTracker with the given flush interval.
@@ -37,6 +34,12 @@ func NewMouseTracker(interval time.Duration) *MouseTracker {
 		stopCh:   make(chan struct{}),
 		interval: interval,
 	}
+}
+
+// mouseEvent is a lightweight tagged union sent from device readers to the aggregator.
+type mouseEvent struct {
+	isClick bool
+	dx, dy  int32 // accumulated relative/delta values for one SYN_REPORT packet
 }
 
 // Start launches goroutines for all discovered pointer/mouse devices and a flush ticker.
@@ -48,13 +51,8 @@ func (m *MouseTracker) Start() (<-chan MouseStats, error) {
 		log.Printf("[tracker] Found %d native evdev mouse/pointer device(s)", len(devices))
 	}
 
-	type mouseEvent struct {
-		isClick bool
-		relX    float64
-		relY    float64
-	}
-
-	eventCh := make(chan mouseEvent, 512)
+	// Buffered: drops events when aggregator is busy — never blocks the reader goroutine.
+	eventCh := make(chan mouseEvent, 256)
 
 	for _, path := range devices {
 		go func(devPath string) {
@@ -66,74 +64,82 @@ func (m *MouseTracker) Start() (<-chan MouseStats, error) {
 			defer dev.Close()
 			log.Printf("[tracker] listening on mouse dev %s", devPath)
 
-			var currX, currY float64
+			var (
+				currX, currY         float64
+				pendingDX, pendingDY int32
+				hasPending           bool
+			)
+
+			flushMove := func() {
+				if hasPending && (pendingDX != 0 || pendingDY != 0) {
+					select {
+					case eventCh <- mouseEvent{dx: pendingDX, dy: pendingDY}:
+					default:
+					}
+					pendingDX, pendingDY = 0, 0
+				}
+				hasPending = false
+			}
 
 			for {
+				// BLOCKING read — goroutine sleeps until the kernel delivers an event.
+				// No select/default spin-loop → zero idle CPU.
+				ev, err := dev.ReadOne()
+				if err != nil {
+					return
+				}
+
 				select {
 				case <-m.stopCh:
 					return
 				default:
-					ev, err := dev.ReadOne()
-					if err != nil {
-						return
-					}
+				}
 
-					// Mouse click events (EV_KEY: BTN_LEFT, BTN_RIGHT, BTN_MIDDLE, BTN_SIDE, BTN_EXTRA)
-					if ev.Type == evdev.EV_KEY && ev.Value == 1 {
-						if isMouseButton(ev.Code) {
-							select {
-							case eventCh <- mouseEvent{isClick: true}:
-							default:
-							}
-						}
-					}
+				switch ev.Type {
+				case evdev.EV_SYN:
+					// SYN_REPORT = end of event packet; flush accumulated movement.
+					flushMove()
 
-					// Relative mouse movement (EV_REL: REL_X, REL_Y)
-					if ev.Type == evdev.EV_REL {
-						var rx, ry float64
-						if ev.Code == evdev.REL_X {
-							rx = float64(ev.Value)
-						} else if ev.Code == evdev.REL_Y {
-							ry = float64(ev.Value)
-						}
-						if rx != 0 || ry != 0 {
-							select {
-							case eventCh <- mouseEvent{isClick: false, relX: rx, relY: ry}:
-							default:
-							}
+				case evdev.EV_KEY:
+					if ev.Value == 1 && isMouseButton(ev.Code) {
+						flushMove()
+						select {
+						case eventCh <- mouseEvent{isClick: true}:
+						default:
 						}
 					}
 
-					// Absolute positioning (EV_ABS: ABS_X, ABS_Y e.g. touchpad/drawing tablet)
-					if ev.Type == evdev.EV_ABS {
-						if ev.Code == evdev.ABS_X || ev.Code == evdev.ABS_Y {
-							newVal := float64(ev.Value)
-							var rx, ry float64
-							if ev.Code == evdev.ABS_X {
-								if currX > 0 {
-									rx = math.Abs(newVal - currX)
-								}
-								currX = newVal
-							} else if ev.Code == evdev.ABS_Y {
-								if currY > 0 {
-									ry = math.Abs(newVal - currY)
-								}
-								currY = newVal
-							}
-							if rx > 0 || ry > 0 {
-								select {
-								case eventCh <- mouseEvent{isClick: false, relX: rx, relY: ry}:
-								default:
-								}
-							}
+				case evdev.EV_REL:
+					switch ev.Code {
+					case evdev.REL_X:
+						pendingDX += ev.Value
+					case evdev.REL_Y:
+						pendingDY += ev.Value
+					}
+					hasPending = true
+
+				case evdev.EV_ABS:
+					if ev.Code == evdev.ABS_X {
+						newVal := float64(ev.Value)
+						if currX > 0 {
+							pendingDX += int32(math.Round(newVal - currX))
+							hasPending = true
 						}
+						currX = newVal
+					} else if ev.Code == evdev.ABS_Y {
+						newVal := float64(ev.Value)
+						if currY > 0 {
+							pendingDY += int32(math.Round(newVal - currY))
+							hasPending = true
+						}
+						currY = newVal
 					}
 				}
 			}
 		}(path)
 	}
 
-	// Event aggregator
+	// Event aggregator — single goroutine, no mutex contention on hot path.
 	go func() {
 		for {
 			select {
@@ -142,8 +148,10 @@ func (m *MouseTracker) Start() (<-chan MouseStats, error) {
 				if ev.isClick {
 					m.clicks++
 				} else {
-					dist := math.Sqrt(ev.relX*ev.relX + ev.relY*ev.relY)
-					m.distance += dist
+					dx := float64(ev.dx)
+					dy := float64(ev.dy)
+					// Accumulate squared distance — only take sqrt once at flush time.
+					m.distanceSqAcc += dx*dx + dy*dy
 				}
 				m.mu.Unlock()
 			case <-m.stopCh:
@@ -154,7 +162,6 @@ func (m *MouseTracker) Start() (<-chan MouseStats, error) {
 
 	statsCh := make(chan MouseStats, 4)
 
-	// Flush ticker
 	go func() {
 		ticker := time.NewTicker(m.interval)
 		defer ticker.Stop()
@@ -175,12 +182,13 @@ func (m *MouseTracker) Start() (<-chan MouseStats, error) {
 	return statsCh, nil
 }
 
-// RecordMouseActivity records mouse activity submitted via API or desktop frontend.
+// RecordMouseActivity records mouse activity submitted via the frontend (zero-sudo mode).
 func (m *MouseTracker) RecordMouseActivity(clicks int, distance float64) {
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	m.clicks += clicks
-	m.distance += distance
+	// Frontend reports straight pixel distance; square it to match flush math.
+	m.distanceSqAcc += distance * distance
+	m.mu.Unlock()
 }
 
 // Stop signals all tracker goroutines to exit. Safe to call multiple times.
@@ -188,73 +196,74 @@ func (m *MouseTracker) Stop() {
 	m.stopOnce.Do(func() { close(m.stopCh) })
 }
 
-// flush atomically reads and resets the counters.
+// flush atomically reads and resets the counters, computing final distance only here.
 func (m *MouseTracker) flush() MouseStats {
 	m.mu.Lock()
 	clicks := m.clicks
-	dist := m.distance
+	sqAcc := m.distanceSqAcc
 	m.clicks = 0
-	m.distance = 0
+	m.distanceSqAcc = 0
 	m.mu.Unlock()
 
+	dist := 0.0
+	if sqAcc > 0 {
+		dist = math.Round(math.Sqrt(sqAcc)*10) / 10
+	}
 	return MouseStats{
 		TotalClicks:   clicks,
-		MouseDistance: math.Round(dist*10) / 10,
+		MouseDistance: dist,
 	}
 }
 
-// isMouseButton checks if an evdev code corresponds to a mouse button.
+// isMouseButton checks if an evdev code is a mouse button (BTN_LEFT … BTN_TASK).
 func isMouseButton(code evdev.EvCode) bool {
-	// BTN_LEFT = 0x110 (272), BTN_RIGHT = 0x111 (273), BTN_MIDDLE = 0x112 (274), BTN_SIDE = 0x113, BTN_EXTRA = 0x114
 	return code >= 272 && code <= 279
 }
 
-// discoverMice returns all /dev/input pointer/mouse device paths.
+// discoverMice returns all /dev/input/event* device paths that report pointer events.
+// Scans only /dev/input directly (not by-id/by-path which are symlinks to the same nodes).
 func discoverMice() ([]string, error) {
-	dirsToScan := []string{"/dev/input"}
-	if entries, err := os.ReadDir("/dev/input/by-id"); err == nil && len(entries) > 0 {
-		dirsToScan = append(dirsToScan, "/dev/input/by-id")
-	}
-	if entries, err := os.ReadDir("/dev/input/by-path"); err == nil && len(entries) > 0 {
-		dirsToScan = append(dirsToScan, "/dev/input/by-path")
+	entries, err := os.ReadDir("/dev/input")
+	if err != nil {
+		return nil, err
 	}
 
 	seen := make(map[string]bool)
 	var mice []string
 
-	for _, dir := range dirsToScan {
-		entries, err := os.ReadDir(dir)
+	for _, e := range entries {
+		name := e.Name()
+		if !strings.HasPrefix(name, "event") {
+			continue
+		}
+		path := filepath.Join("/dev/input", name)
+
+		// Resolve symlinks so we never open the same hardware device twice.
+		real, err := filepath.EvalSymlinks(path)
+		if err != nil {
+			real = path
+		}
+		if seen[real] {
+			continue
+		}
+
+		dev, err := evdev.Open(path)
 		if err != nil {
 			continue
 		}
-		for _, e := range entries {
-			name := e.Name()
-			if !strings.Contains(name, "event") && !strings.Contains(name, "mouse") {
-				continue
+		caps := dev.CapableTypes()
+		isPointer := false
+		for _, t := range caps {
+			if t == evdev.EV_REL || t == evdev.EV_ABS {
+				isPointer = true
+				break
 			}
-			path := filepath.Join(dir, name)
-			if seen[path] {
-				continue
-			}
+		}
+		dev.Close()
 
-			dev, err := evdev.Open(path)
-			if err != nil {
-				continue
-			}
-			caps := dev.CapableTypes()
-			isPointer := false
-			for _, t := range caps {
-				if t == evdev.EV_REL || t == evdev.EV_ABS {
-					isPointer = true
-					break
-				}
-			}
-			dev.Close()
-
-			if isPointer {
-				mice = append(mice, path)
-				seen[path] = true
-			}
+		if isPointer {
+			mice = append(mice, path)
+			seen[real] = true
 		}
 	}
 	return mice, nil

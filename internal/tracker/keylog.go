@@ -66,20 +66,22 @@ func (t *KeystrokeTracker) Start() (<-chan KeystrokeStats, error) {
 			log.Printf("[tracker] listening on %s", devPath)
 
 			for {
+				// BLOCKING read — goroutine sleeps until the kernel delivers an event.
+				// No select/default spin-loop → zero idle CPU usage.
+				ev, err := dev.ReadOne()
+				if err != nil {
+					return
+				}
 				select {
 				case <-t.stopCh:
 					return
 				default:
-					ev, err := dev.ReadOne()
-					if err != nil {
-						return
-					}
-					// Only capture key-press events (value==1), not releases or repeats
-					if ev.Type == evdev.EV_KEY && ev.Value == 1 {
-						select {
-						case eventCh <- ev.Code:
-						default:
-						}
+				}
+				// Only capture key-press events (value==1), not releases or repeats
+				if ev.Type == evdev.EV_KEY && ev.Value == 1 {
+					select {
+					case eventCh <- ev.Code:
+					default:
 					}
 				}
 			}
@@ -186,48 +188,45 @@ func ComputeEntropyScore(total, unique int) float64 {
 	return math.Round(score*10) / 10
 }
 
-// discoverKeyboards returns all /dev/input keyboard device paths.
+// discoverKeyboards returns all /dev/input/event* keyboard device paths.
+// Scans only /dev/input directly and resolves symlinks to avoid duplicate opens.
 func discoverKeyboards() ([]string, error) {
-	dirsToScan := []string{"/dev/input"}
-	if entries, err := os.ReadDir("/dev/input/by-id"); err == nil && len(entries) > 0 {
-		dirsToScan = append(dirsToScan, "/dev/input/by-id")
-	}
-	if entries, err := os.ReadDir("/dev/input/by-path"); err == nil && len(entries) > 0 {
-		dirsToScan = append(dirsToScan, "/dev/input/by-path")
+	entries, err := os.ReadDir("/dev/input")
+	if err != nil {
+		return nil, err
 	}
 
 	seen := make(map[string]bool)
 	var keyboards []string
 
-	for _, dir := range dirsToScan {
-		entries, err := os.ReadDir(dir)
+	for _, e := range entries {
+		name := e.Name()
+		if !strings.HasPrefix(name, "event") {
+			continue
+		}
+		path := filepath.Join("/dev/input", name)
+
+		real, err := filepath.EvalSymlinks(path)
+		if err != nil {
+			real = path
+		}
+		if seen[real] {
+			continue
+		}
+
+		dev, err := evdev.Open(path)
 		if err != nil {
 			continue
 		}
-		for _, e := range entries {
-			name := e.Name()
-			if !strings.Contains(name, "event") && !strings.Contains(name, "kbd") {
-				continue
+		caps := dev.CapableTypes()
+		for _, t := range caps {
+			if t == evdev.EV_KEY {
+				keyboards = append(keyboards, path)
+				seen[real] = true
+				break
 			}
-			path := filepath.Join(dir, name)
-			if seen[path] {
-				continue
-			}
-
-			dev, err := evdev.Open(path)
-			if err != nil {
-				continue
-			}
-			caps := dev.CapableTypes()
-			for _, t := range caps {
-				if t == evdev.EV_KEY {
-					keyboards = append(keyboards, path)
-					seen[path] = true
-					break
-				}
-			}
-			dev.Close()
 		}
+		dev.Close()
 	}
 	return keyboards, nil
 }

@@ -250,12 +250,7 @@ func (a *App) collect() {
 				log.Printf("[app] guest logged #%d — category=%s productive=%v tokens=%d",
 					logID, result.Category, result.Productive, result.Usage.TotalTokenCount)
 			} else {
-				log.Printf("[app] guest AI analysis offline/error for #%d: %v — applying local fallback", logID, err)
-				fallbackReason := "Offline Mode (Local Log)"
-				if !a.gemini.HasKey() {
-					fallbackReason = "No Gemini API key set"
-				}
-				_ = a.database.UpdateAIResult(logID, "Browsing", true, 0.8, fallbackReason)
+				log.Printf("[app] guest AI analysis offline/error for #%d: %v — leaving log pending for re-analysis", logID, err)
 			}
 		}(id, shot.Base64Data, keyStats.EntropyScore)
 	} else {
@@ -551,8 +546,7 @@ func (a *App) ProcessPendingLogs() (int, error) {
 		cancel()
 
 		if err != nil {
-			log.Printf("[app] re-analyze log #%d error: %v — applying offline fallback", entry.ID, err)
-			_ = a.database.UpdateAIResult(entry.ID, "Browsing", true, 0.8, "Offline Mode (Local Log)")
+			log.Printf("[app] re-analyze log #%d error: %v — leaving pending for retry", entry.ID, err)
 			continue
 		}
 

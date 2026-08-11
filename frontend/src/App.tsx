@@ -515,31 +515,6 @@ Return ONLY a valid JSON array of ${bundle.length} objects in exact input order:
           } catch (fallbackErr) {
             console.warn('Gemma fallback request failed:', fallbackErr);
           }
-
-          // Local graceful fallback if both primary and Gemma fallback endpoints fail
-          const resultMap = new Map<number, any>();
-          bundle.forEach(item => {
-            resultMap.set(item.id, {
-              category: 'Browsing',
-              is_productive: true,
-              confidence: 0.85,
-              reason: `Local client processed (${localModel} rate guarded)`
-            });
-          });
-
-          setLogs(prev => prev.map(log => {
-            const resItem = resultMap.get(log.id);
-            if (resItem) {
-              return {
-                ...log,
-                ai_category: resItem.category,
-                is_productive: resItem.is_productive,
-                ai_confidence: resItem.confidence,
-                ai_reason: resItem.reason
-              };
-            }
-            return log;
-          }));
         });
       }
     }

@@ -245,71 +245,33 @@ func (g *GeminiClient) SelectBestModel(ctx context.Context, exclude map[string]b
 	return "", fmt.Errorf("no working Gemini models available")
 }
 
-// Analyze sends a screenshot (base64 JPEG) and keystroke entropy score to Gemini.
+// Analyze sends a single screenshot and telemetry to Gemini by wrapping it in AnalyzeBatch.
 func (g *GeminiClient) Analyze(ctx context.Context, base64Image string, entropyScore float64) (*AnalysisResult, error) {
-	if !g.HasKey() {
-		return &AnalysisResult{
-			Category:   "Unknown",
-			Productive: false,
-			Confidence: 0,
-			Reason:     "No Gemini API key configured",
-		}, nil
-	}
-
-	prompt := fmt.Sprintf(
-		`You are an expert developer productivity analyzer inspecting a Linux desktop screenshot.
-
-Context:
-- Keystroke Entropy Score: %.1f/100 in the last 30 seconds.
-  * High entropy (>15.0) indicates active typing (coding, writing documentation).
-  * Low entropy (0.0 - 15.0) indicates reading code/logs, reviewing build errors, inspecting terminal output, or idling.
-
-Instructions:
-1. Identify the primary application open on screen (app_name, e.g. VS Code, Chrome, Terminal, Slack, Spotify, JetBrains).
-2. Classify the app category (app_category, e.g. IDE / Code Editor, Web Browser, Terminal / CLI, Communication, Entertainment).
-3. Identify the active window title or file path visible (window_title, e.g. "db.go - mini-tracker", "Google Search").
-4. Select the primary category from: [Coding, Writing, Browsing, Social Media, Video/Entertainment, Communication, Design, Idle, Other].
-5. Evaluate productivity percentage score (productivity_score: 0 to 100). Software engineering, coding, debugging, terminal ops, build inspection = 85-100. Leisure/social media = 0-20.
-6. Return ONLY a valid JSON object without markdown fences:
-{"category": "Coding", "app_name": "VS Code", "app_category": "IDE / Code Editor", "window_title": "db.go - mini-tracker", "productivity_score": 95, "productive": true, "confidence": 0.95, "brief_reason": "Editing Go database logic in VS Code terminal"}`,
-		entropyScore,
-	)
-
-	body := buildGeminiRequest(prompt, base64Image)
-	reqBody, err := json.Marshal(body)
+	batchResults, err := g.AnalyzeBatch(ctx, []BatchAnalysisItem{
+		{
+			Base64Image:  base64Image,
+			EntropyScore: entropyScore,
+		},
+	})
 	if err != nil {
-		return nil, fmt.Errorf("marshal request: %w", err)
+		return nil, err
+	}
+	if len(batchResults) == 0 {
+		return nil, fmt.Errorf("empty result from batch analysis")
 	}
 
-	excluded := make(map[string]bool)
-
-	// Ensure we have a model selected
-	model := g.GetModel()
-	if model == "" {
-		m, err := g.SelectBestModel(ctx, excluded)
-		if err != nil {
-			return nil, err
-		}
-		model = m
-	}
-
-	// Attempt request
-	res, err := g.executeAnalysis(ctx, model, reqBody)
-	if err != nil && (strings.Contains(err.Error(), "404") || strings.Contains(err.Error(), "NOT_FOUND") || strings.Contains(err.Error(), "429") || strings.Contains(err.Error(), "RESOURCE_EXHAUSTED") || strings.Contains(err.Error(), "deadline exceeded") || strings.Contains(err.Error(), "Timeout exceeded")) {
-		// Model failed or timed out: mark excluded and retry with failover model
-		log.Printf("[ai/gemini] Model %s failed (%v), retrying with failover model...", model, err)
-		excluded[model] = true
-
-		newModel, errSelect := g.SelectBestModel(ctx, excluded)
-		if errSelect != nil {
-			return nil, fmt.Errorf("initial model %s failed (%v) and model failover failed: %w", model, err, errSelect)
-		}
-
-		log.Printf("[ai/gemini] Retrying analysis with failover model: %s", newModel)
-		return g.executeAnalysis(ctx, newModel, reqBody)
-	}
-
-	return res, err
+	res := batchResults[0]
+	return &AnalysisResult{
+		Category:        res.Category,
+		AppName:         res.AppName,
+		AppCategory:     res.AppCategory,
+		WindowTitle:     res.WindowTitle,
+		Productive:      res.Productive,
+		ProductiveScore: res.ProductiveScore,
+		Confidence:      res.Confidence,
+		Reason:          res.Reason,
+		Usage:           res.Usage,
+	}, nil
 }
 
 // BatchAnalysisItem represents a single screenshot item in a batch request.

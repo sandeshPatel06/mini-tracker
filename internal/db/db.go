@@ -1005,7 +1005,7 @@ func (db *DB) GetWorkSessionsFiltered(userID, orgID int64, startDate, endDate st
 		}
 	}
 
-	return sessions, nil
+	return sessions, rows.Err()
 }
 
 // GetWorkSessionsForDate aggregates activity captures for a date into high-level work sessions.
@@ -1443,10 +1443,14 @@ func (db *DB) GetOrgUsageSummary(orgID int64) (*APIUsageSummary, error) {
 	}
 
 	// 1. Total & key source aggregation for org
+	placeholder := "$1"
+	if db.dialect == dialect.SQLite {
+		placeholder = "?"
+	}
 	rows, err := db.rawDB.Query(`
 		SELECT key_source, COUNT(*), COALESCE(SUM(prompt_tokens), 0), COALESCE(SUM(candidate_tokens), 0), COALESCE(SUM(total_tokens), 0)
 		FROM api_usage_logs
-		WHERE org_id = $1 OR key_source = 'org_admin'
+		WHERE org_id = `+placeholder+` OR key_source = 'org_admin'
 		GROUP BY key_source
 	`, orgID)
 	if err == nil {
@@ -1475,7 +1479,7 @@ func (db *DB) GetOrgUsageSummary(orgID int64) (*APIUsageSummary, error) {
 		       COALESCE(SUM(a.total_tokens), 0) as t_tokens
 		FROM users u
 		LEFT JOIN api_usage_logs a ON u.id = a.user_id
-		WHERE u.org_id = $1
+		WHERE u.org_id = `+placeholder+`
 		GROUP BY u.id, u.full_name, u.email, u.role
 		ORDER BY t_tokens DESC
 	`, orgID)
@@ -1487,7 +1491,9 @@ func (db *DB) GetOrgUsageSummary(orgID int64) (*APIUsageSummary, error) {
 				summary.UserBreakdown = append(summary.UserBreakdown, ub)
 			}
 		}
-		_ = userRows.Err()
+		if rowErr := userRows.Err(); rowErr != nil {
+			log.Printf("[db] GetOrgUsageSummary userRows iteration error: %v", rowErr)
+		}
 	}
 
 	return summary, nil

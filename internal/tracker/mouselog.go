@@ -21,6 +21,7 @@ type MouseStats struct {
 // MouseTracker monitors mouse/pointer input devices and aggregates click/movement metrics.
 type MouseTracker struct {
 	mu         sync.Mutex
+	stopOnce   sync.Once
 	clicks     int
 	distance   float64
 	stopCh     chan struct{}
@@ -182,9 +183,9 @@ func (m *MouseTracker) RecordMouseActivity(clicks int, distance float64) {
 	m.distance += distance
 }
 
-// Stop signals all tracker goroutines to exit.
+// Stop signals all tracker goroutines to exit. Safe to call multiple times.
 func (m *MouseTracker) Stop() {
-	close(m.stopCh)
+	m.stopOnce.Do(func() { close(m.stopCh) })
 }
 
 // flush atomically reads and resets the counters.

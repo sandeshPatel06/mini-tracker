@@ -282,6 +282,7 @@ type BatchAnalysisItem struct {
 	ImagePath     string
 	TotalClicks   int
 	MouseDistance float64
+	UserTask      string
 }
 
 // BatchAnalysisResult represents the result for a single item in a batch.
@@ -304,6 +305,20 @@ func (g *GeminiClient) AnalyzeBatch(ctx context.Context, items []BatchAnalysisIt
 		return nil, fmt.Errorf("no API key set or empty batch")
 	}
 
+	// Extract active user task context if provided (up to 20 words)
+	activeTask := ""
+	for _, item := range items {
+		if strings.TrimSpace(item.UserTask) != "" {
+			activeTask = strings.TrimSpace(item.UserTask)
+			break
+		}
+	}
+
+	taskContextPrompt := "CURRENT TARGET USER TASK: General software development and workstation tasks."
+	if activeTask != "" {
+		taskContextPrompt = fmt.Sprintf("CURRENT TARGET USER TASK (GOAL): %q\nEVALUATION RULE: Analyze how relevant the visible desktop content and user input (typing/mouse) are to achieving THIS SPECIFIC TASK. High scores require direct alignment with this task context.", activeTask)
+	}
+
 	// Build per-item telemetry summary for the prompt
 	itemSummaries := ""
 	for i, item := range items {
@@ -312,6 +327,8 @@ func (g *GeminiClient) AnalyzeBatch(ctx context.Context, items []BatchAnalysisIt
 	}
 
 	prompt := fmt.Sprintf(`You are a world-class developer productivity analyst inspecting a sequence of %d desktop screenshots captured from a Linux workstation in chronological order.
+
+%s
 
 TELEMETRY CONTEXT (use this data to calibrate scores — do NOT ignore it):
 %s
@@ -322,23 +339,22 @@ INSTRUCTIONS FOR EACH SCREENSHOT ITEM:
 3. Identify the active window title or file path visible (window_title).
 4. Classify the app_category (e.g. IDE / Code Editor, Terminal / CLI, Web Browser, Communication, Entertainment).
 5. Select the primary category from: [Coding, Writing, Browsing, Document Editing, Communication, Social Media, Video/Entertainment, Idle, Other].
-6. Compute productivity_score (integer 0-100) based on ALL signals below — NEVER default to 100 without evidence:
-   - Keystroke Entropy > 20: Active typing — strong coding/writing indicator (+30 to score)
-   - Keystroke Entropy 8-20: Moderate typing — reviewing, debugging (+15 to score)
-   - Keystroke Entropy < 8: Reading/idle mode — reduces score unless heavy mouse usage
-   - Mouse Distance > 5000px: Active navigation/design work (+10 to score)
-   - Mouse Clicks > 20: Interactive workflow (+5 to score)
-   - Visual context: Code editor with diff/code visible = 85-100; IDE with terminal = 80-95;
-     browser on technical docs = 60-80; social media/YouTube = 0-25; idle desktop = 0-15.
-   - Combined low entropy + low mouse + idle screen = score 0-20.
+6. Compute productivity_score (integer 0-100) dynamically based on TASK ALIGNMENT and TELEMETRY SIGNALS — NEVER default to static or 100%% scores:
+   - Task Relevance: Direct work on the stated task = +40 to +60 pts; related docs/research = +30 to +45 pts; unrelated browsing/messaging = +10 to +30 pts; social media/leisure/idle = 0 to 15 pts.
+   - Keystroke Entropy > 20: Active typing/writing (+25 pts)
+   - Keystroke Entropy 8-20: Moderate typing/reviewing (+15 pts)
+   - Keystroke Entropy < 8: Reading/idle mode — lowers score unless offset by heavy mouse activity
+   - Mouse Distance > 5000px: Active navigation/design work (+10 pts)
+   - Mouse Clicks > 20: Interactive workflow (+5 pts)
+   - Combined low entropy + low mouse + off-task screen = score 0-20.
 7. Set is_productive=true only if productivity_score >= 50.
 
 Respond ONLY with a valid JSON array of %d objects in EXACT input order:
 [
-`, len(items), itemSummaries, len(items))
+`, len(items), taskContextPrompt, itemSummaries, len(items))
 
 	for i, item := range items {
-		prompt += fmt.Sprintf(`  {"item_index": %d, "app_name": "<detected app>", "app_category": "<detected category>", "window_title": "<detected title>", "category": "<category>", "productivity_score": <0-100 integer>, "is_productive": <true/false>, "confidence": <0.0-1.0>, "reason": "<1-sentence reason citing entropy %.1f and visible context>"}%s
+		prompt += fmt.Sprintf(`  {"item_index": %d, "app_name": "<detected app>", "app_category": "<detected category>", "window_title": "<detected title>", "category": "<category>", "productivity_score": <0-100 integer>, "is_productive": <true/false>, "confidence": <0.0-1.0>, "reason": "<1-sentence reason evaluating task alignment and telemetry (entropy %.1f)>"}%s
 `, i+1, item.EntropyScore, func() string {
 			if i < len(items)-1 {
 				return ","

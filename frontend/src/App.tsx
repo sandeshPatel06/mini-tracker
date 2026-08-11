@@ -21,6 +21,9 @@ declare const window: Window & {
         GetLogsByDate: (date: string) => Promise<LogEntry[]>;
         GetStats: (date: string) => Promise<ProductivityStats>;
         GetConfig: () => Promise<AppConfig>;
+        GetTodayTrackedSeconds: () => Promise<number>;
+        SetActiveTask: (task: string) => Promise<string>;
+        GetActiveTask: () => Promise<string>;
         RecordInputActivity: (totalKeys: number, uniqueKeys: number) => Promise<void>;
         RecordMouseActivity: (clicks: number, distancePx: number) => Promise<void>;
         ClearAllLocalData: () => Promise<boolean>;
@@ -77,6 +80,22 @@ export default function App() {
   // Tracker Work Clock State
   const [isTrackingActive, setIsTrackingActive] = useState<boolean>(true);
   const [elapsedSeconds, setElapsedSeconds] = useState<number>(0);
+
+  // Active Task Goal State (Max 20 words limit)
+  const [userTask, setUserTask] = useState<string>(() => localStorage.getItem('mini_user_task') || '');
+  const [showTaskModal, setShowTaskModal] = useState<boolean>(false);
+  const [taskInput, setTaskInput] = useState<string>('');
+
+  const saveTask = (text: string) => {
+    const words = text.trim().split(/\s+/).filter(Boolean);
+    const limited = words.slice(0, 20).join(' ');
+    setUserTask(limited);
+    localStorage.setItem('mini_user_task', limited);
+    if (window.go?.main?.App?.SetActiveTask) {
+      callGo(() => window.go!.main.App.SetActiveTask(limited));
+    }
+    setShowTaskModal(false);
+  };
 
   // Wizard window reference — keeps track of the separate OS window
   const wizardWinRef = useRef<Window | null>(null);
@@ -139,7 +158,7 @@ export default function App() {
   useEffect(() => {
     if (window.go?.main?.App?.GetTodayTrackedSeconds) {
       callGo(() => window.go!.main.App.GetTodayTrackedSeconds())
-        .then((sec: number) => {
+        .then((sec: any) => {
           if (typeof sec === 'number' && sec > 0) {
             setElapsedSeconds(sec);
           }
@@ -319,26 +338,26 @@ export default function App() {
         const bundle = pendingLogs.slice(0, Math.min(Math.max(3, targetBundleSize), 6));
 
         // Prepare enhanced multimodal contents array for Google Gemini REST API v1beta
+        const taskGoal = userTask.trim() ? `CURRENT TARGET USER TASK (GOAL): "${userTask.trim()}"\nEVALUATION RULE: Analyze how relevant the visible desktop content and user input (typing/mouse) are to achieving THIS SPECIFIC TASK. High scores require direct alignment with this task context.` : "CURRENT TARGET USER TASK: General software development and workstation tasks.";
+
         const promptText = `You are an expert, objective developer productivity analyst inspecting a sequence of ${bundle.length} desktop screenshots captured from a Linux workstation in chronological order.
+
+${taskGoal}
 
 CRITICAL INSTRUCTIONS FOR EACH SCREENSHOT ITEM:
 1. Multi-Monitor Grid Inspection: Each image may be a composite grid of multiple monitors. Inspect ALL screens visible in the grid.
 2. Application & Context Extraction: Identify the primary active application (app_name: e.g., VS Code, Terminal, Chrome, Slack, Spotify), open file paths/code snippet text, documentation title, or window title (window_title).
-3. Telemetry-Driven Scoring — use ALL provided signals, do NOT ignore them:
-   - Keystroke Entropy > 20: Active typing — strong coding/writing indicator (+30 pts)
-   - Keystroke Entropy 8-20: Moderate typing — reviewing, debugging (+15 pts)
-   - Keystroke Entropy < 8: Reading or idle mode — reduces score unless offset by high mouse activity
-   - Mouse Distance > 5000px: Active UI navigation (+10 pts)
+3. Telemetry & Task Alignment Scoring — use ALL provided signals dynamically:
+   - Direct work on stated task: +40 to +60 pts
+   - Related docs / technical research: +30 to +45 pts
+   - Unrelated browsing / messaging: +10 to +30 pts
+   - Leisure / social media / idle: 0 to 15 pts
+   - Keystroke Entropy > 20: Active typing/writing (+25 pts)
+   - Keystroke Entropy 8-20: Moderate typing (+15 pts)
+   - Keystroke Entropy < 8: Reading/idle mode — lowers score unless offset by heavy mouse activity
+   - Mouse Distance > 5000px: Active navigation (+10 pts)
    - Mouse Clicks > 20: Interactive session (+5 pts)
-   - Low entropy + low mouse + idle screen = score 0-20 (do NOT give 100 in this case)
-4. Visual context scoring:
-   * Active Coding (VS Code/JetBrains/Terminal builds/Git) + high entropy: 85-100.
-   * Technical Reading / Code Review / API Docs + medium entropy: 60-85.
-   * Team Work / Slack / Work Email: 50-75.
-   * General Web Browsing: 35-60.
-   * Leisure / Social Media / YouTube (visible in screenshot): 0-25.
-   * Idle / Lock Screen / Blank: 0-15.
-   - Do NOT default every item to 100%. Give realistic, nuanced scores based on the actual visual and telemetry evidence.
+   - Combined low entropy + low mouse + off-task screen = score 0-20 (NEVER default to 100).
 
 Return ONLY a valid JSON array of ${bundle.length} objects in exact input order:
 [
@@ -351,7 +370,7 @@ Return ONLY a valid JSON array of ${bundle.length} objects in exact input order:
     "productivity_score": 92,
     "is_productive": true,
     "confidence": 0.95,
-    "reason": "Editing Go backend database logic in VS Code while monitoring terminal build"
+    "reason": "Editing Go backend database logic matching active task goal"
   }
 ]`;
 
@@ -753,10 +772,42 @@ Return ONLY a valid JSON array of ${bundle.length} objects in exact input order:
           <button
             onClick={handleToggleTracking}
             className={`btn-tracker-toggle ${isTrackingActive ? 'active' : ''}`}
-            style={{ marginBottom: isGuestMode ? 0 : 8 }}
+            style={{ marginBottom: 8 }}
           >
             <Icon name={isTrackingActive ? 'x' : 'check'} size={14} />
             <span>{isTrackingActive ? 'Pause Tracker' : 'Start Tracker'}</span>
+          </button>
+          <button
+            onClick={() => {
+              setTaskInput(userTask);
+              setShowTaskModal(true);
+            }}
+            style={{
+              width: '100%',
+              padding: '6px 10px',
+              background: userTask ? 'rgba(59, 130, 246, 0.15)' : 'rgba(255, 255, 255, 0.05)',
+              border: userTask ? '1px solid rgba(59, 130, 246, 0.3)' : '1px solid rgba(255, 255, 255, 0.1)',
+              borderRadius: '8px',
+              color: userTask ? '#60a5fa' : '#9ca3af',
+              fontSize: '11px',
+              fontWeight: 600,
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '6px',
+              marginBottom: isGuestMode ? 0 : 8,
+              textAlign: 'left',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap'
+            }}
+            title={userTask || 'Set target task goal (max 20 words)'}
+          >
+            <Icon name="target" size={12} />
+            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {userTask ? `Task: ${userTask}` : 'Set Target Task Goal'}
+            </span>
           </button>
           {!isGuestMode && (
             <button
@@ -998,6 +1049,116 @@ Return ONLY a valid JSON array of ${bundle.length} objects in exact input order:
         {/* Open icon */}
         <span style={{ color: '#636366', fontSize: 11 }}>↗</span>
       </button>
+
+      {/* Target Task Goal Modal Dialog */}
+      {showTaskModal && (
+        <div style={{
+          position: 'fixed',
+          inset: 0,
+          background: 'rgba(0, 0, 0, 0.65)',
+          backdropFilter: 'blur(4px)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 9999,
+          padding: 20
+        }}>
+          <div style={{
+            background: 'var(--bg-card)',
+            border: '1px solid var(--border-medium)',
+            borderRadius: 'var(--radius-lg)',
+            padding: 24,
+            width: '100%',
+            maxWidth: 440,
+            boxShadow: 'var(--shadow-card), var(--shadow-glow)'
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <Icon name="target" size={18} style={{ color: 'var(--accent-purple)' }} />
+                <h3 style={{ margin: 0, fontSize: 16, fontWeight: 600, color: 'var(--text-primary)' }}>Set Target Work Task</h3>
+              </div>
+              <button
+                onClick={() => setShowTaskModal(false)}
+                style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: 18 }}
+              >×</button>
+            </div>
+
+            <p style={{ fontSize: 12, color: 'var(--text-secondary)', margin: '0 0 14px 0', lineHeight: 1.5 }}>
+              Describe what you are currently working on. AI analytics will evaluate your screenshots, keypresses, and mouse activity specifically against this goal.
+            </p>
+
+            <textarea
+              rows={3}
+              value={taskInput}
+              onChange={e => setTaskInput(e.target.value)}
+              placeholder="e.g. Fixing database migration bug and optimizing mouse event loop performance..."
+              style={{
+                width: '100%',
+                padding: 10,
+                background: 'var(--bg-base)',
+                border: '1px solid var(--border-subtle)',
+                borderRadius: 'var(--radius-md)',
+                color: 'var(--text-primary)',
+                fontSize: 13,
+                resize: 'none',
+                outline: 'none',
+                boxSizing: 'border-box',
+                marginBottom: 6
+              }}
+            />
+
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18 }}>
+              <span style={{
+                fontSize: 11,
+                color: taskInput.trim().split(/\s+/).filter(Boolean).length > 20 ? 'var(--accent-red)' : 'var(--text-muted)'
+              }}>
+                Word count: {taskInput.trim().split(/\s+/).filter(Boolean).length} / 20 words max
+              </span>
+              {userTask && (
+                <button
+                  onClick={() => saveTask('')}
+                  style={{ background: 'none', border: 'none', color: 'var(--accent-red)', fontSize: 11, cursor: 'pointer' }}
+                >
+                  Clear Task
+                </button>
+              )}
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
+              <button
+                onClick={() => setShowTaskModal(false)}
+                style={{
+                  padding: '8px 14px',
+                  background: 'transparent',
+                  border: '1px solid var(--border-subtle)',
+                  borderRadius: 'var(--radius-md)',
+                  color: 'var(--text-secondary)',
+                  fontSize: 12,
+                  fontWeight: 500,
+                  cursor: 'pointer'
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => saveTask(taskInput)}
+                style={{
+                  padding: '8px 16px',
+                  background: 'var(--accent-purple)',
+                  border: 'none',
+                  borderRadius: 'var(--radius-md)',
+                  color: '#fff',
+                  fontSize: 12,
+                  fontWeight: 600,
+                  cursor: 'pointer'
+                }}
+              >
+                Save & Align AI Analytics
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

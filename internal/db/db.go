@@ -197,7 +197,32 @@ func Open(dataDir string, dbURLs ...string) (*DB, error) {
 }
 
 func (db *DB) migrate() error {
-	// Safe column additions for existing databases (run before index creation)
+	// safeAddColumn adds a column only if it does not already exist.
+	// Works on ALL SQLite versions (no IF NOT EXISTS required).
+	safeAddColumn := func(table, column, colType string) {
+		// Check current columns via PRAGMA table_info
+		rows, err := db.rawDB.Query(`PRAGMA table_info(` + table + `)`)
+		if err != nil {
+			return
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var cid int
+			var name, typ string
+			var notNull, pk int
+			var dflt interface{}
+			if err := rows.Scan(&cid, &name, &typ, &notNull, &dflt, &pk); err == nil {
+				if name == column {
+					return // column already exists
+				}
+			}
+		}
+		// Column not found — add it
+		_, _ = db.rawDB.Exec(`ALTER TABLE ` + table + ` ADD COLUMN ` + column + ` ` + colType)
+	}
+
+	// Safe column additions for existing databases (run before CREATE TABLE / index creation).
+	// These use _, _ so errors ("duplicate column") are silently ignored.
 	colMigrations := []string{
 		"ALTER TABLE organizations ADD COLUMN gemini_api_key TEXT DEFAULT ''",
 		"ALTER TABLE organizations ADD COLUMN gemini_model TEXT DEFAULT ''",
@@ -209,6 +234,11 @@ func (db *DB) migrate() error {
 	for _, alter := range colMigrations {
 		_, _ = db.rawDB.Exec(alter)
 	}
+
+	// Mouse telemetry columns — use safeAddColumn for guaranteed compatibility
+	// with SQLite versions that don't support ALTER TABLE ADD COLUMN IF NOT EXISTS.
+	safeAddColumn("logs", "total_clicks", "INTEGER DEFAULT 0")
+	safeAddColumn("logs", "mouse_distance", "REAL DEFAULT 0")
 
 	stmts := []string{
 		`CREATE TABLE IF NOT EXISTS organizations (
@@ -269,8 +299,7 @@ func (db *DB) migrate() error {
 		`CREATE INDEX IF NOT EXISTS idx_logs_org_ts ON logs(org_id, timestamp);`,
 		`CREATE INDEX IF NOT EXISTS idx_logs_unanalyzed ON logs(ai_category, timestamp);`,
 		`CREATE INDEX IF NOT EXISTS idx_logs_sync_status ON logs(sync_status);`,
-		`ALTER TABLE logs ADD COLUMN IF NOT EXISTS total_clicks INTEGER DEFAULT 0;`,
-		`ALTER TABLE logs ADD COLUMN IF NOT EXISTS mouse_distance DOUBLE PRECISION DEFAULT 0;`,
+		// Note: total_clicks and mouse_distance are handled by safeAddColumn above
 		`CREATE TABLE IF NOT EXISTS work_sessions (
 			id             SERIAL PRIMARY KEY,
 			org_id         INTEGER DEFAULT 1,
@@ -363,8 +392,7 @@ func (db *DB) migrate() error {
 			`CREATE INDEX IF NOT EXISTS idx_logs_org_ts ON logs(org_id, timestamp);`,
 			`CREATE INDEX IF NOT EXISTS idx_logs_unanalyzed ON logs(ai_category, timestamp);`,
 			`CREATE INDEX IF NOT EXISTS idx_logs_sync_status ON logs(sync_status);`,
-			`ALTER TABLE logs ADD COLUMN IF NOT EXISTS total_clicks INTEGER DEFAULT 0;`,
-			`ALTER TABLE logs ADD COLUMN IF NOT EXISTS mouse_distance REAL DEFAULT 0;`,
+			// Note: total_clicks and mouse_distance are handled by safeAddColumn above
 			`CREATE TABLE IF NOT EXISTS work_sessions (
 				id             INTEGER PRIMARY KEY AUTOINCREMENT,
 				org_id         INTEGER DEFAULT 1,
@@ -1194,6 +1222,33 @@ func (db *DB) GetProductivityStatsFiltered(userID, orgID int64, startDate, endDa
 // GetProductivityStats returns aggregated stats for a given date.
 func (db *DB) GetProductivityStats(date string) (*ProductivityStats, error) {
 	return db.GetProductivityStatsFiltered(0, 0, date, date)
+}
+
+// GetTodayTrackedSeconds returns the total accumulated tracked seconds for today based on database logs.
+func (db *DB) GetTodayTrackedSeconds(intervalSec int64) int64 {
+	if intervalSec <= 0 {
+		intervalSec = 30
+	}
+	todayStr := time.Now().Format("2006-01-02")
+	var count int64
+	var query string
+	if db.dialect == dialect.Postgres {
+		query = "SELECT COUNT(*) FROM logs WHERE timestamp::date = CURRENT_DATE"
+	} else {
+		query = "SELECT COUNT(*) FROM logs WHERE substr(timestamp, 1, 10) = ?"
+	}
+
+	var row *sql.Row
+	if db.dialect == dialect.Postgres {
+		row = db.rawDB.QueryRow(query)
+	} else {
+		row = db.rawDB.QueryRow(query, todayStr)
+	}
+
+	if err := row.Scan(&count); err != nil {
+		return 0
+	}
+	return count * intervalSec
 }
 
 // GetUnanalyzedLogs returns all logs that have not yet been successfully analyzed by AI using Ent SQL Builder.

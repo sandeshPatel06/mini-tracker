@@ -82,7 +82,7 @@ func main() {
 		trackerMutex     sync.Mutex
 		trackerActive    = true
 		trackerStartTime = time.Now()
-		accumulatedSec   int64
+		accumulatedSec   = database.GetTodayTrackedSeconds(int64(cfg.ScreenshotInterval.Seconds()))
 	)
 
 	getElapsedSeconds := func() int64 {

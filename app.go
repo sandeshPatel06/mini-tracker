@@ -41,6 +41,7 @@ type App struct {
 	statsMu          sync.Mutex
 	latestKeyStats   tracker.KeystrokeStats
 	latestMouseStats tracker.MouseStats
+	activeTask       string
 }
 
 // NewApp creates a new App application struct.
@@ -475,6 +476,26 @@ func (a *App) UpdateAIModel(modelName string) (bool, error) {
 		log.Printf("[app] Updated AI model to: %s", modelName)
 	}
 	return true, nil
+}
+
+// SetActiveTask sets the current target user task (up to 20 words).
+func (a *App) SetActiveTask(task string) string {
+	a.statsMu.Lock()
+	defer a.statsMu.Unlock()
+	words := strings.Fields(strings.TrimSpace(task))
+	if len(words) > 20 {
+		words = words[:20]
+	}
+	a.activeTask = strings.Join(words, " ")
+	log.Printf("[app] Active task updated to: %q", a.activeTask)
+	return a.activeTask
+}
+
+// GetActiveTask returns the current target user task.
+func (a *App) GetActiveTask() string {
+	a.statsMu.Lock()
+	defer a.statsMu.Unlock()
+	return a.activeTask
 }
 
 // GetImageBase64 reads an image file from disk and returns it as a data URL.

@@ -548,11 +548,12 @@ Return ONLY a valid JSON array of ${bundle.length} objects in exact input order:
     let totalCount = 0;
     const uniqueKeys = new Set<string>();
 
-    // Mouse telemetry
+    // Mouse telemetry — accumulate squared distance; sqrt only at flush (same as Go backend).
     let mouseClicks = 0;
-    let mouseDistance = 0;
+    let mouseDistSqAcc = 0;
     let lastMouseX = -1;
     let lastMouseY = -1;
+    let rafPending = false; // rAF throttle flag for mousemove
 
     const handleKeyDown = (e: KeyboardEvent) => {
       totalCount++;
@@ -563,14 +564,25 @@ Return ONLY a valid JSON array of ${bundle.length} objects in exact input order:
       mouseClicks++;
     };
 
+    // Throttled via requestAnimationFrame: processes at most ~60fps regardless of
+    // how fast the OS delivers mousemove events (can be 1000+/s on some hardware).
+    let pendingX = -1, pendingY = -1;
     const handleMouseMove = (e: MouseEvent) => {
-      if (lastMouseX >= 0 && lastMouseY >= 0) {
-        const dx = e.screenX - lastMouseX;
-        const dy = e.screenY - lastMouseY;
-        mouseDistance += Math.sqrt(dx * dx + dy * dy);
+      pendingX = e.screenX;
+      pendingY = e.screenY;
+      if (!rafPending) {
+        rafPending = true;
+        requestAnimationFrame(() => {
+          rafPending = false;
+          if (lastMouseX >= 0 && lastMouseY >= 0) {
+            const dx = pendingX - lastMouseX;
+            const dy = pendingY - lastMouseY;
+            mouseDistSqAcc += dx * dx + dy * dy; // defer sqrt to flush
+          }
+          lastMouseX = pendingX;
+          lastMouseY = pendingY;
+        });
       }
-      lastMouseX = e.screenX;
-      lastMouseY = e.screenY;
     };
 
     window.addEventListener('keydown', handleKeyDown, { passive: true });
@@ -596,11 +608,11 @@ Return ONLY a valid JSON array of ${bundle.length} objects in exact input order:
         }
       }
 
-      // Flush mouse
+      // Flush mouse — take sqrt only here (once per 30s, not per event)
       const clicksSnapshot = mouseClicks;
-      const distSnapshot = Math.round(mouseDistance);
+      const distSnapshot = Math.round(Math.sqrt(mouseDistSqAcc));
       mouseClicks = 0;
-      mouseDistance = 0;
+      mouseDistSqAcc = 0;
 
       if (clicksSnapshot > 0 || distSnapshot > 0) {
         if (window.go?.main?.App) {

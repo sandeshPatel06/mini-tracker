@@ -65,6 +65,30 @@ log "🚀 Starting installation of ${APP_NAME}..."
 log "Target User: ${REAL_USER} (Home: ${REAL_HOME}, Install Dir: ${INSTALL_DIR})"
 
 # ==============================================================================
+# DETECT UPDATE VS FRESH INSTALL
+# ==============================================================================
+IS_UPDATE=false
+DB_PATH="${DATA_DIR}/tracker.db"
+if [ -f "${INSTALL_DIR}/get-hike" ] || [ -f "${DB_PATH}" ]; then
+    IS_UPDATE=true
+    log "🔄 Existing installation detected — running as UPDATE (data preserved)."
+else
+    log "🆕 Fresh installation."
+fi
+
+# ==============================================================================
+# PRESERVE USER DATA (DB + IMAGES) BEFORE ANY MODIFICATIONS
+# ==============================================================================
+# These paths store all user logs, screenshots, and AI analytics.
+# They must NEVER be deleted or overwritten during an update.
+DB_BACKUP_PATH=""
+if [ "${IS_UPDATE}" = true ] && [ -f "${DB_PATH}" ]; then
+    DB_BACKUP_PATH="${DB_PATH}.bak_$(date +%Y%m%d%H%M%S)"
+    cp -a "${DB_PATH}" "${DB_BACKUP_PATH}"
+    log "✅ Database backed up to: ${DB_BACKUP_PATH}"
+fi
+
+# ==============================================================================
 # 2. PREREQUISITE CHECKS
 # ==============================================================================
 if ! command -v curl >/dev/null 2>&1; then
@@ -253,6 +277,19 @@ fi
 log "Provisioning directories..."
 mkdir -p "${CONFIG_DIR}"
 mkdir -p "${DATA_DIR}"
+mkdir -p "${DATA_DIR}/images"
+mkdir -p "${DATA_DIR}/logs"
+
+# ── DATA PRESERVATION GUARD ──────────────────────────────────────────────────
+# Explicitly ensure tracker.db and screenshots are NEVER removed by this script.
+# The DB lives at ${DATA_DIR}/tracker.db — do not touch it.
+if [ -f "${DB_PATH}" ]; then
+    log "✅ User database preserved: ${DB_PATH} ($(du -sh "${DB_PATH}" 2>/dev/null | cut -f1) on disk)"
+elif [ -n "${DB_BACKUP_PATH}" ] && [ -f "${DB_BACKUP_PATH}" ]; then
+    # Restore from backup if the DB vanished during install
+    cp -a "${DB_BACKUP_PATH}" "${DB_PATH}"
+    log "⚠️  Database restored from backup: ${DB_BACKUP_PATH}"
+fi
 
 # ==============================================================================
 # 9. DESKTOP SHORTCUTS & APP ICON INTEGRATION
@@ -370,10 +407,28 @@ fi
 
 # Verify Installation
 if [ -f "${INSTALL_DIR}/get-hike" ]; then
-    log "🎉 ${APP_NAME} desktop application installation completed successfully."
-    log "Log saved to: ${LOG_FILE}"
+    if [ "${IS_UPDATE}" = true ]; then
+        log "🔄 ${APP_NAME} updated successfully — all your logs and history are preserved."
+    else
+        log "🎉 ${APP_NAME} desktop application installed successfully."
+    fi
+    log "   Binary : ${INSTALL_DIR}/get-hike"
+    log "   Data   : ${DATA_DIR}  (logs, screenshots, tracker.db)"
+    log "   Config : ${CONFIG_DIR}"
+    log "   Log    : ${LOG_FILE}"
+    if [ -f "${DB_PATH}" ]; then
+        log "   DB     : ${DB_PATH} ($(du -sh "${DB_PATH}" 2>/dev/null | cut -f1))"
+    fi
+    if [ -n "${DB_BACKUP_PATH}" ] && [ -f "${DB_BACKUP_PATH}" ]; then
+        log "   Backup : ${DB_BACKUP_PATH} (safe to delete after verifying the app works)"
+    fi
 else
     log "❌ Installation failed."
+    # Attempt to restore DB from backup if something went wrong
+    if [ -n "${DB_BACKUP_PATH}" ] && [ -f "${DB_BACKUP_PATH}" ] && [ ! -f "${DB_PATH}" ]; then
+        cp -a "${DB_BACKUP_PATH}" "${DB_PATH}"
+        log "⚠️  Restored database from backup: ${DB_BACKUP_PATH}"
+    fi
     exit 3
 fi
 

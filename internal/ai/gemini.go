@@ -64,7 +64,7 @@ func NewGeminiClient(apiKey string, initialModel ...string) *GeminiClient {
 	return &GeminiClient{
 		apiKey:    apiKey,
 		modelName: m,
-		client:    &http.Client{Timeout: 60 * time.Second},
+		client:    &http.Client{Timeout: 90 * time.Second},
 	}
 }
 
@@ -149,28 +149,22 @@ func (g *GeminiClient) FetchAvailableModels(ctx context.Context) ([]string, erro
 		return nil, fmt.Errorf("no models with generateContent support found")
 	}
 
-	// Rank models by cost/efficiency/capability (preferring Flash models for 1-2s response times)
+	// Rank models by user preference: strictly prioritize models like gemma-4-31b-it
 	scoreModel := func(name string) int {
 		lName := strings.ToLower(name)
-		if strings.Contains(lName, "gemma-4-31b-it") || strings.Contains(lName, "2.5-flash") {
-			return 150
+		if strings.Contains(lName, "gemma-4-31b-it") {
+			return 200
 		}
-		if strings.Contains(lName, "gemini-2.0-flash") || strings.Contains(lName, "2.0-flash") {
-			return 140
-		}
-		if strings.Contains(lName, "gemini-1.5-flash") || strings.Contains(lName, "1.5-flash") {
-			return 130
-		}
-		if strings.Contains(lName, "flash") {
-			return 120
-		}
-		if strings.Contains(lName, "gemma-4-31b-it") || strings.Contains(lName, "gemma-4") {
-			return 20
+		if strings.Contains(lName, "gemma-4") {
+			return 180
 		}
 		if strings.Contains(lName, "gemma") {
-			return 10
+			return 160
 		}
-		return 5
+		if strings.Contains(lName, "flash") {
+			return 50
+		}
+		return 10
 	}
 
 	// Sort candidates descending by score
@@ -185,9 +179,9 @@ func (g *GeminiClient) FetchAvailableModels(ctx context.Context) ([]string, erro
 	return candidates, nil
 }
 
-// SelectBestModel picks the environment-configured model, pre-configured model, or cheapest available model via discovery.
+// SelectBestModel picks the environment-configured model, pre-configured model, or candidate model.
 func (g *GeminiClient) SelectBestModel(ctx context.Context, exclude map[string]bool) (string, error) {
-	// 1. If GEMINI_MODEL env var is set and not excluded, use it directly without API lookup
+	// 1. If GEMINI_MODEL env var is set and not excluded, use it directly
 	if envModel := os.Getenv("GEMINI_MODEL"); envModel != "" {
 		if exclude == nil || !exclude[envModel] {
 			g.mu.Lock()
@@ -226,9 +220,10 @@ func (g *GeminiClient) SelectBestModel(ctx context.Context, exclude map[string]b
 		log.Printf("[ai/gemini] Model listing warning: %v — falling back to candidate list", err)
 	}
 
-	// 4. Fallback candidates if API listing fails or returns no unexcluded models
+	// 4. Fallback candidates prioritizing gemma models
 	fallbacks := []string{
 		"gemma-4-31b-it",
+		"gemma-2-27b-it",
 	}
 
 	for _, m := range fallbacks {
@@ -334,7 +329,7 @@ TELEMETRY CONTEXT (use this data to calibrate scores — do NOT ignore it):
 %s
 
 INSTRUCTIONS FOR EACH SCREENSHOT ITEM:
-1. Multi-Monitor Grid: Each image may show multiple monitors side-by-side. Inspect ALL visible content.
+1. Multi-Monitor Grid Inspection: If the screenshot is a composite grid of multiple monitors (e.g. Monitor 1 on left, Monitor 2 on right), inspect EACH monitor section individually first. Identify active IDEs, terminals, code diffs, or browser windows across all screens, then combine findings to accurately determine the primary active app.
 2. Identify the primary application (app_name, e.g. VS Code, Terminal, Chrome, Slack, Spotify).
 3. Identify the active window title or file path visible (window_title).
 4. Classify the app_category (e.g. IDE / Code Editor, Terminal / CLI, Web Browser, Communication, Entertainment).
@@ -348,6 +343,10 @@ INSTRUCTIONS FOR EACH SCREENSHOT ITEM:
    - Mouse Clicks > 20: Interactive workflow (+5 pts)
    - Combined low entropy + low mouse + off-task screen = score 0-20.
 7. Set is_productive=true only if productivity_score >= 50.
+
+CRITICAL FORMATTING REQUIREMENT:
+You must output ONLY the raw JSON array starting with '[' and ending with ']'.
+Do NOT include any introduction text, conversational preamble, thinking thoughts, markdown code blocks, or explanatory text before or after the JSON.
 
 Respond ONLY with a valid JSON array of %d objects in EXACT input order:
 [
@@ -387,7 +386,7 @@ Respond ONLY with a valid JSON array of %d objects in EXACT input order:
 			{"parts": parts},
 		},
 		"generationConfig": map[string]interface{}{
-			"temperature":      0.15,
+			"temperature":      0.1,
 			"maxOutputTokens":  2048,
 			"responseMimeType": "application/json",
 		},
@@ -430,7 +429,8 @@ Respond ONLY with a valid JSON array of %d objects in EXACT input order:
 		Candidates []struct {
 			Content struct {
 				Parts []struct {
-					Text string `json:"text"`
+					Text    string `json:"text"`
+					Thought bool   `json:"thought"`
 				} `json:"parts"`
 			} `json:"content"`
 		} `json:"candidates"`
@@ -441,7 +441,19 @@ Respond ONLY with a valid JSON array of %d objects in EXACT input order:
 		return nil, fmt.Errorf("invalid gemini batch response format")
 	}
 
-	rawText := strings.TrimSpace(geminiResp.Candidates[0].Content.Parts[0].Text)
+	// Extract non-thought text part (thinking models return thoughts in part 0 and JSON in part 1)
+	rawText := ""
+	candParts := geminiResp.Candidates[0].Content.Parts
+	for i := len(candParts) - 1; i >= 0; i-- {
+		p := candParts[i]
+		if !p.Thought && strings.TrimSpace(p.Text) != "" {
+			rawText = strings.TrimSpace(p.Text)
+			break
+		}
+	}
+	if rawText == "" {
+		rawText = strings.TrimSpace(candParts[0].Text)
+	}
 	jsonArrayStr := extractJSONArrayString(rawText)
 	var rawResults []struct {
 		ItemIndex         int     `json:"item_index"`
@@ -661,24 +673,32 @@ func truncateString(s string, maxLen int) string {
 
 func extractJSONArrayString(rawText string) string {
 	rawText = strings.TrimSpace(rawText)
-	if strings.HasPrefix(rawText, "```") {
-		lines := strings.Split(rawText, "\n")
-		if len(lines) >= 2 {
-			if strings.HasPrefix(lines[0], "```") {
-				lines = lines[1:]
-			}
-			if len(lines) > 0 && strings.HasPrefix(lines[len(lines)-1], "```") {
-				lines = lines[:len(lines)-1]
-			}
-			rawText = strings.Join(lines, "\n")
+	// Strip markdown code fences if present
+	if strings.Contains(rawText, "```") {
+		clean := rawText
+		if idx := strings.Index(clean, "```json"); idx != -1 {
+			clean = clean[idx+7:]
+		} else if idx := strings.Index(clean, "```"); idx != -1 {
+			clean = clean[idx+3:]
 		}
+		if endIdx := strings.LastIndex(clean, "```"); endIdx != -1 {
+			clean = clean[:endIdx]
+		}
+		rawText = strings.TrimSpace(clean)
 	}
-	rawText = strings.TrimSpace(rawText)
 
 	start := strings.Index(rawText, "[")
-	end := strings.LastIndex(rawText, "]")
-	if start >= 0 && end > start {
-		return rawText[start : end+1]
+	if start >= 0 {
+		end := strings.LastIndex(rawText, "]")
+		if end > start {
+			return rawText[start : end+1]
+		}
+		// Truncated array missing closing bracket: attempt auto-repair by finding last complete object
+		sub := rawText[start:]
+		lastObj := strings.LastIndex(sub, "}")
+		if lastObj != -1 {
+			return sub[:lastObj+1] + "]"
+		}
 	}
 	return rawText
 }

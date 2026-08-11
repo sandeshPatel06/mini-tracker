@@ -26,6 +26,8 @@ type LogEntry struct {
 	TotalKeys       int       `json:"total_keys"`
 	UniqueKeys      int       `json:"unique_keys"`
 	EntropyScore    float64   `json:"entropy_score"`
+	TotalClicks     int       `json:"total_clicks"`
+	MouseDistance   float64   `json:"mouse_distance"`
 	AppName         string    `json:"app_name"`
 	AppCategory     string    `json:"app_category"`
 	WindowTitle     string    `json:"window_title"`
@@ -246,6 +248,8 @@ func (db *DB) migrate() error {
 			total_keys       INTEGER DEFAULT 0,
 			unique_keys      INTEGER DEFAULT 0,
 			entropy_score    DOUBLE PRECISION DEFAULT 0,
+			total_clicks     INTEGER DEFAULT 0,
+			mouse_distance   DOUBLE PRECISION DEFAULT 0,
 			app_name         TEXT DEFAULT '',
 			app_category     TEXT DEFAULT '',
 			window_title     TEXT DEFAULT '',
@@ -265,6 +269,8 @@ func (db *DB) migrate() error {
 		`CREATE INDEX IF NOT EXISTS idx_logs_org_ts ON logs(org_id, timestamp);`,
 		`CREATE INDEX IF NOT EXISTS idx_logs_unanalyzed ON logs(ai_category, timestamp);`,
 		`CREATE INDEX IF NOT EXISTS idx_logs_sync_status ON logs(sync_status);`,
+		`ALTER TABLE logs ADD COLUMN IF NOT EXISTS total_clicks INTEGER DEFAULT 0;`,
+		`ALTER TABLE logs ADD COLUMN IF NOT EXISTS mouse_distance DOUBLE PRECISION DEFAULT 0;`,
 		`CREATE TABLE IF NOT EXISTS work_sessions (
 			id             SERIAL PRIMARY KEY,
 			org_id         INTEGER DEFAULT 1,
@@ -336,6 +342,8 @@ func (db *DB) migrate() error {
 				total_keys       INTEGER DEFAULT 0,
 				unique_keys      INTEGER DEFAULT 0,
 				entropy_score    REAL DEFAULT 0,
+				total_clicks     INTEGER DEFAULT 0,
+				mouse_distance   REAL DEFAULT 0,
 				app_name         TEXT DEFAULT '',
 				app_category     TEXT DEFAULT '',
 				window_title     TEXT DEFAULT '',
@@ -355,6 +363,8 @@ func (db *DB) migrate() error {
 			`CREATE INDEX IF NOT EXISTS idx_logs_org_ts ON logs(org_id, timestamp);`,
 			`CREATE INDEX IF NOT EXISTS idx_logs_unanalyzed ON logs(ai_category, timestamp);`,
 			`CREATE INDEX IF NOT EXISTS idx_logs_sync_status ON logs(sync_status);`,
+			`ALTER TABLE logs ADD COLUMN IF NOT EXISTS total_clicks INTEGER DEFAULT 0;`,
+			`ALTER TABLE logs ADD COLUMN IF NOT EXISTS mouse_distance REAL DEFAULT 0;`,
 			`CREATE TABLE IF NOT EXISTS work_sessions (
 				id             INTEGER PRIMARY KEY AUTOINCREMENT,
 				org_id         INTEGER DEFAULT 1,
@@ -643,7 +653,9 @@ func (db *DB) GetPendingInvitations(orgID int64) ([]Invitation, error) {
 
 // InsertLog stores a new log entry using Ent SQL Builder.
 func (db *DB) InsertLog(e *LogEntry) (int64, error) {
-	builder := entsql.Dialect(db.dialect).Insert("logs").Columns("timestamp", "image_path", "total_keys", "unique_keys", "entropy_score").Values(e.Timestamp.UTC().Format(time.RFC3339), e.ImagePath, e.TotalKeys, e.UniqueKeys, e.EntropyScore)
+	builder := entsql.Dialect(db.dialect).Insert("logs").
+		Columns("timestamp", "image_path", "total_keys", "unique_keys", "entropy_score", "total_clicks", "mouse_distance").
+		Values(e.Timestamp.UTC().Format(time.RFC3339), e.ImagePath, e.TotalKeys, e.UniqueKeys, e.EntropyScore, e.TotalClicks, e.MouseDistance)
 	if db.dialect == dialect.Postgres {
 		builder.Returning("id")
 		query, args := builder.Query()
@@ -701,6 +713,7 @@ func (db *DB) UpdateLogAnalysis(id int64, category, appName, appCategory, window
 func (db *DB) GetLogsFiltered(userID, orgID int64, startDate, endDate string) ([]LogEntry, error) {
 	builder := entsql.Dialect(db.dialect).Select(
 		"id", "timestamp", "image_path", "total_keys", "unique_keys", "entropy_score",
+		"total_clicks", "mouse_distance",
 		"app_name", "app_category", "window_title", "session_id", "session_title",
 		"ai_category", "is_productive", "productive_score", "ai_confidence", "ai_reason",
 	).From(entsql.Table("logs"))
@@ -763,6 +776,7 @@ func (db *DB) GetLogsFiltered(userID, orgID int64, startDate, endDate string) ([
 		var ts interface{}
 		var productive int
 		if err := rows.Scan(&e.ID, &ts, &e.ImagePath, &e.TotalKeys, &e.UniqueKeys, &e.EntropyScore,
+			&e.TotalClicks, &e.MouseDistance,
 			&e.AppName, &e.AppCategory, &e.WindowTitle, &e.SessionID, &e.SessionTitle,
 			&e.AICategory, &productive, &e.ProductiveScore, &e.AIConfidence, &e.AIReason); err != nil {
 			return nil, err
@@ -851,6 +865,7 @@ func (db *DB) GetLogsFilteredPaginated(userID, orgID int64, startDate, endDate s
 
 	builder := entsql.Dialect(db.dialect).Select(
 		"id", "timestamp", "image_path", "total_keys", "unique_keys", "entropy_score",
+		"total_clicks", "mouse_distance",
 		"app_name", "app_category", "window_title", "session_id", "session_title",
 		"ai_category", "is_productive", "productive_score", "ai_confidence", "ai_reason",
 	).From(entsql.Table("logs"))
@@ -873,6 +888,7 @@ func (db *DB) GetLogsFilteredPaginated(userID, orgID int64, startDate, endDate s
 		var ts interface{}
 		var productive int
 		if err := rows.Scan(&e.ID, &ts, &e.ImagePath, &e.TotalKeys, &e.UniqueKeys, &e.EntropyScore,
+			&e.TotalClicks, &e.MouseDistance,
 			&e.AppName, &e.AppCategory, &e.WindowTitle, &e.SessionID, &e.SessionTitle,
 			&e.AICategory, &productive, &e.ProductiveScore, &e.AIConfidence, &e.AIReason); err != nil {
 			return nil, err
@@ -1184,6 +1200,7 @@ func (db *DB) GetProductivityStats(date string) (*ProductivityStats, error) {
 func (db *DB) GetUnanalyzedLogs() ([]LogEntry, error) {
 	builder := entsql.Dialect(db.dialect).Select(
 		"id", "timestamp", "image_path", "total_keys", "unique_keys", "entropy_score",
+		"total_clicks", "mouse_distance",
 		"app_name", "app_category", "window_title", "session_id", "session_title",
 		"ai_category", "is_productive", "productive_score", "ai_confidence", "ai_reason",
 	).From(entsql.Table("logs")).Where(
@@ -1207,6 +1224,7 @@ func (db *DB) GetUnanalyzedLogs() ([]LogEntry, error) {
 		var ts interface{}
 		var productive int
 		if err := rows.Scan(&e.ID, &ts, &e.ImagePath, &e.TotalKeys, &e.UniqueKeys, &e.EntropyScore,
+			&e.TotalClicks, &e.MouseDistance,
 			&e.AppName, &e.AppCategory, &e.WindowTitle, &e.SessionID, &e.SessionTitle,
 			&e.AICategory, &productive, &e.ProductiveScore, &e.AIConfidence, &e.AIReason); err != nil {
 			return nil, err
@@ -1254,6 +1272,7 @@ func (db *DB) GetPendingUploadLogs(limit int) ([]LogEntry, error) {
 	builder := entsql.Dialect(db.dialect).Select(
 		"id", "org_id", "user_id", "timestamp", "image_path",
 		"total_keys", "unique_keys", "entropy_score",
+		"total_clicks", "mouse_distance",
 		"app_name", "app_category", "window_title",
 		"session_id", "session_title", "ai_category",
 		"is_productive", "productive_score", "ai_confidence", "ai_reason",
@@ -1278,6 +1297,7 @@ func (db *DB) GetPendingUploadLogs(limit int) ([]LogEntry, error) {
 		var productive int
 		if err := rows.Scan(&e.ID, &e.OrgID, &e.UserID, &ts, &e.ImagePath,
 			&e.TotalKeys, &e.UniqueKeys, &e.EntropyScore,
+			&e.TotalClicks, &e.MouseDistance,
 			&e.AppName, &e.AppCategory, &e.WindowTitle,
 			&e.SessionID, &e.SessionTitle, &e.AICategory,
 			&productive, &e.ProductiveScore, &e.AIConfidence, &e.AIReason); err != nil {

@@ -22,6 +22,7 @@ declare const window: Window & {
         GetStats: (date: string) => Promise<ProductivityStats>;
         GetConfig: () => Promise<AppConfig>;
         RecordInputActivity: (totalKeys: number, uniqueKeys: number) => Promise<void>;
+        RecordMouseActivity: (clicks: number, distancePx: number) => Promise<void>;
         ClearAllLocalData: () => Promise<boolean>;
         UpdateGeminiAPIKey: (apiKey: string) => Promise<boolean>;
         UpdateAIModel: (modelName: string) => Promise<boolean>;
@@ -311,17 +312,23 @@ export default function App() {
 CRITICAL INSTRUCTIONS FOR EACH SCREENSHOT ITEM:
 1. Multi-Monitor Grid Inspection: Each image may be a composite grid of multiple monitors. Inspect ALL screens visible in the grid.
 2. Application & Context Extraction: Identify the primary active application (app_name: e.g., VS Code, Terminal, Chrome, Slack, Spotify), open file paths/code snippet text, documentation title, or window title (window_title).
-3. Keystroke Telemetry & Activity Scoring:
-   - Calculate an exact, non-default productivity score (productivity_score: 0 to 100) based on actual visual evidence and typing entropy:
-     * Active Coding & Debugging (VS Code, JetBrains, Terminal builds, Git ops) with high entropy (>15.0): 85% to 100%.
-     * Technical Reading / Code Review / Docs (StackOverflow, GitHub PRs, API Docs) with low entropy (0.0-15.0): 65% to 85%.
-     * Team Work & Communication (Slack, Teams, Work Email): 50% to 75%.
-     * General Web Browsing / Mixed Activity: 35% to 60%.
-     * Leisure / Social Media / Video Streaming (YouTube, Reddit, Twitter): 0% to 25%.
-     * Idle / Lock Screen / Blank Desktop: 0%.
-   - Do NOT default every productive item to 100%. Provide nuanced, realistic percentage scores based on visual context!
+3. Telemetry-Driven Scoring — use ALL provided signals, do NOT ignore them:
+   - Keystroke Entropy > 20: Active typing — strong coding/writing indicator (+30 pts)
+   - Keystroke Entropy 8-20: Moderate typing — reviewing, debugging (+15 pts)
+   - Keystroke Entropy < 8: Reading or idle mode — reduces score unless offset by high mouse activity
+   - Mouse Distance > 5000px: Active UI navigation (+10 pts)
+   - Mouse Clicks > 20: Interactive session (+5 pts)
+   - Low entropy + low mouse + idle screen = score 0-20 (do NOT give 100 in this case)
+4. Visual context scoring:
+   * Active Coding (VS Code/JetBrains/Terminal builds/Git) + high entropy: 85-100.
+   * Technical Reading / Code Review / API Docs + medium entropy: 60-85.
+   * Team Work / Slack / Work Email: 50-75.
+   * General Web Browsing: 35-60.
+   * Leisure / Social Media / YouTube (visible in screenshot): 0-25.
+   * Idle / Lock Screen / Blank: 0-15.
+   - Do NOT default every item to 100%. Give realistic, nuanced scores based on the actual visual and telemetry evidence.
 
-Return ONLY a valid JSON array of ${bundle.length} objects matching the exact input order, strictly in this schema:
+Return ONLY a valid JSON array of ${bundle.length} objects in exact input order:
 [
   {
     "item_index": 1,
@@ -342,7 +349,7 @@ Return ONLY a valid JSON array of ${bundle.length} objects matching the exact in
         bundle.forEach((item, idx) => {
           if (item.image_path) {
             parts.push({
-              text: `[Item ${idx + 1} | Timestamp: ${item.timestamp} | Total Keys: ${item.total_keys || 0} | Unique Keys: ${item.unique_keys || 0} | Keystroke Entropy: ${(item.entropy_score || 0).toFixed(1)}]`
+              text: `[Item ${idx + 1} | Timestamp: ${item.timestamp} | Total Keys: ${item.total_keys || 0} | Unique Keys: ${item.unique_keys || 0} | Keystroke Entropy: ${(item.entropy_score || 0).toFixed(1)} | Mouse Clicks: ${item.total_clicks || 0} | Mouse Distance: ${Math.round(item.mouse_distance || 0)}px]`
             });
             // If image_path contains data URI or raw base64
             if (item.image_path.startsWith('data:image/')) {
@@ -536,20 +543,43 @@ Return ONLY a valid JSON array of ${bundle.length} objects matching the exact in
     loadData(today);
   }, [today, loadData]);
 
-  // Keypress input tracking & background sync cron interval (Optimized for Low CPU Overhead)
+  // Keypress & mouse tracking — zero-sudo mode (frontend-reported input activity)
   useEffect(() => {
     let totalCount = 0;
     const uniqueKeys = new Set<string>();
+
+    // Mouse telemetry
+    let mouseClicks = 0;
+    let mouseDistance = 0;
+    let lastMouseX = -1;
+    let lastMouseY = -1;
 
     const handleKeyDown = (e: KeyboardEvent) => {
       totalCount++;
       uniqueKeys.add(e.code || e.key);
     };
 
-    window.addEventListener('keydown', handleKeyDown, { passive: true });
+    const handleMouseDown = () => {
+      mouseClicks++;
+    };
 
-    // Sync keyboard activity to backend every 30 seconds (reduced frequency for low CPU usage)
+    const handleMouseMove = (e: MouseEvent) => {
+      if (lastMouseX >= 0 && lastMouseY >= 0) {
+        const dx = e.screenX - lastMouseX;
+        const dy = e.screenY - lastMouseY;
+        mouseDistance += Math.sqrt(dx * dx + dy * dy);
+      }
+      lastMouseX = e.screenX;
+      lastMouseY = e.screenY;
+    };
+
+    window.addEventListener('keydown', handleKeyDown, { passive: true });
+    window.addEventListener('mousedown', handleMouseDown, { passive: true });
+    window.addEventListener('mousemove', handleMouseMove, { passive: true });
+
+    // Sync keyboard + mouse activity to backend every 30 seconds
     const inputFlushInterval = setInterval(() => {
+      // Flush keyboard
       if (totalCount > 0) {
         const payload = { total_keys: totalCount, unique_keys: uniqueKeys.size };
         totalCount = 0;
@@ -562,9 +592,25 @@ Return ONLY a valid JSON array of ${bundle.length} objects matching the exact in
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload),
-          }).catch(() => {
-            // Silently ignore when backend is offline/standalone guest mode
-          });
+          }).catch(() => {});
+        }
+      }
+
+      // Flush mouse
+      const clicksSnapshot = mouseClicks;
+      const distSnapshot = Math.round(mouseDistance);
+      mouseClicks = 0;
+      mouseDistance = 0;
+
+      if (clicksSnapshot > 0 || distSnapshot > 0) {
+        if (window.go?.main?.App) {
+          callGo(() => window.go!.main.App.RecordMouseActivity(clicksSnapshot, distSnapshot));
+        } else {
+          apiFetch('/api/tracker/mouse', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ clicks: clicksSnapshot, distance_px: distSnapshot }),
+          }).catch(() => {});
         }
       }
     }, 30000);
@@ -593,6 +639,8 @@ Return ONLY a valid JSON array of ${bundle.length} objects matching the exact in
 
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('mousedown', handleMouseDown);
+      window.removeEventListener('mousemove', handleMouseMove);
       clearInterval(inputFlushInterval);
       clearInterval(syncInterval);
     };

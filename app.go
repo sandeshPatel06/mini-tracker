@@ -29,14 +29,16 @@ type App struct {
 	database       *db.DB
 	gemini         *ai.GeminiClient
 	keyTracker     *tracker.KeystrokeTracker
+	mouseTracker   *tracker.MouseTracker
 	syncEngine     *sync.SyncEngine
 	tickerResetCh  chan time.Duration
 
 	isGuest   bool
 	authToken string
 
-	// latest keystroke stats (updated by the tracker goroutine)
-	latestKeyStats tracker.KeystrokeStats
+	// latest input stats (updated by tracker goroutines)
+	latestKeyStats   tracker.KeystrokeStats
+	latestMouseStats tracker.MouseStats
 }
 
 // NewApp creates a new App application struct.
@@ -82,6 +84,19 @@ func (a *App) startup(ctx context.Context) {
 	}
 
 	a.tickerResetCh = make(chan time.Duration, 1)
+
+	// Start mouse tracker
+	a.mouseTracker = tracker.NewMouseTracker(cfg.ScreenshotInterval)
+	if mouseStatsCh, err := a.mouseTracker.Start(); err != nil {
+		log.Printf("[app] mouse tracker error (non-fatal): %v", err)
+	} else {
+		// drain mouse stats into latestMouseStats
+		go func() {
+			for ms := range mouseStatsCh {
+				a.latestMouseStats = ms
+			}
+		}()
+	}
 
 	// Main collection loop — fires every ScreenshotInterval
 	go func() {
@@ -172,11 +187,14 @@ func (a *App) cleanOldScreenshots() {
 	}
 }
 
-// collect captures a screenshot + uses latest keystroke stats, persists the
+// collect captures a screenshot + uses latest keystroke/mouse stats, persists the
 // entry, then fires async Gemini analysis (in Guest mode) or queues for backend sync (in Auth mode).
 func (a *App) collect() {
 	keyStats := a.latestKeyStats
 	a.latestKeyStats = tracker.KeystrokeStats{} // reset
+
+	mouseStats := a.latestMouseStats
+	a.latestMouseStats = tracker.MouseStats{} // reset
 
 	// Screenshot
 	shot, err := tracker.CaptureScreenshot(a.cfg.DataDir)
@@ -191,12 +209,14 @@ func (a *App) collect() {
 	}
 
 	entry := &db.LogEntry{
-		Timestamp:    time.Now(),
-		ImagePath:    shot.FilePath,
-		TotalKeys:    keyStats.TotalKeys,
-		UniqueKeys:   keyStats.UniqueKeys,
-		EntropyScore: keyStats.EntropyScore,
-		SyncStatus:   syncStatus,
+		Timestamp:     time.Now(),
+		ImagePath:     shot.FilePath,
+		TotalKeys:     keyStats.TotalKeys,
+		UniqueKeys:    keyStats.UniqueKeys,
+		EntropyScore:  keyStats.EntropyScore,
+		TotalClicks:   mouseStats.TotalClicks,
+		MouseDistance: mouseStats.MouseDistance,
+		SyncStatus:    syncStatus,
 	}
 
 	if a.database == nil {
@@ -300,6 +320,9 @@ func (a *App) shutdown(_ context.Context) {
 	if a.keyTracker != nil {
 		a.keyTracker.Stop()
 	}
+	if a.mouseTracker != nil {
+		a.mouseTracker.Stop()
+	}
 	if a.database != nil {
 		_ = a.database.Close()
 	}
@@ -336,6 +359,14 @@ func (a *App) GetStats(date string) (*db.ProductivityStats, error) {
 func (a *App) RecordInputActivity(totalKeys, uniqueKeys int) {
 	if a.keyTracker != nil {
 		a.keyTracker.RecordKeystrokes(totalKeys, uniqueKeys)
+	}
+}
+
+// RecordMouseActivity allows the frontend desktop application to report mouse clicks and movement
+// without requiring root/sudo/evdev input group permissions on Linux.
+func (a *App) RecordMouseActivity(clicks int, distancePx float64) {
+	if a.mouseTracker != nil {
+		a.mouseTracker.RecordMouseActivity(clicks, distancePx)
 	}
 }
 

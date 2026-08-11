@@ -1463,6 +1463,7 @@ func (db *DB) GetOrgUsageSummary(orgID int64) (*APIUsageSummary, error) {
 				summary.ByKeySource[ks] = tTokens
 			}
 		}
+		_ = rows.Err()
 	}
 
 	// 2. Per-user breakdown in organization
@@ -1486,6 +1487,7 @@ func (db *DB) GetOrgUsageSummary(orgID int64) (*APIUsageSummary, error) {
 				summary.UserBreakdown = append(summary.UserBreakdown, ub)
 			}
 		}
+		_ = userRows.Err()
 	}
 
 	return summary, nil
@@ -1535,7 +1537,7 @@ func (db *DB) GetUserUsageSummary(userID int64) (*APIUsageSummary, error) {
 		}
 	}
 
-	return summary, nil
+	return summary, rows.Err()
 }
 
 // Close closes the database connection.

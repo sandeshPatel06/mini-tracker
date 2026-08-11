@@ -6,6 +6,8 @@ export interface LogEntry {
   total_keys: number;
   unique_keys: number;
   entropy_score: number;
+  total_clicks: number;
+  mouse_distance: number;
   app_name?: string;
   app_category?: string;
   window_title?: string;

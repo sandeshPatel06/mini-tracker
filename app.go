@@ -321,6 +321,41 @@ func (a *App) SetOrgGeminiKey(orgID int64, apiKey string) (bool, error) {
 
 // shutdown is called when the app terminates.
 func (a *App) shutdown(_ context.Context) {
+	// Flush any accumulated in-memory stats before stopping trackers.
+	// This ensures activity counts from the current interval are saved to the DB
+	// so daily totals are continuous across restarts.
+	a.statsMu.Lock()
+	keyStats := a.latestKeyStats
+	mouseStats := a.latestMouseStats
+	a.latestKeyStats = tracker.KeystrokeStats{}
+	a.latestMouseStats = tracker.MouseStats{}
+	a.statsMu.Unlock()
+
+	if a.database != nil && (keyStats.TotalKeys > 0 || mouseStats.TotalClicks > 0 || mouseStats.MouseDistance > 0) {
+		shot := &tracker.ScreenshotResult{} // no screenshot on shutdown flush
+		syncStatus := "local_only"
+		if !a.isGuest {
+			syncStatus = "pending_upload"
+		}
+		if _, err := a.database.InsertLog(&db.LogEntry{
+			OrgID:         0,
+			UserID:        0,
+			ImagePath:     shot.FilePath,
+			TotalKeys:     keyStats.TotalKeys,
+			UniqueKeys:    keyStats.UniqueKeys,
+			EntropyScore:  keyStats.EntropyScore,
+			TotalClicks:   mouseStats.TotalClicks,
+			MouseDistance: mouseStats.MouseDistance,
+			SyncStatus:    syncStatus,
+			Timestamp:     time.Now(),
+		}); err != nil {
+			log.Printf("[app] shutdown flush error: %v", err)
+		} else {
+			log.Printf("[app] shutdown flush: saved %d keys / %d clicks to DB",
+				keyStats.TotalKeys, mouseStats.TotalClicks)
+		}
+	}
+
 	if a.cancel != nil {
 		a.cancel()
 	}
@@ -351,6 +386,14 @@ func (a *App) GetLogsByDate(date string) ([]db.LogEntry, error) {
 		return nil, nil
 	}
 	return a.database.GetLogsForDate(date)
+}
+
+// GetTodayTrackedSeconds returns total accumulated tracked seconds for today from the DB.
+func (a *App) GetTodayTrackedSeconds() int64 {
+	if a.database == nil || a.cfg == nil {
+		return 0
+	}
+	return a.database.GetTodayTrackedSeconds(int64(a.cfg.ScreenshotInterval.Seconds()))
 }
 
 // GetStats returns productivity stats for today.

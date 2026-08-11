@@ -135,14 +135,26 @@ export default function App() {
     setPage('dashboard');
   };
 
-  // Fetch initial tracker status
+  // Fetch initial tracker status & restore accumulated today's duration
   useEffect(() => {
+    if (window.go?.main?.App?.GetTodayTrackedSeconds) {
+      callGo(() => window.go!.main.App.GetTodayTrackedSeconds())
+        .then((sec: number) => {
+          if (typeof sec === 'number' && sec > 0) {
+            setElapsedSeconds(sec);
+          }
+        })
+        .catch(() => {});
+    }
+
     apiFetch('/api/tracker/status')
       .then(r => r.ok ? r.json() : null)
       .then(data => {
         if (data) {
           setIsTrackingActive(!!data.active);
-          setElapsedSeconds(data.elapsed_seconds || 0);
+          if (data.elapsed_seconds && data.elapsed_seconds > 0) {
+            setElapsedSeconds(data.elapsed_seconds);
+          }
         }
       })
       .catch(() => {});

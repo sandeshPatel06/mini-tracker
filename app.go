@@ -10,13 +10,14 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/reak/get-hike/internal/ai"
 	"github.com/reak/get-hike/internal/config"
 	"github.com/reak/get-hike/internal/db"
 	"github.com/reak/get-hike/internal/logger"
-	"github.com/reak/get-hike/internal/sync"
+	syncp "github.com/reak/get-hike/internal/sync"
 	"github.com/reak/get-hike/internal/tracker"
 )
 
@@ -30,13 +31,14 @@ type App struct {
 	gemini         *ai.GeminiClient
 	keyTracker     *tracker.KeystrokeTracker
 	mouseTracker   *tracker.MouseTracker
-	syncEngine     *sync.SyncEngine
+	syncEngine     *syncp.SyncEngine
 	tickerResetCh  chan time.Duration
 
 	isGuest   bool
 	authToken string
 
-	// latest input stats (updated by tracker goroutines)
+	// latest input stats — guarded by statsMu against concurrent goroutine access
+	statsMu          sync.Mutex
 	latestKeyStats   tracker.KeystrokeStats
 	latestMouseStats tracker.MouseStats
 }
@@ -73,7 +75,7 @@ func (a *App) startup(ctx context.Context) {
 	a.gemini = ai.NewGeminiClient(cfg.GeminiAPIKey, cfg.GeminiModel)
 
 	// Sync Engine (used for Authenticated / Org Mode)
-	a.syncEngine = sync.NewSyncEngine(a.database, cfg.BackendEndpoint)
+	a.syncEngine = syncp.NewSyncEngine(a.database, cfg.BackendEndpoint)
 
 	// Start keystroke tracker
 	a.keyTracker = tracker.NewKeystrokeTracker(cfg.ScreenshotInterval)
@@ -90,10 +92,12 @@ func (a *App) startup(ctx context.Context) {
 	if mouseStatsCh, err := a.mouseTracker.Start(); err != nil {
 		log.Printf("[app] mouse tracker error (non-fatal): %v", err)
 	} else {
-		// drain mouse stats into latestMouseStats
+		// drain mouse stats into latestMouseStats (mutex-protected)
 		go func() {
 			for ms := range mouseStatsCh {
+				a.statsMu.Lock()
 				a.latestMouseStats = ms
+				a.statsMu.Unlock()
 			}
 		}()
 	}
@@ -115,7 +119,9 @@ func (a *App) startup(ctx context.Context) {
 				log.Printf("[app] screenshot collection loop reset to %v", dur)
 			case stats, ok := <-statsCh:
 				if ok {
+					a.statsMu.Lock()
 					a.latestKeyStats = stats
+					a.statsMu.Unlock()
 				}
 			case <-ticker.C:
 				a.collect()
@@ -190,11 +196,12 @@ func (a *App) cleanOldScreenshots() {
 // collect captures a screenshot + uses latest keystroke/mouse stats, persists the
 // entry, then fires async Gemini analysis (in Guest mode) or queues for backend sync (in Auth mode).
 func (a *App) collect() {
+	a.statsMu.Lock()
 	keyStats := a.latestKeyStats
-	a.latestKeyStats = tracker.KeystrokeStats{} // reset
-
+	a.latestKeyStats = tracker.KeystrokeStats{}
 	mouseStats := a.latestMouseStats
-	a.latestMouseStats = tracker.MouseStats{} // reset
+	a.latestMouseStats = tracker.MouseStats{}
+	a.statsMu.Unlock()
 
 	// Screenshot
 	shot, err := tracker.CaptureScreenshot(a.cfg.DataDir)
@@ -231,7 +238,7 @@ func (a *App) collect() {
 
 	if a.isGuest {
 		// Guest Mode: Perform direct client-side local Gemini AI analysis
-		go func(logID int64, filePath, b64Data string, score float64) {
+		go func(logID int64, b64Data string, score float64) {
 			ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 			defer cancel()
 
@@ -250,7 +257,7 @@ func (a *App) collect() {
 				}
 				_ = a.database.UpdateAIResult(logID, "Browsing", true, 0.8, fallbackReason)
 			}
-		}(id, shot.FilePath, shot.Base64Data, keyStats.EntropyScore)
+		}(id, shot.Base64Data, keyStats.EntropyScore)
 	} else {
 		// Authenticated Mode: Push raw telemetry to backend
 		go func() {

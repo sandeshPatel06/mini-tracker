@@ -26,6 +26,7 @@ type KeystrokeStats struct {
 // KeystrokeTracker monitors keyboard devices and aggregates keystroke uniqueness metrics.
 type KeystrokeTracker struct {
 	mu       sync.Mutex
+	stopOnce sync.Once
 	total    int
 	unique   map[evdev.EvCode]struct{}
 	stopCh   chan struct{}
@@ -147,9 +148,9 @@ func (t *KeystrokeTracker) RecordKeyCode(code evdev.EvCode) {
 	t.unique[code] = struct{}{}
 }
 
-// Stop signals all goroutines to exit.
+// Stop signals all goroutines to exit. Safe to call multiple times.
 func (t *KeystrokeTracker) Stop() {
-	close(t.stopCh)
+	t.stopOnce.Do(func() { close(t.stopCh) })
 }
 
 // flush atomically reads and resets the counters, then computes the entropy score.

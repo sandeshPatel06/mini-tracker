@@ -34,7 +34,9 @@ export type IconName =
   | 'clock'
   | 'search'
   | 'filter'
-  | 'info';
+  | 'info'
+  | 'play'
+  | 'pause';
 
 interface IconProps {
   name: IconName;
@@ -357,6 +359,21 @@ export function Icon({
           <circle cx="12" cy="12" r="10" />
           <line x1="12" y1="16" x2="12" y2="12" />
           <line x1="12" y1="8" x2="12.01" y2="8" />
+        </svg>
+      );
+
+    case 'play':
+      return (
+        <svg {...commonProps}>
+          <polygon points="5 3 19 12 5 21 5 3" />
+        </svg>
+      );
+
+    case 'pause':
+      return (
+        <svg {...commonProps}>
+          <rect x="6" y="4" width="4" height="16" />
+          <rect x="14" y="4" width="4" height="16" />
         </svg>
       );
 

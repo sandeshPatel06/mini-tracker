@@ -9,6 +9,8 @@ import (
 func TestLoadConfig(t *testing.T) {
 	os.Setenv("GEMINI_API_KEY", "test-key-123")
 	defer os.Unsetenv("GEMINI_API_KEY")
+	os.Setenv("SCREENSHOT_INTERVAL_SECONDS", "30s")
+	defer os.Unsetenv("SCREENSHOT_INTERVAL_SECONDS")
 
 	cfg, err := Load()
 	if err != nil {

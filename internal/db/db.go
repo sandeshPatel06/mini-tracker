@@ -38,6 +38,7 @@ type LogEntry struct {
 	ProductiveScore float64   `json:"productive_score"`
 	AIConfidence    float64   `json:"ai_confidence"`
 	AIReason        string    `json:"ai_reason"`
+	AIRetryCount    int       `json:"ai_retry_count"`
 	SyncStatus      string    `json:"sync_status"`
 	RemoteID        int64     `json:"remote_id"`
 	SyncedAt        time.Time `json:"synced_at"`
@@ -235,11 +236,6 @@ func (db *DB) migrate() error {
 		_, _ = db.rawDB.Exec(alter)
 	}
 
-	// Mouse telemetry columns — use safeAddColumn for guaranteed compatibility
-	// with SQLite versions that don't support ALTER TABLE ADD COLUMN IF NOT EXISTS.
-	safeAddColumn("logs", "total_clicks", "INTEGER DEFAULT 0")
-	safeAddColumn("logs", "mouse_distance", "REAL DEFAULT 0")
-
 	stmts := []string{
 		`CREATE TABLE IF NOT EXISTS organizations (
 			id              SERIAL PRIMARY KEY,
@@ -280,6 +276,7 @@ func (db *DB) migrate() error {
 			entropy_score    DOUBLE PRECISION DEFAULT 0,
 			total_clicks     INTEGER DEFAULT 0,
 			mouse_distance   DOUBLE PRECISION DEFAULT 0,
+			ai_retry_count   INTEGER DEFAULT 0,
 			app_name         TEXT DEFAULT '',
 			app_category     TEXT DEFAULT '',
 			window_title     TEXT DEFAULT '',
@@ -373,6 +370,7 @@ func (db *DB) migrate() error {
 				entropy_score    REAL DEFAULT 0,
 				total_clicks     INTEGER DEFAULT 0,
 				mouse_distance   REAL DEFAULT 0,
+				ai_retry_count   INTEGER DEFAULT 0,
 				app_name         TEXT DEFAULT '',
 				app_category     TEXT DEFAULT '',
 				window_title     TEXT DEFAULT '',
@@ -392,7 +390,6 @@ func (db *DB) migrate() error {
 			`CREATE INDEX IF NOT EXISTS idx_logs_org_ts ON logs(org_id, timestamp);`,
 			`CREATE INDEX IF NOT EXISTS idx_logs_unanalyzed ON logs(ai_category, timestamp);`,
 			`CREATE INDEX IF NOT EXISTS idx_logs_sync_status ON logs(sync_status);`,
-			// Note: total_clicks and mouse_distance are handled by safeAddColumn above
 			`CREATE TABLE IF NOT EXISTS work_sessions (
 				id             INTEGER PRIMARY KEY AUTOINCREMENT,
 				org_id         INTEGER DEFAULT 1,
@@ -428,6 +425,12 @@ func (db *DB) migrate() error {
 		if _, err := db.rawDB.Exec(stmt); err != nil {
 			log.Printf("[db] migration statement note: %v", err)
 		}
+	}
+
+	if db.dialect == dialect.SQLite {
+		safeAddColumn("logs", "total_clicks", "INTEGER DEFAULT 0")
+		safeAddColumn("logs", "mouse_distance", "REAL DEFAULT 0")
+		safeAddColumn("logs", "ai_retry_count", "INTEGER DEFAULT 0")
 	}
 
 	// Seed default org
@@ -1257,12 +1260,15 @@ func (db *DB) GetUnanalyzedLogs() ([]LogEntry, error) {
 		"id", "timestamp", "image_path", "total_keys", "unique_keys", "entropy_score",
 		"total_clicks", "mouse_distance",
 		"app_name", "app_category", "window_title", "session_id", "session_title",
-		"ai_category", "is_productive", "productive_score", "ai_confidence", "ai_reason",
+		"ai_category", "is_productive", "productive_score", "ai_confidence", "ai_reason", "ai_retry_count",
 	).From(entsql.Table("logs")).Where(
-		entsql.Or(
-			entsql.EQ("ai_category", ""),
-			entsql.EQ("ai_category", "Unknown"),
-			entsql.Like("ai_reason", "%No Gemini API key%"),
+		entsql.And(
+			entsql.Or(
+				entsql.EQ("ai_category", ""),
+				entsql.EQ("ai_category", "Unknown"),
+				entsql.Like("ai_reason", "%No Gemini API key%"),
+			),
+			entsql.LT("ai_retry_count", 10),
 		),
 	).OrderBy(entsql.Asc("timestamp"))
 
@@ -1281,7 +1287,7 @@ func (db *DB) GetUnanalyzedLogs() ([]LogEntry, error) {
 		if err := rows.Scan(&e.ID, &ts, &e.ImagePath, &e.TotalKeys, &e.UniqueKeys, &e.EntropyScore,
 			&e.TotalClicks, &e.MouseDistance,
 			&e.AppName, &e.AppCategory, &e.WindowTitle, &e.SessionID, &e.SessionTitle,
-			&e.AICategory, &productive, &e.ProductiveScore, &e.AIConfidence, &e.AIReason); err != nil {
+			&e.AICategory, &productive, &e.ProductiveScore, &e.AIConfidence, &e.AIReason, &e.AIRetryCount); err != nil {
 			return nil, err
 		}
 		e.Timestamp = parseFlexibleTime(ts)
@@ -1289,6 +1295,29 @@ func (db *DB) GetUnanalyzedLogs() ([]LogEntry, error) {
 		entries = append(entries, e)
 	}
 	return entries, rows.Err()
+}
+
+// IncrementAIRetryCount increments the AI retry counter for a log entry.
+// If retry count reaches 10, marks the log entry as Failed so it won't be retried indefinitely.
+func (db *DB) IncrementAIRetryCount(id int64) error {
+	var currentRetries int
+	row := db.rawDB.QueryRow("SELECT COALESCE(ai_retry_count, 0) FROM logs WHERE id = $1", id)
+	if db.dialect == dialect.SQLite {
+		row = db.rawDB.QueryRow("SELECT COALESCE(ai_retry_count, 0) FROM logs WHERE id = ?", id)
+	}
+	_ = row.Scan(&currentRetries)
+
+	newRetries := currentRetries + 1
+	if newRetries >= 10 {
+		return db.UpdateLogAnalysis(id, "Failed", "", "", "", 0, "", false, 0, 0.0, "AI Analysis Failed (Max 10 retries exceeded)")
+	}
+
+	query := "UPDATE logs SET ai_retry_count = COALESCE(ai_retry_count, 0) + 1 WHERE id = $1"
+	if db.dialect == dialect.SQLite {
+		query = "UPDATE logs SET ai_retry_count = COALESCE(ai_retry_count, 0) + 1 WHERE id = ?"
+	}
+	_, err := db.rawDB.Exec(query, id)
+	return err
 }
 
 func parseFlexibleTime(v interface{}) time.Time {

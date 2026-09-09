@@ -10,6 +10,8 @@ export namespace db {
 	    total_keys: number;
 	    unique_keys: number;
 	    entropy_score: number;
+	    total_clicks: number;
+	    mouse_distance: number;
 	    app_name: string;
 	    app_category: string;
 	    window_title: string;
@@ -20,6 +22,7 @@ export namespace db {
 	    productive_score: number;
 	    ai_confidence: number;
 	    ai_reason: string;
+	    ai_retry_count: number;
 	    sync_status: string;
 	    remote_id: number;
 	    // Go type: time
@@ -39,6 +42,8 @@ export namespace db {
 	        this.total_keys = source["total_keys"];
 	        this.unique_keys = source["unique_keys"];
 	        this.entropy_score = source["entropy_score"];
+	        this.total_clicks = source["total_clicks"];
+	        this.mouse_distance = source["mouse_distance"];
 	        this.app_name = source["app_name"];
 	        this.app_category = source["app_category"];
 	        this.window_title = source["window_title"];
@@ -49,6 +54,7 @@ export namespace db {
 	        this.productive_score = source["productive_score"];
 	        this.ai_confidence = source["ai_confidence"];
 	        this.ai_reason = source["ai_reason"];
+	        this.ai_retry_count = source["ai_retry_count"];
 	        this.sync_status = source["sync_status"];
 	        this.remote_id = source["remote_id"];
 	        this.synced_at = this.convertValues(source["synced_at"], null);

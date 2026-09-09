@@ -123,15 +123,25 @@ func main() {
 				ks := latestKeyStats
 				latestKeyStats = tracker.KeystrokeStats{}
 
-				shot, err := tracker.CaptureScreenshot(cfg.DataDir)
+				winRes, err := tracker.GetActiveWindowTitle()
+				windowTitle := ""
 				if err != nil {
-					log.Printf("[server] screenshot capture: %v", err)
-					shot = &tracker.ScreenshotResult{}
+					log.Printf("[server] window title error: %v", err)
+				} else if winRes != nil {
+					windowTitle = winRes.Title
+				}
+
+				imagePath := ""
+				if res, err := tracker.CaptureScreenshot(cfg.DataDir); err != nil {
+					log.Printf("[server] screenshot capture error: %v", err)
+				} else if res != nil {
+					imagePath = res.FilePath
 				}
 
 				entry := &db.LogEntry{
 					Timestamp:    time.Now(),
-					ImagePath:    shot.FilePath,
+					ImagePath:    imagePath,
+					WindowTitle:  windowTitle,
 					TotalKeys:    ks.TotalKeys,
 					UniqueKeys:   ks.UniqueKeys,
 					EntropyScore: ks.EntropyScore,
@@ -143,19 +153,19 @@ func main() {
 					continue
 				}
 
-				go func(logID int64, filePath, b64 string, score float64) {
+				go func(logID int64, title string, score float64) {
 					ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 					defer cancel()
 
-					res, err := gemini.Analyze(ctx, b64, score)
+					res, err := gemini.Analyze(ctx, title, score)
 					if err != nil {
-						log.Printf("[server] AI analysis error for #%d: %v — applying local fallback", logID, err)
-						_ = database.UpdateLogAnalysis(logID, "Browsing", "Desktop", "Web Browser", "Offline", 0, "", true, 80, 0.8, "Offline Mode (Local Log)")
+						log.Printf("[server] AI analysis error for #%d: %v — incrementing retry count", logID, err)
+						_ = database.IncrementAIRetryCount(logID)
 					} else {
 						_ = database.UpdateLogAnalysis(logID, res.Category, res.AppName, res.AppCategory, res.WindowTitle, 0, "", res.Productive, res.ProductiveScore, res.Confidence, res.Reason)
 						log.Printf("[server] logged #%d — app=%s category=%s productive_score=%.0f%% reason=%s", logID, res.AppName, res.Category, res.ProductiveScore, res.Reason)
 					}
-				}(id, shot.FilePath, shot.Base64Data, ks.EntropyScore)
+				}(id, windowTitle, ks.EntropyScore)
 			}
 		}
 	}()
@@ -203,6 +213,7 @@ func main() {
 		if trackerActive {
 			accumulatedSec += int64(time.Since(trackerStartTime).Seconds())
 			trackerActive = false
+			latestKeyStats = tracker.KeystrokeStats{}
 		} else {
 			trackerStartTime = time.Now()
 			trackerActive = true
@@ -439,6 +450,14 @@ func main() {
 			jsonError(w, "Method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
+
+		trackerMutex.Lock()
+		active := trackerActive
+		trackerMutex.Unlock()
+		if !active {
+			jsonResp(w, map[string]interface{}{"active": false, "success": false, "message": "Tracker is paused"})
+			return
+		}
 		var payload struct {
 			TotalKeys  int `json:"total_keys"`
 			UniqueKeys int `json:"unique_keys"`
@@ -462,6 +481,14 @@ func main() {
 	mux.HandleFunc("/api/screenshots", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			jsonError(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		trackerMutex.Lock()
+		active := trackerActive
+		trackerMutex.Unlock()
+		if !active {
+			jsonResp(w, map[string]interface{}{"active": false, "success": false, "message": "Tracker is paused"})
 			return
 		}
 
@@ -551,6 +578,14 @@ func main() {
 	mux.HandleFunc("/api/telemetry/push", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			jsonError(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		trackerMutex.Lock()
+		active := trackerActive
+		trackerMutex.Unlock()
+		if !active {
+			jsonResp(w, map[string]interface{}{"active": false, "message": "Tracker is paused"})
 			return
 		}
 
@@ -1586,7 +1621,6 @@ func main() {
 	log.Printf("=====================================================")
 	log.Printf("📍 Mini Tracker Web Application Running!")
 	log.Printf("   Dashboard UI: http://localhost:%s", port)
-	log.Printf("   Corporate Beta Platform Enabled")
 	log.Printf("=====================================================")
 
 	srv := &http.Server{
@@ -1689,15 +1723,10 @@ func processPendingLogs(database *db.DB, gemini *ai.GeminiClient) int {
 
 		var batchItems []ai.BatchAnalysisItem
 		for _, entry := range chunk {
-			var b64 string
-			if entry.ImagePath != "" {
-				if data, err := os.ReadFile(entry.ImagePath); err == nil {
-					b64 = encodingBase64(data)
-				}
-			}
+			// Image processing removed since we use WindowTitle directly
 			batchItems = append(batchItems, ai.BatchAnalysisItem{
 				LogID:        entry.ID,
-				Base64Image:  b64,
+				WindowTitle:  entry.WindowTitle,
 				EntropyScore: entry.EntropyScore,
 				ImagePath:    entry.ImagePath,
 			})
@@ -1710,22 +1739,14 @@ func processPendingLogs(database *db.DB, gemini *ai.GeminiClient) int {
 		if err != nil {
 			log.Printf("[server] batch AI analysis error for %d logs: %v (falling back to single item analysis)", len(batchItems), err)
 			for _, entry := range chunk {
-				var b64 string
-				if entry.ImagePath != "" {
-					if data, err := os.ReadFile(entry.ImagePath); err == nil {
-						b64 = encodingBase64(data)
-					}
-				}
 				sCtx, sCancel := context.WithTimeout(context.Background(), 45*time.Second)
-				res, sErr := gemini.Analyze(sCtx, b64, entry.EntropyScore)
+				res, sErr := gemini.Analyze(sCtx, entry.WindowTitle, entry.EntropyScore)
 				sCancel()
 				if sErr == nil {
 					_ = database.UpdateLogAnalysis(entry.ID, res.Category, res.AppName, res.AppCategory, res.WindowTitle, 0, "", res.Productive, res.ProductiveScore, res.Confidence, res.Reason)
 					processed++
 				} else {
-					log.Printf("[server] single AI analysis error for log #%d: %v — applying offline fallback", entry.ID, sErr)
-					_ = database.UpdateLogAnalysis(entry.ID, "Browsing", "Desktop", "Web Browser", "Offline", 0, "", true, 80, 0.8, "Offline Mode (Local Log)")
-					processed++
+					_ = database.IncrementAIRetryCount(entry.ID)
 				}
 			}
 			continue
@@ -1920,22 +1941,22 @@ const wizardHTML = `<!DOCTYPE html>
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
   :root {
-    --bg-base:       #080911;
-    --bg-surface:    #0d0e1a;
-    --bg-card:       #121424;
-    --bg-elevated:   #1d203b;
-    --border-subtle: rgba(99,102,241,0.14);
-    --border-medium: rgba(99,102,241,0.28);
-    --border-glow:   rgba(99,102,241,0.45);
-    --accent:        #6366f1;
-    --accent2:       #4f46e5;
-    --teal:          #2dd4bf;
+    --bg-base:       #06120e;
+    --bg-surface:    #0b1c17;
+    --bg-card:       #112720;
+    --bg-elevated:   #18352c;
+    --border-subtle: rgba(16,185,129,0.14);
+    --border-medium: rgba(16,185,129,0.28);
+    --border-glow:   rgba(16,185,129,0.45);
+    --accent:        #10b981;
+    --accent2:       #059669;
+    --teal:          #34d399;
     --green:         #10b981;
     --red:           #ef4444;
     --amber:         #f59e0b;
-    --text-primary:  #f1f5f9;
-    --text-secondary:#94a3b8;
-    --text-muted:    #64748b;
+    --text-primary:  #f0fdf4;
+    --text-secondary:#a7f3d0;
+    --text-muted:    #6ee7b7;
     --mono:          'JetBrains Mono', monospace;
   }
 

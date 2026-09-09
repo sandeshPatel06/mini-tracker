@@ -4,6 +4,8 @@ import {db} from '../models';
 
 export function ClearAllLocalData():Promise<boolean>;
 
+export function GetActiveTask():Promise<string>;
+
 export function GetConfig():Promise<Record<string, any>>;
 
 export function GetImageBase64(arg1:string):Promise<string>;
@@ -14,17 +16,27 @@ export function GetStats(arg1:string):Promise<db.ProductivityStats>;
 
 export function GetTodayLogs():Promise<Array<db.LogEntry>>;
 
+export function GetTodayTrackedSeconds():Promise<number>;
+
+export function GetTrackingStatus():Promise<Record<string, any>>;
+
 export function OpenTrackerWizard(arg1:string):Promise<void>;
 
 export function ProcessPendingLogs():Promise<number>;
 
 export function RecordInputActivity(arg1:number,arg2:number):Promise<void>;
 
+export function RecordMouseActivity(arg1:number,arg2:number):Promise<void>;
+
+export function SetActiveTask(arg1:string):Promise<string>;
+
 export function SetAuthSession(arg1:string,arg2:boolean):Promise<void>;
 
 export function SetOrgGeminiKey(arg1:number,arg2:string):Promise<boolean>;
 
 export function SetUserPersonalKey(arg1:string):Promise<boolean>;
+
+export function ToggleTracking():Promise<Record<string, any>>;
 
 export function TriggerSyncNow():Promise<boolean>;
 

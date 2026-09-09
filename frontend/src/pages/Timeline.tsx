@@ -67,7 +67,7 @@ export default function Timeline({ logs, loading, today, onDateChange }: Props) 
   // Calculate day summary metrics
   const avgDayScore = logs.length > 0
     ? Math.round(
-        logs.reduce((acc, l) => acc + (l.productive_score !== undefined && l.productive_score > 0 ? l.productive_score : l.is_productive ? 100 : 0), 0) / logs.length
+        logs.reduce((acc, l) => acc + (typeof l.productive_score === 'number' ? l.productive_score : l.is_productive ? 100 : 0), 0) / logs.length
       )
     : 0;
 
@@ -76,7 +76,7 @@ export default function Timeline({ logs, loading, today, onDateChange }: Props) 
       <ImageModal imagePath={selectedImage} onClose={() => setSelectedImage(null)} />
 
       {/* Header Bar */}
-      <div className="page-header">
+      <div className="page-header" style={{ marginBottom: 16 }}>
         <div>
           <h1 className="page-title" style={{ fontSize: 24, fontWeight: 700, letterSpacing: '-0.4px', color: 'var(--text-primary)' }}>
             Activity Timeline
@@ -85,33 +85,29 @@ export default function Timeline({ logs, loading, today, onDateChange }: Props) 
             Detailed minute-by-minute activity captures & AI focus ratings
           </div>
         </div>
-
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <input
-            id="timeline-date-picker"
-            type="date"
-            className="date-input"
-            value={today}
-            max={new Date().toISOString().slice(0, 10)}
-            onChange={(e) => onDateChange(e.target.value)}
-            style={{
-              padding: '6px 12px',
-              borderRadius: 'var(--radius-md)',
-              border: '1px solid var(--border-medium)',
-              background: 'var(--bg-surface)',
-              color: 'var(--text-primary)',
-              fontSize: 13,
-            }}
-          />
-        </div>
       </div>
 
       {/* Top Filter Controls & Summary Strip */}
-      <div className="card" style={{ marginBottom: 20, padding: '16px 20px' }}>
-        <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 16 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', flex: 1 }}>
+      <div className="card" style={{ marginBottom: 20, padding: '14px 18px' }}>
+        <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 14 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', flex: 1 }}>
+            {/* Date Picker */}
+            <input
+              id="timeline-date-picker"
+              type="date"
+              className="date-input"
+              value={today}
+              max={new Date().toISOString().slice(0, 10)}
+              onChange={(e) => onDateChange(e.target.value)}
+              style={{
+                height: 36,
+                padding: '0 12px',
+                fontSize: 13,
+              }}
+            />
+
             {/* Search Input */}
-            <div style={{ position: 'relative', minWidth: 220 }}>
+            <div style={{ position: 'relative', minWidth: 200, flex: 1 }}>
               <input
                 type="text"
                 placeholder="Search apps, windows, reason..."
@@ -157,7 +153,7 @@ export default function Timeline({ logs, loading, today, onDateChange }: Props) 
                 setSelectedCategory(e.target.value);
                 setCurrentPage(1);
               }}
-              style={{ height: 36, fontSize: 13, minWidth: 140 }}
+              style={{ height: 36, fontSize: 13, minWidth: 130 }}
             >
               <option value="ALL">All Categories</option>
               {uniqueCategories.map((cat) => (
@@ -166,10 +162,10 @@ export default function Timeline({ logs, loading, today, onDateChange }: Props) 
             </select>
           </div>
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: 16, fontSize: 13, color: 'var(--text-muted)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 14, fontSize: 13, color: 'var(--text-muted)' }}>
             <span>Showing <strong style={{ color: 'var(--text-primary)' }}>{paginatedLogs.length}</strong> of {filteredLogs.length}</span>
             <span>•</span>
-            <span style={{ fontWeight: 600, color: avgDayScore >= 60 ? 'var(--accent-green)' : 'var(--accent-purple)' }}>
+            <span style={{ fontWeight: 600, color: avgDayScore >= 60 ? 'var(--accent-green)' : 'var(--accent-primary)' }}>
               Avg Day Focus: {avgDayScore}%
             </span>
           </div>
@@ -215,7 +211,7 @@ export default function Timeline({ logs, loading, today, onDateChange }: Props) 
           ) : (
             <div className="timeline-list">
               {paginatedLogs.map((log) => {
-                const scoreVal = log.productive_score !== undefined && log.productive_score > 0
+                const scoreVal = typeof log.productive_score === 'number'
                   ? Math.round(log.productive_score)
                   : log.is_productive ? 100 : 0;
 
@@ -255,11 +251,28 @@ export default function Timeline({ logs, loading, today, onDateChange }: Props) 
                         )}
                       </div>
 
-                      <div className="timeline-reason" style={{ marginTop: 4 }}>
+                      {log.window_title && (
+                        <div
+                          title={log.window_title}
+                          style={{
+                            fontSize: 12,
+                            fontWeight: 600,
+                            color: 'var(--text-primary)',
+                            marginTop: 4,
+                            whiteSpace: 'nowrap',
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                          }}
+                        >
+                          🪟 {log.window_title}
+                        </div>
+                      )}
+
+                      <div className="timeline-reason" style={{ marginTop: 2 }}>
                         {log.ai_reason || '—'}
                       </div>
 
-                      <div style={{ marginTop: 6, display: 'flex', gap: 16, alignItems: 'center', fontSize: 11, color: 'var(--text-muted)' }}>
+                      <div style={{ marginTop: 4, display: 'flex', gap: 12, alignItems: 'center', fontSize: 11, color: 'var(--text-muted)' }}>
                         <span>⌨️ {log.total_keys} keys · {log.unique_keys} unique</span>
                         <span>•</span>
                         <span>Entropy: {log.entropy_score.toFixed(1)}</span>
@@ -272,7 +285,7 @@ export default function Timeline({ logs, loading, today, onDateChange }: Props) 
                       ) : (
                         <span className={`badge ${scoreVal >= 50 ? 'badge-productive' : 'badge-unproductive'}`}>
                           <Icon name={scoreVal >= 50 ? 'check' : 'x'} size={13} />
-                          {scoreVal}% Focus Rating
+                          {scoreVal}% Focus
                         </span>
                       )}
                       {log.ai_confidence > 0 && (

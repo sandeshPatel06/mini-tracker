@@ -22,6 +22,8 @@ declare const window: Window & {
         GetStats: (date: string) => Promise<ProductivityStats>;
         GetConfig: () => Promise<AppConfig>;
         GetTodayTrackedSeconds: () => Promise<number>;
+        GetTrackingStatus: () => Promise<{ active?: boolean; elapsed_seconds?: number } | null>;
+        ToggleTracking: () => Promise<{ active?: boolean; elapsed_seconds?: number } | null>;
         SetActiveTask: (task: string) => Promise<string>;
         GetActiveTask: () => Promise<string>;
         RecordInputActivity: (totalKeys: number, uniqueKeys: number) => Promise<void>;
@@ -156,7 +158,19 @@ export default function App() {
 
   // Fetch initial tracker status & restore accumulated today's duration
   useEffect(() => {
-    if (window.go?.main?.App?.GetTodayTrackedSeconds) {
+    const app = (window as any).go?.main?.App;
+    if (app?.GetTrackingStatus) {
+      callGo(() => app.GetTrackingStatus())
+        .then((status: any) => {
+          if (status) {
+            setIsTrackingActive(!!status.active);
+            if (typeof status.elapsed_seconds === 'number') {
+              setElapsedSeconds(status.elapsed_seconds);
+            }
+          }
+        })
+        .catch(() => {});
+    } else {
       callGo(() => window.go!.main.App.GetTodayTrackedSeconds())
         .then((sec: any) => {
           if (typeof sec === 'number' && sec > 0) {
@@ -190,6 +204,15 @@ export default function App() {
 
   const handleToggleTracking = async () => {
     try {
+      const app = (window as any).go?.main?.App;
+      if (app?.ToggleTracking) {
+        const res: any = await callGo(() => app.ToggleTracking());
+        if (res) {
+          setIsTrackingActive(!!res.active);
+          setElapsedSeconds(res.elapsed_seconds || 0);
+          return;
+        }
+      }
       const res = await apiFetch('/api/tracker/toggle', { method: 'POST' });
       if (res.ok) {
         const data = await res.json();
@@ -551,6 +574,8 @@ Return ONLY a valid JSON array of ${bundle.length} objects in exact input order:
 
   // Keypress & mouse tracking — zero-sudo mode (frontend-reported input activity)
   useEffect(() => {
+    if (!isTrackingActive) return;
+
     let totalCount = 0;
     const uniqueKeys = new Set<string>();
 
@@ -662,7 +687,7 @@ Return ONLY a valid JSON array of ${bundle.length} objects in exact input order:
       clearInterval(inputFlushInterval);
       clearInterval(syncInterval);
     };
-  }, [loadData]);
+  }, [isTrackingActive, loadData]);
 
   // Mobile navbar collapse state
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState<boolean>(false);
@@ -741,7 +766,7 @@ Return ONLY a valid JSON array of ${bundle.length} objects in exact input order:
       {/* Sidebar */}
       <aside className={`sidebar ${isMobileMenuOpen ? 'open' : ''}`}>
         <div className="sidebar-logo">
-          <img src={logoAsset} alt="get-Hike Logo" className="app-brand-logo-img" style={{ width: 42, height: 42 }} />
+          <img src={logoAsset} alt="get-Hike Logo" className="app-brand-logo-img" style={{ width: 32, height: 32 }} />
           <div>
             <div className="sidebar-logo-text">get-Hike</div>
             <div className="sidebar-logo-sub">Productivity</div>
@@ -758,12 +783,13 @@ Return ONLY a valid JSON array of ${bundle.length} objects in exact input order:
                 padding: '2px 6px',
                 borderRadius: 4,
                 fontWeight: 600,
-                background: isGuestMode ? 'rgba(168, 85, 247, 0.15)' : 'rgba(16, 185, 129, 0.15)',
-                color: isGuestMode ? '#c084fc' : '#34d399',
-                border: isGuestMode ? '1px solid rgba(168, 85, 247, 0.3)' : '1px solid rgba(16, 185, 129, 0.3)',
+                background: isGuestMode ? 'rgba(139, 92, 246, 0.15)' : 'rgba(16, 185, 129, 0.15)',
+                color: isGuestMode ? 'var(--accent-purple)' : 'var(--accent-green)',
+                border: isGuestMode ? '1px solid rgba(139, 92, 246, 0.3)' : '1px solid rgba(16, 185, 129, 0.3)',
+                whiteSpace: 'nowrap',
               }}
             >
-              {isGuestMode ? '100% Offline Guest' : 'Backend Synced'}
+              {isGuestMode ? 'Offline Guest' : 'Synced'}
             </span>
           </div>
           <div className="sidebar-widget-timer">
@@ -771,10 +797,10 @@ Return ONLY a valid JSON array of ${bundle.length} objects in exact input order:
           </div>
           <button
             onClick={handleToggleTracking}
-            className={`btn-tracker-toggle ${isTrackingActive ? 'active' : ''}`}
+            className={`btn-tracker-toggle ${isTrackingActive ? 'active' : 'paused'}`}
             style={{ marginBottom: 8 }}
           >
-            <Icon name={isTrackingActive ? 'x' : 'check'} size={14} />
+            <Icon name={isTrackingActive ? 'pause' : 'play'} size={14} />
             <span>{isTrackingActive ? 'Pause Tracker' : 'Start Tracker'}</span>
           </button>
           <button
@@ -782,26 +808,7 @@ Return ONLY a valid JSON array of ${bundle.length} objects in exact input order:
               setTaskInput(userTask);
               setShowTaskModal(true);
             }}
-            style={{
-              width: '100%',
-              padding: '6px 10px',
-              background: userTask ? 'rgba(59, 130, 246, 0.15)' : 'rgba(255, 255, 255, 0.05)',
-              border: userTask ? '1px solid rgba(59, 130, 246, 0.3)' : '1px solid rgba(255, 255, 255, 0.1)',
-              borderRadius: '8px',
-              color: userTask ? '#60a5fa' : '#9ca3af',
-              fontSize: '11px',
-              fontWeight: 600,
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              gap: '6px',
-              marginBottom: isGuestMode ? 0 : 8,
-              textAlign: 'left',
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-              whiteSpace: 'nowrap'
-            }}
+            className={`btn-task-goal ${userTask ? 'active' : ''}`}
             title={userTask || 'Set target task goal (max 20 words)'}
           >
             <Icon name="target" size={12} />
@@ -813,22 +820,7 @@ Return ONLY a valid JSON array of ${bundle.length} objects in exact input order:
             <button
               onClick={handleSyncNow}
               disabled={isSyncing}
-              style={{
-                width: '100%',
-                padding: '7px 12px',
-                background: 'rgba(99, 102, 241, 0.15)',
-                border: '1px solid rgba(99, 102, 241, 0.3)',
-                borderRadius: '8px',
-                color: '#818cf8',
-                fontSize: '11px',
-                fontWeight: 600,
-                cursor: isSyncing ? 'not-allowed' : 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                gap: '6px',
-                transition: 'all 0.2s ease',
-              }}
+              className={`btn-sync-now ${isSyncing ? 'syncing' : ''}`}
             >
               <Icon name="refresh" size={12} className={isSyncing ? 'spin' : ''} />
               <span>{isSyncing ? 'Syncing...' : (syncMessage || 'Sync Now')}</span>
@@ -881,28 +873,22 @@ Return ONLY a valid JSON array of ${bundle.length} objects in exact input order:
             <div style={{ marginBottom: 10 }}>
               <button
                 onClick={() => setIsGuestMode(false)}
+                className="btn btn-secondary btn-sm w-full"
                 style={{
-                  width: '100%',
-                  padding: '4px 8px',
-                  background: 'var(--bg-elevated)',
-                  border: '1px solid var(--border-medium)',
-                  borderRadius: 'var(--radius-sm)',
-                  color: 'var(--accent-purple)',
-                  fontSize: 11,
-                  fontWeight: 600,
-                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: 6,
+                  fontSize: 12,
                   marginBottom: 8,
                 }}
               >
-                🔐 Sign In / Sign Up
+                <Icon name="lock" size={13} />
+                <span>Sign In / Sign Up</span>
               </button>
             </div>
           )}
 
-          <div className="status-badge" style={{ marginBottom: 8 }}>
-            <div className={`status-dot ${isTracking ? '' : 'inactive'}`} />
-            <span>{isTracking ? 'Tracking active' : 'Tracker paused'}</span>
-          </div>
           <div className="status-badge">
             {(() => {
               const localKey = localStorage.getItem('mini_gemini_api_key');
@@ -1052,106 +1038,65 @@ Return ONLY a valid JSON array of ${bundle.length} objects in exact input order:
 
       {/* Target Task Goal Modal Dialog */}
       {showTaskModal && (
-        <div style={{
-          position: 'fixed',
-          inset: 0,
-          background: 'rgba(0, 0, 0, 0.65)',
-          backdropFilter: 'blur(4px)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          zIndex: 9999,
-          padding: 20
-        }}>
-          <div style={{
-            background: 'var(--bg-card)',
-            border: '1px solid var(--border-medium)',
-            borderRadius: 'var(--radius-lg)',
-            padding: 24,
-            width: '100%',
-            maxWidth: 440,
-            boxShadow: 'var(--shadow-card), var(--shadow-glow)'
-          }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <Icon name="target" size={18} style={{ color: 'var(--accent-purple)' }} />
-                <h3 style={{ margin: 0, fontSize: 16, fontWeight: 600, color: 'var(--text-primary)' }}>Set Target Work Task</h3>
+        <div className="modal-backdrop">
+          <div className="modal-card" style={{ maxWidth: 460 }}>
+            <div className="modal-header">
+              <div className="flex items-center gap-8">
+                <Icon name="target" size={18} style={{ color: 'var(--accent-primary)' }} />
+                <h3 className="modal-title">Set Target Work Task</h3>
               </div>
               <button
+                className="modal-close"
                 onClick={() => setShowTaskModal(false)}
-                style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: 18 }}
+                aria-label="Close dialog"
               >×</button>
             </div>
 
-            <p style={{ fontSize: 12, color: 'var(--text-secondary)', margin: '0 0 14px 0', lineHeight: 1.5 }}>
-              Describe what you are currently working on. AI analytics will evaluate your screenshots, keypresses, and mouse activity specifically against this goal.
-            </p>
+            <div className="modal-body">
+              <p style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 14, lineHeight: 1.5 }}>
+                Describe what you are currently working on. AI analytics will evaluate your screenshots, keypresses, and mouse activity specifically against this goal.
+              </p>
 
-            <textarea
-              rows={3}
-              value={taskInput}
-              onChange={e => setTaskInput(e.target.value)}
-              placeholder="e.g. Fixing database migration bug and optimizing mouse event loop performance..."
-              style={{
-                width: '100%',
-                padding: 10,
-                background: 'var(--bg-base)',
-                border: '1px solid var(--border-subtle)',
-                borderRadius: 'var(--radius-md)',
-                color: 'var(--text-primary)',
-                fontSize: 13,
-                resize: 'none',
-                outline: 'none',
-                boxSizing: 'border-box',
-                marginBottom: 6
-              }}
-            />
+              <textarea
+                rows={3}
+                className="form-input"
+                value={taskInput}
+                onChange={e => setTaskInput(e.target.value)}
+                placeholder="e.g. Fixing database migration bug and optimizing mouse event loop performance..."
+                style={{
+                  resize: 'none',
+                  marginBottom: 8,
+                }}
+              />
 
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18 }}>
-              <span style={{
-                fontSize: 11,
-                color: taskInput.trim().split(/\s+/).filter(Boolean).length > 20 ? 'var(--accent-red)' : 'var(--text-muted)'
-              }}>
-                Word count: {taskInput.trim().split(/\s+/).filter(Boolean).length} / 20 words max
-              </span>
-              {userTask && (
-                <button
-                  onClick={() => saveTask('')}
-                  style={{ background: 'none', border: 'none', color: 'var(--accent-red)', fontSize: 11, cursor: 'pointer' }}
-                >
-                  Clear Task
-                </button>
-              )}
+              <div className="flex items-center justify-between mt-4" style={{ marginBottom: 4 }}>
+                <span style={{
+                  fontSize: 11,
+                  color: taskInput.trim().split(/\s+/).filter(Boolean).length > 20 ? 'var(--accent-red)' : 'var(--text-muted)'
+                }}>
+                  Word count: {taskInput.trim().split(/\s+/).filter(Boolean).length} / 20 words max
+                </span>
+                {userTask && (
+                  <button
+                    onClick={() => saveTask('')}
+                    style={{ background: 'none', border: 'none', color: 'var(--accent-red)', fontSize: 11, fontWeight: 600, cursor: 'pointer' }}
+                  >
+                    Clear Task
+                  </button>
+                )}
+              </div>
             </div>
 
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
+            <div className="modal-footer">
               <button
                 onClick={() => setShowTaskModal(false)}
-                style={{
-                  padding: '8px 14px',
-                  background: 'transparent',
-                  border: '1px solid var(--border-subtle)',
-                  borderRadius: 'var(--radius-md)',
-                  color: 'var(--text-secondary)',
-                  fontSize: 12,
-                  fontWeight: 500,
-                  cursor: 'pointer'
-                }}
+                className="btn btn-secondary btn-sm"
               >
                 Cancel
               </button>
               <button
                 onClick={() => saveTask(taskInput)}
-                style={{
-                  padding: '8px 16px',
-                  background: 'var(--accent-purple)',
-                  border: 'none',
-                  borderRadius: 'var(--radius-md)',
-                  color: '#fff',
-                  fontSize: 12,
-                  fontWeight: 600,
-                  cursor: 'pointer'
-                }}
+                className="btn btn-primary btn-sm"
               >
                 Save & Align AI Analytics
               </button>

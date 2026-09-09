@@ -4,82 +4,62 @@ interface CategoryBadgeProps {
   category: string;
 }
 
-const CATEGORY_STYLES: Record<string, { bg: string; color: string; border: string }> = {
-  Coding: {
-    bg: 'rgba(99, 102, 241, 0.12)',
-    color: '#818cf8',
-    border: 'rgba(99, 102, 241, 0.25)',
-  },
-  Writing: {
-    bg: 'rgba(59, 130, 246, 0.12)',
-    color: '#60a5fa',
-    border: 'rgba(59, 130, 246, 0.25)',
-  },
-  Browsing: {
-    bg: 'rgba(20, 184, 166, 0.12)',
-    color: '#2dd4bf',
-    border: 'rgba(20, 184, 166, 0.25)',
-  },
-  Communication: {
-    bg: 'rgba(16, 185, 129, 0.12)',
-    color: '#34d399',
-    border: 'rgba(16, 185, 129, 0.25)',
-  },
-  Design: {
-    bg: 'rgba(236, 72, 153, 0.12)',
-    color: '#f472b6',
-    border: 'rgba(236, 72, 153, 0.25)',
-  },
-  'Social Media': {
-    bg: 'rgba(245, 158, 11, 0.12)',
-    color: '#fbbf24',
-    border: 'rgba(245, 158, 11, 0.25)',
-  },
-  'Video/Entertainment': {
-    bg: 'rgba(249, 115, 22, 0.12)',
-    color: '#fb923c',
-    border: 'rgba(249, 115, 22, 0.25)',
-  },
-  Idle: {
-    bg: 'rgba(148, 163, 184, 0.1)',
-    color: '#94a3b8',
-    border: 'rgba(148, 163, 184, 0.2)',
-  },
-  Other: {
-    bg: 'rgba(148, 163, 184, 0.1)',
-    color: '#cbd5e1',
-    border: 'rgba(148, 163, 184, 0.2)',
-  },
+const CATEGORY_STYLES: Record<string, { varName: string }> = {
+  Coding: { varName: '--accent-green' },
+  Writing: { varName: '--accent-teal' },
+  Browsing: { varName: '--accent-cyan' },
+  Communication: { varName: '--accent-indigo' },
+  Design: { varName: '--accent-purple' },
+  'Social Media': { varName: '--accent-amber' },
+  'Video/Entertainment': { varName: '--accent-red' },
+  Idle: { varName: '--text-muted' },
+  Other: { varName: '--text-muted' },
 };
 
 export function CategoryBadge({ category }: CategoryBadgeProps) {
-  if (!category || category === 'Unknown') {
+  if (!category || category === 'Unknown' || category === 'Failed') {
+    const isFailed = category === 'Failed';
     return (
-      <span style={{ color: 'var(--text-muted)', fontSize: 12, fontStyle: 'normal' }}>
-        Pending AI analysis…
+      <span style={{ 
+        color: isFailed ? 'var(--accent-red)' : 'var(--text-muted)', 
+        fontSize: 11, 
+        fontStyle: 'normal',
+        fontWeight: 500,
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 6
+      }}>
+        {isFailed && <span style={{ width: 6, height: 6, borderRadius: '50%', backgroundColor: 'var(--accent-red)' }} />}
+        {isFailed ? 'Analysis Failed' : 'Pending AI analysis…'}
       </span>
     );
   }
 
-  const style = CATEGORY_STYLES[category] || CATEGORY_STYLES.Other;
+  const styleConfig = CATEGORY_STYLES[category] || CATEGORY_STYLES.Other;
+  const colorVar = `var(${styleConfig.varName})`;
 
   return (
     <span
+      className="category-badge"
       style={{
         display: 'inline-flex',
         alignItems: 'center',
         gap: 6,
-        padding: '3px 9px',
-        borderRadius: 4,
+        padding: '4px 10px',
+        borderRadius: 'var(--radius-sm)',
         fontSize: 11,
         fontWeight: 600,
-        backgroundColor: style.bg,
-        color: style.color,
-        border: `1px solid ${style.border}`,
-        letterSpacing: '0.2px',
+        backgroundColor: `color-mix(in srgb, ${colorVar} 12%, transparent)`,
+        color: colorVar,
+        border: `1px solid color-mix(in srgb, ${colorVar} 30%, transparent)`,
+        letterSpacing: '0.3px',
+        boxShadow: `0 2px 8px color-mix(in srgb, ${colorVar} 10%, transparent)`,
       }}
     >
-      <span style={{ width: 6, height: 6, borderRadius: '50%', backgroundColor: style.color }} />
+      <span style={{ 
+        width: 6, height: 6, borderRadius: '50%', backgroundColor: colorVar,
+        boxShadow: `0 0 6px ${colorVar}`
+      }} />
       <span>{category}</span>
     </span>
   );

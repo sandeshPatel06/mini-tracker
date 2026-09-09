@@ -3,6 +3,7 @@ package ai
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -240,11 +241,11 @@ func (g *GeminiClient) SelectBestModel(ctx context.Context, exclude map[string]b
 	return "", fmt.Errorf("no working Gemini models available")
 }
 
-// Analyze sends a single screenshot and telemetry to Gemini by wrapping it in AnalyzeBatch.
-func (g *GeminiClient) Analyze(ctx context.Context, base64Image string, entropyScore float64) (*AnalysisResult, error) {
+// Analyze sends window title and telemetry to Gemini by wrapping it in AnalyzeBatch.
+func (g *GeminiClient) Analyze(ctx context.Context, windowTitle string, entropyScore float64) (*AnalysisResult, error) {
 	batchResults, err := g.AnalyzeBatch(ctx, []BatchAnalysisItem{
 		{
-			Base64Image:  base64Image,
+			WindowTitle:  windowTitle,
 			EntropyScore: entropyScore,
 		},
 	})
@@ -272,7 +273,7 @@ func (g *GeminiClient) Analyze(ctx context.Context, base64Image string, entropyS
 // BatchAnalysisItem represents a single screenshot item in a batch request.
 type BatchAnalysisItem struct {
 	LogID         int64
-	Base64Image   string
+	WindowTitle   string
 	EntropyScore  float64
 	ImagePath     string
 	TotalClicks   int
@@ -321,19 +322,19 @@ func (g *GeminiClient) AnalyzeBatch(ctx context.Context, items []BatchAnalysisIt
 			i+1, item.EntropyScore, item.TotalClicks, item.MouseDistance)
 	}
 
-	prompt := fmt.Sprintf(`You are a world-class developer productivity analyst inspecting a sequence of %d desktop screenshots captured from a Linux workstation in chronological order.
+	prompt := fmt.Sprintf(`You are a world-class developer productivity analyst inspecting a sequence of %d desktop window titles captured from a Linux workstation in chronological order.
 
 %s
 
 TELEMETRY CONTEXT (use this data to calibrate scores — do NOT ignore it):
 %s
 
-INSTRUCTIONS FOR EACH SCREENSHOT ITEM:
-1. Multi-Monitor Grid Inspection: If the screenshot is a composite grid of multiple monitors (e.g. Monitor 1 on left, Monitor 2 on right), inspect EACH monitor section individually first. Identify active IDEs, terminals, code diffs, or browser windows across all screens, then combine findings to accurately determine the primary active app.
+INSTRUCTIONS FOR EACH ITEM:
+1. Analyze the 'window_title' string. The application name is often at the end (e.g., "index.tsx - Visual Studio Code" -> app_name="Visual Studio Code").
 2. Identify the primary application (app_name, e.g. VS Code, Terminal, Chrome, Slack, Spotify).
-3. Identify the active window title or file path visible (window_title).
+3. Infer the active document, URL, or context visible in the title.
 4. Classify the app_category (e.g. IDE / Code Editor, Terminal / CLI, Web Browser, Communication, Entertainment).
-5. Select the primary category from: [Coding, Writing, Browsing, Document Editing, Communication, Social Media, Video/Entertainment, Idle, Other].
+5. Select the primary category from exactly one of these: [Coding, Writing, Browsing, Document Editing, Communication, Design, Social Media, Video/Entertainment, Idle, Other].
 6. Compute productivity_score (integer 0-100) dynamically based on TASK ALIGNMENT and TELEMETRY SIGNALS — NEVER default to static or 100%% scores:
    - Task Relevance: Direct work on the stated task = +40 to +60 pts; related docs/research = +30 to +45 pts; unrelated browsing/messaging = +10 to +30 pts; social media/leisure/idle = 0 to 15 pts.
    - Keystroke Entropy > 20: Active typing/writing (+25 pts)
@@ -341,7 +342,7 @@ INSTRUCTIONS FOR EACH SCREENSHOT ITEM:
    - Keystroke Entropy < 8: Reading/idle mode — lowers score unless offset by heavy mouse activity
    - Mouse Distance > 5000px: Active navigation/design work (+10 pts)
    - Mouse Clicks > 20: Interactive workflow (+5 pts)
-   - Combined low entropy + low mouse + off-task screen = score 0-20.
+   - Combined low entropy + low mouse + off-task window title = score 0-20.
 7. Set is_productive=true only if productivity_score >= 50.
 
 CRITICAL FORMATTING REQUIREMENT:
@@ -368,17 +369,26 @@ Respond ONLY with a valid JSON array of %d objects in EXACT input order:
 	}
 
 	for i, item := range items {
-		parts = append(parts, map[string]interface{}{
-			"text": fmt.Sprintf("[Item %d | Entropy: %.1f/100 | Clicks: %d | Mouse Distance: %.0fpx]", i+1, item.EntropyScore, item.TotalClicks, item.MouseDistance),
-		})
-		if item.Base64Image != "" {
-			parts = append(parts, map[string]interface{}{
-				"inline_data": map[string]interface{}{
-					"mime_type": "image/webp",
-					"data":      item.Base64Image,
-				},
-			})
+		if item.ImagePath != "" {
+			if data, err := os.ReadFile(item.ImagePath); err == nil {
+				imgBase64 := base64.StdEncoding.EncodeToString(data)
+				mimeType := "image/webp"
+				if strings.HasSuffix(item.ImagePath, ".png") {
+					mimeType = "image/png"
+				} else if strings.HasSuffix(item.ImagePath, ".jpg") || strings.HasSuffix(item.ImagePath, ".jpeg") {
+					mimeType = "image/jpeg"
+				}
+				parts = append(parts, map[string]interface{}{
+					"inlineData": map[string]interface{}{
+						"mimeType": mimeType,
+						"data":     imgBase64,
+					},
+				})
+			}
 		}
+		parts = append(parts, map[string]interface{}{
+			"text": fmt.Sprintf("[Item %d | Title: %q | Entropy: %.1f/100 | Clicks: %d | Mouse Distance: %.0fpx]", i+1, item.WindowTitle, item.EntropyScore, item.TotalClicks, item.MouseDistance),
+		})
 	}
 
 	reqPayload := map[string]interface{}{
@@ -552,16 +562,13 @@ func (g *GeminiClient) executeAnalysis(ctx context.Context, modelName string, re
 }
 
 // buildGeminiRequest constructs the Gemini API request body with JSON response enforcement.
-func buildGeminiRequest(prompt, base64Image string) map[string]interface{} {
+func buildGeminiRequest(prompt, windowTitle string) map[string]interface{} {
 	parts := []map[string]interface{}{
 		{"text": prompt},
 	}
-	if base64Image != "" {
+	if windowTitle != "" {
 		parts = append(parts, map[string]interface{}{
-			"inline_data": map[string]interface{}{
-				"mime_type": "image/webp",
-				"data":      base64Image,
-			},
+			"text": fmt.Sprintf("Window Title: %q", windowTitle),
 		})
 	}
 

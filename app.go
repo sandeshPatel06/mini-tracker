@@ -42,6 +42,10 @@ type App struct {
 	latestKeyStats   tracker.KeystrokeStats
 	latestMouseStats tracker.MouseStats
 	activeTask       string
+
+	isTrackingActive bool
+	trackerStartTime time.Time
+	accumulatedSec   int64
 }
 
 // NewApp creates a new App application struct.
@@ -103,6 +107,9 @@ func (a *App) startup(ctx context.Context) {
 		}()
 	}
 
+	a.isTrackingActive = true
+	a.trackerStartTime = time.Now()
+
 	// Main collection loop — fires every ScreenshotInterval
 	go func() {
 		dur := cfg.ScreenshotInterval
@@ -125,6 +132,12 @@ func (a *App) startup(ctx context.Context) {
 					a.statsMu.Unlock()
 				}
 			case <-ticker.C:
+				a.statsMu.Lock()
+				active := a.isTrackingActive
+				a.statsMu.Unlock()
+				if !active {
+					continue
+				}
 				a.collect()
 			}
 		}
@@ -204,11 +217,19 @@ func (a *App) collect() {
 	a.latestMouseStats = tracker.MouseStats{}
 	a.statsMu.Unlock()
 
-	// Screenshot
-	shot, err := tracker.CaptureScreenshot(a.cfg.DataDir)
+	winRes, err := tracker.GetActiveWindowTitle()
+	windowTitle := ""
 	if err != nil {
-		log.Printf("[app] screenshot error: %v", err)
-		shot = &tracker.ScreenshotResult{}
+		log.Printf("[app] window title error: %v", err)
+	} else if winRes != nil {
+		windowTitle = winRes.Title
+	}
+
+	imagePath := ""
+	if res, err := tracker.CaptureScreenshot(a.cfg.DataDir); err != nil {
+		log.Printf("[app] screenshot capture error: %v", err)
+	} else if res != nil {
+		imagePath = res.FilePath
 	}
 
 	syncStatus := "pending_upload"
@@ -218,7 +239,8 @@ func (a *App) collect() {
 
 	entry := &db.LogEntry{
 		Timestamp:     time.Now(),
-		ImagePath:     shot.FilePath,
+		ImagePath:     imagePath,
+		WindowTitle:   windowTitle,
 		TotalKeys:     keyStats.TotalKeys,
 		UniqueKeys:    keyStats.UniqueKeys,
 		EntropyScore:  keyStats.EntropyScore,
@@ -239,11 +261,11 @@ func (a *App) collect() {
 
 	if a.isGuest {
 		// Guest Mode: Perform direct client-side local Gemini AI analysis
-		go func(logID int64, b64Data string, score float64) {
+		go func(logID int64, title string, score float64) {
 			ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 			defer cancel()
 
-			if result, err := a.gemini.Analyze(ctx, b64Data, score); err == nil {
+			if result, err := a.gemini.Analyze(ctx, title, score); err == nil {
 				if err := a.database.UpdateAIResult(logID, result.Category, result.Productive, result.Confidence, result.Reason); err != nil {
 					log.Printf("[app] update local AI result error: %v", err)
 				}
@@ -253,7 +275,7 @@ func (a *App) collect() {
 			} else {
 				log.Printf("[app] guest AI analysis offline/error for #%d: %v — leaving log pending for re-analysis", logID, err)
 			}
-		}(id, shot.Base64Data, keyStats.EntropyScore)
+		}(id, windowTitle, keyStats.EntropyScore)
 	} else {
 		// Authenticated Mode: Push raw telemetry to backend
 		go func() {
@@ -328,7 +350,6 @@ func (a *App) shutdown(_ context.Context) {
 	a.statsMu.Unlock()
 
 	if a.database != nil && (keyStats.TotalKeys > 0 || mouseStats.TotalClicks > 0 || mouseStats.MouseDistance > 0) {
-		shot := &tracker.ScreenshotResult{} // no screenshot on shutdown flush
 		syncStatus := "local_only"
 		if !a.isGuest {
 			syncStatus = "pending_upload"
@@ -336,7 +357,7 @@ func (a *App) shutdown(_ context.Context) {
 		if _, err := a.database.InsertLog(&db.LogEntry{
 			OrgID:         0,
 			UserID:        0,
-			ImagePath:     shot.FilePath,
+			ImagePath:     "",
 			TotalKeys:     keyStats.TotalKeys,
 			UniqueKeys:    keyStats.UniqueKeys,
 			EntropyScore:  keyStats.EntropyScore,
@@ -384,8 +405,65 @@ func (a *App) GetLogsByDate(date string) ([]db.LogEntry, error) {
 	return a.database.GetLogsForDate(date)
 }
 
-// GetTodayTrackedSeconds returns total accumulated tracked seconds for today from the DB.
+// ToggleTracking starts or pauses tracking session.
+func (a *App) ToggleTracking() (map[string]interface{}, error) {
+	a.statsMu.Lock()
+	defer a.statsMu.Unlock()
+
+	if a.isTrackingActive {
+		if !a.trackerStartTime.IsZero() {
+			a.accumulatedSec += int64(time.Since(a.trackerStartTime).Seconds())
+		}
+		a.isTrackingActive = false
+		a.latestKeyStats = tracker.KeystrokeStats{}
+		a.latestMouseStats = tracker.MouseStats{}
+	} else {
+		a.trackerStartTime = time.Now()
+		a.isTrackingActive = true
+	}
+
+	elapsed := a.accumulatedSec
+	if a.isTrackingActive && !a.trackerStartTime.IsZero() {
+		elapsed += int64(time.Since(a.trackerStartTime).Seconds())
+	}
+
+	log.Printf("[app] tracking toggled — active: %v, elapsed: %ds", a.isTrackingActive, elapsed)
+	return map[string]interface{}{
+		"active":          a.isTrackingActive,
+		"elapsed_seconds": elapsed,
+	}, nil
+}
+
+// GetTrackingStatus returns current tracking state and accumulated elapsed time.
+func (a *App) GetTrackingStatus() map[string]interface{} {
+	a.statsMu.Lock()
+	defer a.statsMu.Unlock()
+
+	elapsed := a.accumulatedSec
+	if a.isTrackingActive && !a.trackerStartTime.IsZero() {
+		elapsed += int64(time.Since(a.trackerStartTime).Seconds())
+	}
+
+	return map[string]interface{}{
+		"active":          a.isTrackingActive,
+		"elapsed_seconds": elapsed,
+	}
+}
+
+// GetTodayTrackedSeconds returns total accumulated tracked seconds for today.
 func (a *App) GetTodayTrackedSeconds() int64 {
+	a.statsMu.Lock()
+	active := a.isTrackingActive
+	startTime := a.trackerStartTime
+	accum := a.accumulatedSec
+	a.statsMu.Unlock()
+
+	if active && !startTime.IsZero() {
+		return accum + int64(time.Since(startTime).Seconds())
+	}
+	if accum > 0 {
+		return accum
+	}
 	if a.database == nil || a.cfg == nil {
 		return 0
 	}
@@ -403,6 +481,12 @@ func (a *App) GetStats(date string) (*db.ProductivityStats, error) {
 // RecordInputActivity allows the frontend desktop application to report user keystroke activity
 // without requiring root/sudo/evdev input group permissions on Linux.
 func (a *App) RecordInputActivity(totalKeys, uniqueKeys int) {
+	a.statsMu.Lock()
+	active := a.isTrackingActive
+	a.statsMu.Unlock()
+	if !active {
+		return
+	}
 	if a.keyTracker != nil {
 		a.keyTracker.RecordKeystrokes(totalKeys, uniqueKeys)
 	}
@@ -411,6 +495,12 @@ func (a *App) RecordInputActivity(totalKeys, uniqueKeys int) {
 // RecordMouseActivity allows the frontend desktop application to report mouse clicks and movement
 // without requiring root/sudo/evdev input group permissions on Linux.
 func (a *App) RecordMouseActivity(clicks int, distancePx float64) {
+	a.statsMu.Lock()
+	active := a.isTrackingActive
+	a.statsMu.Unlock()
+	if !active {
+		return
+	}
 	if a.mouseTracker != nil {
 		a.mouseTracker.RecordMouseActivity(clicks, distancePx)
 	}
@@ -554,20 +644,13 @@ func (a *App) ProcessPendingLogs() (int, error) {
 	processed := 0
 
 	for _, entry := range logs {
-		var b64 string
-		if entry.ImagePath != "" {
-			data, err := os.ReadFile(entry.ImagePath)
-			if err == nil {
-				b64 = base64.StdEncoding.EncodeToString(data)
-			}
-		}
-
 		ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
-		res, err := a.gemini.Analyze(ctx, b64, entry.EntropyScore)
+		res, err := a.gemini.Analyze(ctx, entry.WindowTitle, entry.EntropyScore)
 		cancel()
 
 		if err != nil {
-			log.Printf("[app] re-analyze log #%d error: %v — leaving pending for retry", entry.ID, err)
+			log.Printf("[app] re-analyze log #%d error: %v — incrementing retry count", entry.ID, err)
+			_ = a.database.IncrementAIRetryCount(entry.ID)
 			continue
 		}
 

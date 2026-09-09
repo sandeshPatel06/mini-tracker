@@ -6,6 +6,10 @@ export function ClearAllLocalData() {
   return window['go']['main']['App']['ClearAllLocalData']();
 }
 
+export function GetActiveTask() {
+  return window['go']['main']['App']['GetActiveTask']();
+}
+
 export function GetConfig() {
   return window['go']['main']['App']['GetConfig']();
 }
@@ -26,6 +30,14 @@ export function GetTodayLogs() {
   return window['go']['main']['App']['GetTodayLogs']();
 }
 
+export function GetTodayTrackedSeconds() {
+  return window['go']['main']['App']['GetTodayTrackedSeconds']();
+}
+
+export function GetTrackingStatus() {
+  return window['go']['main']['App']['GetTrackingStatus']();
+}
+
 export function OpenTrackerWizard(arg1) {
   return window['go']['main']['App']['OpenTrackerWizard'](arg1);
 }
@@ -38,6 +50,14 @@ export function RecordInputActivity(arg1, arg2) {
   return window['go']['main']['App']['RecordInputActivity'](arg1, arg2);
 }
 
+export function RecordMouseActivity(arg1, arg2) {
+  return window['go']['main']['App']['RecordMouseActivity'](arg1, arg2);
+}
+
+export function SetActiveTask(arg1) {
+  return window['go']['main']['App']['SetActiveTask'](arg1);
+}
+
 export function SetAuthSession(arg1, arg2) {
   return window['go']['main']['App']['SetAuthSession'](arg1, arg2);
 }
@@ -48,6 +68,10 @@ export function SetOrgGeminiKey(arg1, arg2) {
 
 export function SetUserPersonalKey(arg1) {
   return window['go']['main']['App']['SetUserPersonalKey'](arg1);
+}
+
+export function ToggleTracking() {
+  return window['go']['main']['App']['ToggleTracking']();
 }
 
 export function TriggerSyncNow() {

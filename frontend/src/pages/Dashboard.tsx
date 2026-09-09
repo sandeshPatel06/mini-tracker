@@ -95,7 +95,7 @@ export default function Dashboard({ logs, stats, config, loading, today, onRefre
   const avgProductivityScore = analyzedLogs.length > 0
     ? Math.round(
         analyzedLogs.reduce(
-          (acc, l) => acc + (l.productive_score !== undefined && l.productive_score > 0 ? l.productive_score : l.is_productive ? 100 : 0),
+          (acc, l) => acc + (typeof l.productive_score === 'number' ? l.productive_score : l.is_productive ? 100 : 0),
           0
         ) / analyzedLogs.length
       )
@@ -225,44 +225,23 @@ export default function Dashboard({ logs, stats, config, loading, today, onRefre
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          {pendingCount > 0 && (
-            <button
-              onClick={handleProcessPending}
-              disabled={processingPending}
-              className="btn btn-secondary"
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 6,
-                height: 36,
-                padding: '0 14px',
-                fontSize: 13,
-                fontWeight: 500,
-                whiteSpace: 'nowrap',
-              }}
-            >
-              <Icon name="sparkles" size={14} />
-              <span>{processingPending ? 'Analyzing...' : `Analyze ${pendingCount} Pending`}</span>
-            </button>
-          )}
-
           {onRefresh && (
             <button
               onClick={onRefresh}
-              className="btn btn-secondary"
+              className="btn btn-secondary btn-sm"
               title="Refresh Dashboard Data"
               style={{
                 display: 'inline-flex',
                 alignItems: 'center',
                 gap: 6,
-                height: 36,
-                padding: '0 14px',
-                fontSize: 13,
+                height: 34,
+                padding: '0 12px',
+                fontSize: 12,
                 fontWeight: 500,
                 whiteSpace: 'nowrap',
               }}
             >
-              <Icon name="refresh" size={14} />
+              <Icon name="refresh" size={13} />
               <span>Refresh</span>
             </button>
           )}
@@ -276,28 +255,28 @@ export default function Dashboard({ logs, stats, config, loading, today, onRefre
           value={`${avgProductivityScore}%`}
           sub={`Evaluated dynamically by Gemini AI vision`}
           iconName="target"
-          iconColor={avgProductivityScore >= 70 ? '#10b981' : avgProductivityScore >= 50 ? '#eab308' : '#ef4444'}
+          iconColor={avgProductivityScore >= 70 ? 'var(--accent-green)' : avgProductivityScore >= 50 ? 'var(--accent-amber)' : 'var(--accent-red)'}
         />
         <StatCard
           label="Total Keystrokes"
           value={totalKeys.toLocaleString()}
           sub="Recorded active keyboard activity"
           iconName="keyboard"
-          iconColor="#6366f1"
+          iconColor="var(--accent-indigo)"
         />
         <StatCard
           label="Keystroke Variety (Entropy)"
           value={avgEntropy.toFixed(1)}
           sub="Typing complexity score (0 - 100)"
           iconName="activity"
-          iconColor="#06b6d4"
+          iconColor="var(--accent-cyan)"
         />
         <StatCard
           label="Top Application"
           value={topApps[0]?.appName || stats?.top_category || '—'}
           sub={topApps[0] ? `${topApps[0].percent}% of work time` : `${logs.length} snapshots recorded`}
           iconName="award"
-          iconColor="#eab308"
+          iconColor="var(--accent-teal)"
         />
       </div>
 
@@ -341,11 +320,11 @@ export default function Dashboard({ logs, stats, config, loading, today, onRefre
                       key={`cell-${index}`}
                       fill={
                         entry.score >= 75
-                          ? '#10b981'
+                          ? 'var(--accent-green)'
                           : entry.score >= 50
-                          ? '#6366f1'
+                          ? 'var(--accent-indigo)'
                           : entry.score > 0
-                          ? '#f59e0b'
+                          ? 'var(--accent-amber)'
                           : 'var(--border-subtle)'
                       }
                     />
@@ -394,7 +373,7 @@ export default function Dashboard({ logs, stats, config, loading, today, onRefre
                       style={{
                         width: `${app.percent}%`,
                         height: '100%',
-                        backgroundColor: app.avgScore >= 70 ? '#10b981' : app.avgScore >= 50 ? '#6366f1' : '#ef4444',
+                        backgroundColor: app.avgScore >= 70 ? 'var(--accent-green)' : app.avgScore >= 50 ? 'var(--accent-indigo)' : 'var(--accent-red)',
                         borderRadius: 99,
                       }}
                     />
@@ -489,7 +468,7 @@ export default function Dashboard({ logs, stats, config, loading, today, onRefre
 
       {/* Activity Stream Feed */}
       <div className="card">
-        <div className="card-header" style={{ padding: '16px 20px', borderBottom: '1px solid var(--border-subtle)' }}>
+        <div className="card-header" style={{ padding: '14px 18px', borderBottom: '1px solid var(--border-subtle)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
           <div>
             <span className="card-title" style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-primary)', textTransform: 'none', letterSpacing: '0' }}>
               Activity Stream & AI Evaluations
@@ -498,9 +477,22 @@ export default function Dashboard({ logs, stats, config, loading, today, onRefre
               Detailed productivity logs with AI percentages, active apps, and screenshot inspection
             </div>
           </div>
-          <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-            Click thumbnail to inspect full resolution screenshot
-          </span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            {pendingCount > 0 && (
+              <button
+                onClick={handleProcessPending}
+                disabled={processingPending}
+                className="btn btn-secondary btn-sm"
+                style={{ fontSize: 12, height: 30, padding: '0 10px' }}
+              >
+                <Icon name="sparkles" size={13} />
+                <span>{processingPending ? 'Analyzing...' : `Analyze ${pendingCount} Pending`}</span>
+              </button>
+            )}
+            <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+              Latest 10 captures
+            </span>
+          </div>
         </div>
 
         <div className="card-body" style={{ padding: '12px 16px' }}>
@@ -517,7 +509,7 @@ export default function Dashboard({ logs, stats, config, loading, today, onRefre
           ) : (
             <div className="timeline-list">
               {recent.map((log) => {
-                const scoreVal = log.productive_score !== undefined && log.productive_score > 0
+                const scoreVal = typeof log.productive_score === 'number'
                   ? Math.round(log.productive_score)
                   : log.is_productive ? 100 : 0;
                 return (
@@ -561,7 +553,27 @@ export default function Dashboard({ logs, stats, config, loading, today, onRefre
                           </span>
                         )}
                       </div>
-                      <div className="timeline-reason">{log.ai_reason || '—'}</div>
+
+                      {log.window_title && (
+                        <div
+                          title={log.window_title}
+                          style={{
+                            fontSize: 12,
+                            fontWeight: 600,
+                            color: 'var(--text-primary)',
+                            marginTop: 4,
+                            whiteSpace: 'nowrap',
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                          }}
+                        >
+                          🪟 {log.window_title}
+                        </div>
+                      )}
+
+                      <div className="timeline-reason" style={{ marginTop: 2 }}>
+                        {log.ai_reason || '—'}
+                      </div>
                     </div>
 
                     <div>
@@ -581,7 +593,7 @@ export default function Dashboard({ logs, stats, config, loading, today, onRefre
                             name={scoreVal >= 50 ? 'check' : 'x'}
                             size={13}
                           />
-                          {scoreVal}% Focus Rating
+                          {scoreVal}% Focus
                         </span>
                       )}
                     </div>

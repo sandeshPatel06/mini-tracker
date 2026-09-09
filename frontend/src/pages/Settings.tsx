@@ -236,7 +236,7 @@ export function SettingsPage({ theme = 'auto', onThemeChange }: SettingsPageProp
                     padding: 14,
                     borderRadius: 'var(--radius-md)',
                     border: '1.5px solid',
-                    borderColor: theme === t.id ? 'var(--accent-purple)' : 'var(--border-subtle)',
+                    borderColor: theme === t.id ? 'var(--accent-primary)' : 'var(--border-subtle)',
                     background: theme === t.id ? 'var(--bg-elevated)' : 'var(--bg-surface)',
                     cursor: 'pointer',
                     transition: 'var(--transition)',
@@ -245,7 +245,7 @@ export function SettingsPage({ theme = 'auto', onThemeChange }: SettingsPageProp
                     gap: 4
                   }}
                 >
-                  <div style={{ fontWeight: 700, fontSize: 13, color: theme === t.id ? 'var(--accent-teal)' : 'var(--text-primary)' }}>
+                  <div style={{ fontWeight: 700, fontSize: 13, color: theme === t.id ? 'var(--accent-primary)' : 'var(--text-primary)' }}>
                     {t.title}
                   </div>
                   <div style={{ fontSize: 11, color: 'var(--text-secondary)' }}>
@@ -332,7 +332,7 @@ export function SettingsPage({ theme = 'auto', onThemeChange }: SettingsPageProp
                     <option value="models/gemma-4-31b-it">Gemini 2.5 Flash (Fast & Recommended)</option>
                     <option value="models/gemini-2.5-pro">Gemini 2.5 Pro (Deep Reasoning)</option>
                     <option value="models/Gemma 4 31B IT">Gemini 2.0 Flash</option>
-                    <option value="models/gemma-4-31b-it">Gemma 4 31B IT (Open Weights Multimodal Fallback)</option>
+                    <option value="models/gemma-2-27b-it">Gemma 2 27B IT (Open Multimodal Fallback)</option>
                   </>
                 )}
               </select>

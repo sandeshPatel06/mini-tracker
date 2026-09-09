@@ -22,12 +22,13 @@ interface Props {
 }
 
 const COLORS = {
-  productive:   '#10b981',
-  unproductive: '#ef4444',
-  entropy:      '#6366f1',
-  teal:         '#2dd4bf',
-  amber:        '#f59e0b',
-  purple:       '#8b5cf6',
+  productive:   'var(--accent-green)',
+  unproductive: 'var(--accent-red)',
+  entropy:      'var(--accent-indigo)',
+  teal:         'var(--accent-teal)',
+  amber:        'var(--accent-amber)',
+  purple:       'var(--accent-purple)',
+  cyan:         'var(--accent-cyan)',
 };
 
 // Custom Tooltip Component
@@ -35,12 +36,14 @@ const CustomTooltip = ({ active, payload, label }: { active?: boolean; payload?:
   if (!active || !payload?.length) return null;
   return (
     <div style={{
-      background: 'var(--bg-surface)',
+      background: 'var(--bg-glass)',
+      backdropFilter: 'blur(8px)',
+      WebkitBackdropFilter: 'blur(8px)',
       border: '1px solid var(--border-medium)',
       borderRadius: 'var(--radius-md)',
       padding: '10px 14px',
       fontSize: 12,
-      boxShadow: 'var(--shadow-md)',
+      boxShadow: '0 4px 15px rgba(0, 0, 0, 0.2), inset 0 1px 1px rgba(255, 255, 255, 0.05)',
       color: 'var(--text-primary)',
     }}>
       <div style={{ color: 'var(--text-muted)', marginBottom: 6, fontWeight: 600 }}>{label}</div>
@@ -91,7 +94,7 @@ export default function Analytics({
   const avgFocusScore = useMemo(() => {
     if (analyzedLogs.length === 0) return 0;
     return Math.round(
-      analyzedLogs.reduce((acc, l) => acc + (l.productive_score !== undefined && l.productive_score > 0 ? l.productive_score : l.is_productive ? 100 : 0), 0) / analyzedLogs.length
+      analyzedLogs.reduce((acc, l) => acc + (typeof l.productive_score === 'number' ? l.productive_score : l.is_productive ? 100 : 0), 0) / analyzedLogs.length
     );
   }, [analyzedLogs]);
 
@@ -100,7 +103,7 @@ export default function Analytics({
     return Array.from({ length: 24 }, (_, h) => {
       const hourLogs = logs.filter(l => new Date(l.timestamp).getHours() === h);
       if (hourLogs.length === 0) return null;
-      const totalScore = hourLogs.reduce((acc, l) => acc + (l.productive_score !== undefined && l.productive_score > 0 ? l.productive_score : l.is_productive ? 100 : 0), 0);
+      const totalScore = hourLogs.reduce((acc, l) => acc + (typeof l.productive_score === 'number' ? l.productive_score : l.is_productive ? 100 : 0), 0);
       const avgScore = Math.round(totalScore / hourLogs.length);
       return {
         hour: `${String(h).padStart(2, '0')}:00`,
@@ -119,7 +122,7 @@ export default function Analytics({
         appMap[app] = { count: 0, category: l.app_category || 'Application', totalScore: 0 };
       }
       appMap[app].count++;
-      appMap[app].totalScore += l.productive_score !== undefined && l.productive_score > 0 ? l.productive_score : l.is_productive ? 100 : 0;
+      appMap[app].totalScore += typeof l.productive_score === 'number' ? l.productive_score : l.is_productive ? 100 : 0;
     });
 
     const total = logs.length || 1;
@@ -159,7 +162,7 @@ export default function Analytics({
 
   const PIE_COLORS = [
     COLORS.entropy, COLORS.teal, COLORS.amber, COLORS.productive,
-    '#8b5cf6', '#ec4899', '#f97316', '#06b6d4',
+    COLORS.purple, COLORS.cyan, 'var(--accent-red)'
   ];
 
   const dateLabel = startDate && endDate && startDate !== endDate
@@ -266,22 +269,26 @@ export default function Analytics({
           <div className="stats-grid">
             <div className="stat-card">
               <span className="stat-label">AI Focus Rating</span>
-              <div className="stat-value" style={{ color: avgFocusScore >= 70 ? '#10b981' : '#6366f1' }}>
+              <div className="stat-value" style={{ color: avgFocusScore >= 70 ? 'var(--accent-green)' : 'var(--accent-primary)' }}>
                 {avgFocusScore}%
               </div>
-              <div className="stat-sub">Average AI evaluation across all captures</div>
+              <div className="stat-sub">{analyzedLogs.length} of {logs.length} captures evaluated</div>
             </div>
 
             <div className="stat-card">
-              <span className="stat-label">Total Captures</span>
-              <div className="stat-value">{logs.length}</div>
-              <div className="stat-sub">{analyzedLogs.length} analyzed by AI vision</div>
+              <span className="stat-label">Active Work Duration</span>
+              <div className="stat-value">
+                {logs.length > 0 ? (logs.length * 0.5 >= 60 ? `${(logs.length * 0.5 / 60).toFixed(1)} hrs` : `${Math.round(logs.length * 0.5)} mins`) : '0 mins'}
+              </div>
+              <div className="stat-sub">Based on {logs.length} background telemetry points</div>
             </div>
 
             <div className="stat-card">
-              <span className="stat-label">Top Desktop App</span>
-              <div className="stat-value">{appData[0]?.name || '—'}</div>
-              <div className="stat-sub">{appData[0] ? `${appData[0].percent}% of total work time` : '—'}</div>
+              <span className="stat-label">Avg Input Telemetry</span>
+              <div className="stat-value">
+                {logs.length > 0 ? Math.round(logs.reduce((acc, l) => acc + l.total_keys, 0) / logs.length) : 0} <span style={{ fontSize: 14, fontWeight: 500, color: 'var(--text-muted)' }}>keys / cap</span>
+              </div>
+              <div className="stat-sub">Average keystrokes per 30s capture interval</div>
             </div>
           </div>
 

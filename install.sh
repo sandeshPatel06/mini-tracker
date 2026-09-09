@@ -313,20 +313,43 @@ rm -f "${PIXMAP_DIR}/mini-tracker.png" "${PIXMAP_DIR}/mini-tracker-server.png" "
 
 # Install application icon across system & user icon paths
 ICON_SOURCE=""
-if [ -f "frontend/src/assets/logo.png" ]; then
+if [ -f "${SCRIPT_DIR}/frontend/src/assets/logo.png" ]; then
+    ICON_SOURCE="${SCRIPT_DIR}/frontend/src/assets/logo.png"
+elif [ -f "frontend/src/assets/logo.png" ]; then
     ICON_SOURCE="frontend/src/assets/logo.png"
-elif [ -f "build/appicon.png" ]; then
-    ICON_SOURCE="build/appicon.png"
+elif [ -f "${SCRIPT_DIR}/frontend/src/assets/images/logo-universal.png" ]; then
+    ICON_SOURCE="${SCRIPT_DIR}/frontend/src/assets/images/logo-universal.png"
 elif [ -f "frontend/src/assets/images/logo-universal.png" ]; then
     ICON_SOURCE="frontend/src/assets/images/logo-universal.png"
+elif [ -f "${SCRIPT_DIR}/build/appicon.png" ]; then
+    ICON_SOURCE="${SCRIPT_DIR}/build/appicon.png"
+elif [ -f "build/appicon.png" ]; then
+    ICON_SOURCE="build/appicon.png"
 fi
 
 INSTALLED_ICON_PATH="${INSTALL_DIR}/get-hike.png"
-if [ -n "${ICON_SOURCE}" ]; then
+
+# Remote download fallback if installer is run outside repository (e.g., via curl or from temp dir)
+if [ -z "${ICON_SOURCE}" ] || [ ! -f "${ICON_SOURCE}" ]; then
+    log "📥 Remote or standalone execution detected. Downloading logo icon from repository..."
+    mkdir -p "${INSTALL_DIR}"
+    if curl -sSL --fail "https://raw.githubusercontent.com/sandeshPatel06/mini-tracker/main/frontend/src/assets/logo.png" -o "${INSTALLED_ICON_PATH}" 2>/dev/null; then
+        ICON_SOURCE="${INSTALLED_ICON_PATH}"
+        log "✅ Downloaded remote app logo icon to ${INSTALLED_ICON_PATH}"
+    fi
+fi
+
+if [ -n "${ICON_SOURCE}" ] && [ -f "${ICON_SOURCE}" ]; then
     cp -f "${ICON_SOURCE}" "${INSTALLED_ICON_PATH}"
+    cp -f "${ICON_SOURCE}" "${INSTALL_DIR}/logo.png"
     cp -f "${ICON_SOURCE}" "${ICON_DIR}/get-hike.png"
+    cp -f "${ICON_SOURCE}" "${ICON_DIR}/mini-tracker.png"
     cp -f "${ICON_SOURCE}" "${PIXMAP_DIR}/get-hike.png"
-    log "✅ Installed custom app icon."
+    cp -f "${ICON_SOURCE}" "${PIXMAP_DIR}/mini-tracker.png"
+    chmod 644 "${INSTALLED_ICON_PATH}" "${INSTALL_DIR}/logo.png" "${ICON_DIR}/get-hike.png" "${PIXMAP_DIR}/get-hike.png" 2>/dev/null || true
+    log "✅ Installed custom app icon to ${INSTALLED_ICON_PATH} and system icon themes."
+else
+    log "⚠️ Warning: Custom app icon source could not be resolved."
 fi
 
 # Create Primary get-Hike .desktop entry
@@ -347,10 +370,23 @@ StartupWMClass=get-hike
 WMClass=get-hike
 EOF
 chmod 755 "${DESKTOP_ENTRY_FILE}"
+gio set "${DESKTOP_ENTRY_FILE}" metadata::trusted true 2>/dev/null || true
 
 AUTOSTART_FILE="${AUTOSTART_DIR}/get-hike.desktop"
 cp -f "${DESKTOP_ENTRY_FILE}" "${AUTOSTART_FILE}"
 chmod 755 "${AUTOSTART_FILE}"
+
+# Also install launcher to user's Desktop folder if present
+USER_DESKTOP_DIR="${REAL_HOME}/Desktop"
+if [ -d "${USER_DESKTOP_DIR}" ]; then
+    cp -f "${DESKTOP_ENTRY_FILE}" "${USER_DESKTOP_DIR}/get-hike.desktop"
+    chmod 755 "${USER_DESKTOP_DIR}/get-hike.desktop"
+    gio set "${USER_DESKTOP_DIR}/get-hike.desktop" metadata::trusted true 2>/dev/null || true
+    if [ "${IS_SUDO}" = true ] && [ "${REAL_USER}" != "root" ]; then
+        chown "${REAL_USER}:${REAL_GROUP}" "${USER_DESKTOP_DIR}/get-hike.desktop" 2>/dev/null || true
+    fi
+    log "✅ Installed desktop launcher to ${USER_DESKTOP_DIR}/get-hike.desktop"
+fi
 
 if command -v update-desktop-database >/dev/null 2>&1; then
     update-desktop-database "${APPLICATIONS_DIR}" 2>/dev/null || true
@@ -360,6 +396,8 @@ if command -v gtk-update-icon-cache >/dev/null 2>&1; then
     gtk-update-icon-cache -f -t "$(dirname "${ICON_DIR}")" 2>/dev/null || true
     gtk-update-icon-cache -f -t "${REAL_HOME}/.local/share/icons/hicolor" 2>/dev/null || true
 fi
+touch "${ICON_DIR}/.." 2>/dev/null || true
+touch "${REAL_HOME}/.local/share/icons/hicolor" 2>/dev/null || true
 log "✅ Created Desktop & Autostart launchers with custom icon."
 
 # ==============================================================================

@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - main
+  pull_request:
+    branches:
+      - main
 
 permissions:
   contents: write
@@ -58,6 +61,7 @@ jobs:
           (cd bin && sha256sum get-hike get-hike-server mini-tracker mini-tracker-server > checksums.txt)
 
       - name: Create Release Notes & Publish Release
+        if: github.event_name == 'push'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -102,4 +106,3 @@ jobs:
             bin/checksums.txt \
             --title "get-Hike $TAG_NAME ($SHORT_SHA)" \
             --notes-file release_notes.md
-

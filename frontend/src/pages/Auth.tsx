@@ -12,6 +12,7 @@ export function AuthPage({ onAuthSuccess, onSkip }: AuthProps) {
   const [isLogin, setIsLogin] = useState(true);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [fullName, setFullName] = useState('');
   const [orgName, setOrgName] = useState('');
   const [loading, setLoading] = useState(false);
@@ -19,28 +20,54 @@ export function AuthPage({ onAuthSuccess, onSkip }: AuthProps) {
   const [error, setError] = useState('');
 
   const pollTimerRef = React.useRef<any>(null);
+  const oauthTimeoutRef = React.useRef<any>(null);
+  const pollCountRef = React.useRef(0);
 
   React.useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const authErr = params.get('error');
     if (authErr) {
-      setError(decodeURIComponent(authErr));
+      try {
+        setError(decodeURIComponent(authErr));
+      } catch {
+        setError(authErr);
+      }
     }
 
     return () => {
       if (pollTimerRef.current) clearInterval(pollTimerRef.current);
+      if (oauthTimeoutRef.current) clearTimeout(oauthTimeoutRef.current);
     };
   }, []);
 
+  const stopAuthPolling = () => {
+    if (pollTimerRef.current) {
+      clearInterval(pollTimerRef.current);
+      pollTimerRef.current = null;
+    }
+    if (oauthTimeoutRef.current) {
+      clearTimeout(oauthTimeoutRef.current);
+      oauthTimeoutRef.current = null;
+    }
+  };
+
   const startAuthPolling = () => {
     if (pollTimerRef.current) clearInterval(pollTimerRef.current);
+    pollCountRef.current = 0;
     pollTimerRef.current = setInterval(async () => {
+      pollCountRef.current += 1;
+      if (pollCountRef.current > 40) {
+        stopAuthPolling();
+        setOauthLoading(null);
+        setError('Sign-in was cancelled or timed out. Try again.');
+        return;
+      }
       try {
         const res = await apiFetch('/api/auth/me');
         if (res.ok) {
           const data = await res.json();
           if (data.authenticated && data.user) {
-            if (pollTimerRef.current) clearInterval(pollTimerRef.current);
+            stopAuthPolling();
             setOauthLoading(null);
             onAuthSuccess(data.user, data.org || null);
           }
@@ -49,6 +76,11 @@ export function AuthPage({ onAuthSuccess, onSkip }: AuthProps) {
         // Continue polling silently until auth completes
       }
     }, 1500);
+  };
+
+  const cancelOAuth = () => {
+    stopAuthPolling();
+    setOauthLoading(null);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -84,12 +116,17 @@ export function AuthPage({ onAuthSuccess, onSkip }: AuthProps) {
   const handleOAuth = (provider: 'google' | 'azure') => {
     setError('');
     setOauthLoading(provider);
-    
+
     const redirectTarget = encodeURIComponent('/auth-success');
     const targetUrl = buildApiUrl(`/api/auth/oauth/${provider}?redirect=${redirectTarget}`);
 
     // Begin background polling for login completion
     startAuthPolling();
+    oauthTimeoutRef.current = setTimeout(() => {
+      stopAuthPolling();
+      setOauthLoading(null);
+      setError('Sign-in was cancelled or timed out. Try again.');
+    }, 60000);
 
     // Trigger external system browser opening to avoid webview disallowed_useragent errors
     if ((window as any).runtime?.BrowserOpenURL) {
@@ -115,9 +152,11 @@ export function AuthPage({ onAuthSuccess, onSkip }: AuthProps) {
         </div>
 
         {/* Tab Selector */}
-        <div className="auth-tabs">
+        <div className="auth-tabs" role="tablist">
           <button
             type="button"
+            role="tab"
+            aria-selected={isLogin}
             className={`auth-tab ${isLogin ? 'active' : ''}`}
             onClick={() => { setIsLogin(true); setError(''); }}
           >
@@ -125,6 +164,8 @@ export function AuthPage({ onAuthSuccess, onSkip }: AuthProps) {
           </button>
           <button
             type="button"
+            role="tab"
+            aria-selected={!isLogin}
             className={`auth-tab ${!isLogin ? 'active' : ''}`}
             onClick={() => { setIsLogin(false); setError(''); }}
           >
@@ -133,7 +174,7 @@ export function AuthPage({ onAuthSuccess, onSkip }: AuthProps) {
         </div>
 
         {/* Error Alert */}
-        {error && <div className="auth-error-alert">{error}</div>}
+        {error && <div className="auth-error-alert" role="alert">{error}</div>}
 
         {/* Social SSO OAuth Buttons */}
         <div className="oauth-button-group">
@@ -180,6 +221,14 @@ export function AuthPage({ onAuthSuccess, onSkip }: AuthProps) {
           </button>
         </div>
 
+        {oauthLoading && (
+          <div style={{ textAlign: 'center', marginTop: 10 }}>
+            <button type="button" className="btn-link-guest" onClick={cancelOAuth}>
+              Cancel sign-in
+            </button>
+          </div>
+        )}
+
         <div className="auth-divider">
           <span>Or with email</span>
         </div>
@@ -189,11 +238,13 @@ export function AuthPage({ onAuthSuccess, onSkip }: AuthProps) {
           {!isLogin && (
             <>
               <div className="form-group">
-                <label className="form-label">Full Name</label>
+                <label className="form-label" htmlFor="auth-fullname">Full Name</label>
                 <input
+                  id="auth-fullname"
                   type="text"
                   className="form-input"
                   placeholder="John Doe"
+                  autoComplete="name"
                   value={fullName}
                   onChange={(e) => setFullName(e.target.value)}
                   required={!isLogin}
@@ -201,8 +252,9 @@ export function AuthPage({ onAuthSuccess, onSkip }: AuthProps) {
               </div>
 
               <div className="form-group">
-                <label className="form-label">Organization / Workspace Name</label>
+                <label className="form-label" htmlFor="auth-orgname">Organization / Workspace Name</label>
                 <input
+                  id="auth-orgname"
                   type="text"
                   className="form-input"
                   placeholder="Acme Corp"
@@ -215,27 +267,42 @@ export function AuthPage({ onAuthSuccess, onSkip }: AuthProps) {
           )}
 
           <div className="form-group">
-            <label className="form-label">Work Email</label>
+            <label className="form-label" htmlFor="auth-email">Work Email</label>
             <input
+              id="auth-email"
               type="email"
               className="form-input"
               placeholder="you@company.com"
+              autoComplete="email"
               value={email}
-              onChange={(e) => setEmail(e.target.value)}
+              onChange={(e) => { setEmail(e.target.value); if (error) setError(''); }}
               required
             />
           </div>
 
           <div className="form-group">
-            <label className="form-label">Password</label>
-            <input
-              type="password"
-              className="form-input"
-              placeholder="••••••••••••"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              required
-            />
+            <label className="form-label" htmlFor="auth-password">Password</label>
+            <div style={{ position: 'relative' }}>
+              <input
+                id="auth-password"
+                type={showPassword ? 'text' : 'password'}
+                className="form-input"
+                placeholder="••••••••••••"
+                autoComplete={isLogin ? 'current-password' : 'new-password'}
+                value={password}
+                onChange={(e) => { setPassword(e.target.value); if (error) setError(''); }}
+                required
+                style={{ paddingRight: 44, width: '100%' }}
+              />
+              <button
+                type="button"
+                aria-label={showPassword ? 'Hide password' : 'Show password'}
+                onClick={() => setShowPassword((v) => !v)}
+                style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: 4 }}
+              >
+                {showPassword ? 'Hide' : 'Show'}
+              </button>
+            </div>
           </div>
 
           <button
@@ -244,7 +311,9 @@ export function AuthPage({ onAuthSuccess, onSkip }: AuthProps) {
             disabled={loading}
           >
             {loading ? (
-              <span className="spinner-sm" />
+              <>
+                <span className="spinner-sm" /> Signing in…
+              </>
             ) : (
               isLogin ? 'Sign In to Account' : 'Create Organization Account'
             )}

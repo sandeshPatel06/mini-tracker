@@ -23,6 +23,8 @@ export function SettingsPage({ theme = 'auto', onThemeChange }: SettingsPageProp
   const [usageCount, setUsageCount] = useState<number>(() => {
     return parseInt(localStorage.getItem('mini_ai_usage_count') || '0', 10);
   });
+  const [saving, setSaving] = useState(false);
+  const [testing, setTesting] = useState(false);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [nextSyncSeconds, setNextSyncSeconds] = useState<number>(30);
 
@@ -60,11 +62,12 @@ export function SettingsPage({ theme = 'auto', onThemeChange }: SettingsPageProp
 
     const timer = setInterval(() => {
       setNextSyncSeconds(prev => (prev <= 1 ? 30 : prev - 1));
-      syncUsage();
     }, 1000);
+    const usageTimer = setInterval(syncUsage, 20000);
 
     return () => {
       clearInterval(timer);
+      clearInterval(usageTimer);
       window.removeEventListener('ai_usage_updated', handleCustomUsageEvent);
       window.removeEventListener('storage', syncUsage);
     };
@@ -100,9 +103,9 @@ export function SettingsPage({ theme = 'auto', onThemeChange }: SettingsPageProp
   }, []);
 
   useEffect(() => {
-    if (apiKey.trim()) {
-      fetchAvailableModels(apiKey);
-    }
+    if (!apiKey.trim()) return;
+    const t = setTimeout(() => fetchAvailableModels(apiKey), 500);
+    return () => clearTimeout(t);
   }, [apiKey, fetchAvailableModels]);
 
   const [screenshotInterval, setScreenshotInterval] = useState<number>(() => {
@@ -110,13 +113,11 @@ export function SettingsPage({ theme = 'auto', onThemeChange }: SettingsPageProp
   });
 
   const handleSave = async () => {
-    localStorage.setItem('mini_gemini_api_key', apiKey.trim());
-    localStorage.setItem('mini_ai_model', model);
-    localStorage.setItem('mini_screenshot_interval', screenshotInterval.toString());
-
+    setSaving(true);
+    let backendError: string | null = null;
     const cleanModel = model.replace('models/', '');
-    if ((window as any).go?.main?.App) {
-      try {
+    try {
+      if ((window as any).go?.main?.App) {
         if ((window as any).go.main.App.UpdateGeminiAPIKey) {
           await (window as any).go.main.App.UpdateGeminiAPIKey(apiKey.trim());
         }
@@ -126,10 +127,8 @@ export function SettingsPage({ theme = 'auto', onThemeChange }: SettingsPageProp
         if ((window as any).go.main.App.UpdateScreenshotInterval) {
           await (window as any).go.main.App.UpdateScreenshotInterval(screenshotInterval);
         }
-      } catch { }
-    } else {
-      try {
-        await apiFetch('/api/config', {
+      } else {
+        const res = await apiFetch('/api/config', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -138,11 +137,25 @@ export function SettingsPage({ theme = 'auto', onThemeChange }: SettingsPageProp
             screenshot_interval_seconds: screenshotInterval
           }),
         });
-      } catch { }
+        if (!res.ok) {
+          throw new Error(`Server returned ${res.status}`);
+        }
+      }
+    } catch (err: any) {
+      backendError = err?.message || 'unknown error';
     }
 
-    setStatusMessage('✓ Settings & Selected Model saved successfully!');
-    setTimeout(() => setStatusMessage(null), 3000);
+    localStorage.setItem('mini_gemini_api_key', apiKey.trim());
+    localStorage.setItem('mini_ai_model', model);
+    localStorage.setItem('mini_screenshot_interval', screenshotInterval.toString());
+
+    if (backendError) {
+      setStatusMessage(`✕ Saved locally, but backend update failed: ${backendError}`);
+    } else {
+      setStatusMessage('✓ Settings & Selected Model saved successfully!');
+    }
+    setTimeout(() => setStatusMessage(null), 4000);
+    setSaving(false);
   };
 
   const handleTestAPI = async () => {
@@ -150,6 +163,8 @@ export function SettingsPage({ theme = 'auto', onThemeChange }: SettingsPageProp
       setStatusMessage('Please enter an API Key first.');
       return;
     }
+    if (testing) return;
+    setTesting(true);
     setStatusMessage('Testing connection and fetching models…');
     await fetchAvailableModels(apiKey);
     try {
@@ -170,6 +185,8 @@ export function SettingsPage({ theme = 'auto', onThemeChange }: SettingsPageProp
       }
     } catch {
       setStatusMessage('✕ Connection failed. Check network or API key.');
+    } finally {
+      setTesting(false);
     }
   };
 
@@ -203,8 +220,8 @@ export function SettingsPage({ theme = 'auto', onThemeChange }: SettingsPageProp
               Fetch models, rate limits, configure API keys, and track direct client-side usage.
             </p>
           </div>
-          <button type="submit" className="btn btn-primary" style={{ padding: '10px 24px', fontSize: 14, fontWeight: 700 }}>
-            💾 Save Settings & Selected Model
+          <button type="submit" disabled={saving} className="btn btn-primary" style={{ padding: '10px 24px', fontSize: 14, fontWeight: 700 }}>
+            {saving ? 'Saving…' : '💾 Save Settings & Selected Model'}
           </button>
         </div>
 
@@ -352,7 +369,7 @@ export function SettingsPage({ theme = 'auto', onThemeChange }: SettingsPageProp
             )}
 
             <div style={{ display: 'flex', gap: 12, marginTop: 20 }}>
-              <button type="submit" className="btn btn-primary" style={{ padding: '10px 24px', fontSize: 14, fontWeight: 700 }}>
+              <button type="submit" disabled={saving} className="btn btn-primary" style={{ padding: '10px 24px', fontSize: 14, fontWeight: 700 }}>
                 💾 Save Configuration & Selected Model
               </button>
               <button type="button" onClick={handleTestAPI} className="btn btn-secondary">

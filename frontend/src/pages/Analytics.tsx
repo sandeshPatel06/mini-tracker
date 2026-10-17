@@ -1,11 +1,12 @@
 import { useState, useEffect, useMemo } from 'react';
-import { LogEntry, ProductivityStats, User } from '../types';
+import { LogEntry, ProductivityStats, User, AppConfig } from '../types';
 import { apiFetch } from '../api';
 import { format } from 'date-fns';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
-  LineChart, Line, PieChart, Pie, Cell,
+  LineChart, Line, PieChart, Pie, Cell, Legend,
 } from 'recharts';
+import { localISODate, isPendingLog, FOCUS_GOOD, FOCUS_OK } from '../utils';
 
 interface Props {
   logs: LogEntry[];
@@ -19,6 +20,9 @@ interface Props {
   endDate?: string;
   onUserChange?: (userId: number | null) => void;
   onDateRangeChange?: (start: string, end: string) => void;
+  loadError?: string | null;
+  onRetry?: () => void;
+  config?: AppConfig | null;
 }
 
 const COLORS = {
@@ -47,12 +51,20 @@ const CustomTooltip = ({ active, payload, label }: { active?: boolean; payload?:
       color: 'var(--text-primary)',
     }}>
       <div style={{ color: 'var(--text-muted)', marginBottom: 6, fontWeight: 600 }}>{label}</div>
-      {payload.map((p, i) => (
-        <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4 }}>
-          <div style={{ width: 8, height: 8, borderRadius: '50%', background: p.color || p.fill }} />
-          <span>{p.name}: <strong>{typeof p.value === 'number' ? (p.unit ? `${p.value}${p.unit}` : p.value.toFixed(1)) : p.value}</strong></span>
-        </div>
-      ))}
+      {payload.map((p, i) => {
+        const noCaptures = p.name === 'Focus Rating' && p.payload?.Captures === 0;
+        const display = noCaptures
+          ? 'No captures'
+          : typeof p.value === 'number'
+            ? (Number.isInteger(p.value) ? `${p.value}${p.unit || ''}` : p.value.toFixed(1))
+            : p.value;
+        return (
+          <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4 }}>
+            <div style={{ width: 8, height: 8, borderRadius: '50%', background: p.color || p.fill }} />
+            <span>{p.name}: <strong>{display}</strong></span>
+          </div>
+        );
+      })}
     </div>
   );
 };
@@ -69,6 +81,9 @@ export default function Analytics({
   endDate,
   onUserChange,
   onDateRangeChange,
+  loadError,
+  onRetry,
+  config,
 }: Props) {
   const [members, setMembers] = useState<{ id: number; full_name: string; email: string; role: string }[]>([]);
 
@@ -87,7 +102,7 @@ export default function Analytics({
 
   // Analyzed logs for focus percentage
   const analyzedLogs = useMemo(() => {
-    return logs.filter(l => l.ai_category && l.ai_category !== 'Unknown' && !l.ai_reason.includes('No Gemini API key'));
+    return logs.filter(l => !isPendingLog(l));
   }, [logs]);
 
   // Overall Average Focus Score
@@ -102,15 +117,14 @@ export default function Analytics({
   const hourlyData = useMemo(() => {
     return Array.from({ length: 24 }, (_, h) => {
       const hourLogs = logs.filter(l => new Date(l.timestamp).getHours() === h);
-      if (hourLogs.length === 0) return null;
       const totalScore = hourLogs.reduce((acc, l) => acc + (typeof l.productive_score === 'number' ? l.productive_score : l.is_productive ? 100 : 0), 0);
-      const avgScore = Math.round(totalScore / hourLogs.length);
+      const avgScore = hourLogs.length > 0 ? Math.round(totalScore / hourLogs.length) : 0;
       return {
         hour: `${String(h).padStart(2, '0')}:00`,
         'Focus Rating': avgScore,
         Captures: hourLogs.length,
       };
-    }).filter(Boolean) as { hour: string; 'Focus Rating': number; Captures: number }[];
+    });
   }, [logs]);
 
   // App Usage Breakdown calculation
@@ -139,15 +153,16 @@ export default function Analytics({
   }, [logs]);
 
   // Entropy & Typing Line Chart Data
+  const multiDay = !!(startDate && endDate && startDate !== endDate);
   const entropyData = useMemo(() => {
     return [...logs]
       .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime())
       .map(l => ({
-        time: format(new Date(l.timestamp), 'HH:mm'),
+        time: format(new Date(l.timestamp), multiDay ? 'MMM d HH:mm' : 'HH:mm'),
         Entropy: parseFloat(l.entropy_score.toFixed(1)),
         FocusScore: l.productive_score !== undefined ? Math.round(l.productive_score) : l.is_productive ? 100 : 0,
       }));
-  }, [logs]);
+  }, [logs, multiDay]);
 
   // Category breakdown for pie chart
   const categoryData = useMemo(() => {
@@ -167,12 +182,15 @@ export default function Analytics({
 
   const dateLabel = startDate && endDate && startDate !== endDate
     ? `${format(new Date(startDate + 'T00:00:00'), 'MMM d, yyyy')} - ${format(new Date(endDate + 'T00:00:00'), 'MMM d, yyyy')}`
-    : today === new Date().toISOString().slice(0, 10)
+    : today === localISODate()
     ? 'Today'
     : format(new Date(today + 'T00:00:00'), 'MMMM d, yyyy');
 
+  const intervalSec = config?.screenshot_interval_seconds ?? 30;
+  const activeMinutes = logs.length > 0 ? (logs.length * intervalSec) / 60 : 0;
+
   return (
-    <div>
+    <div aria-busy={loading}>
       <div className="page-header" style={{ flexWrap: 'wrap', gap: 16, marginBottom: 24 }}>
         <div>
           <h1 className="page-title" style={{ fontSize: 24, fontWeight: 700, letterSpacing: '-0.4px', color: 'var(--text-primary)' }}>
@@ -187,6 +205,7 @@ export default function Analytics({
           {(currentUser?.role === 'admin' || currentUser?.role === 'owner') && members.length > 0 && (
             <select
               className="date-input"
+              aria-label="Filter by team member"
               value={selectedUserId || ''}
               onChange={(e) => onUserChange?.(e.target.value ? Number(e.target.value) : null)}
               style={{
@@ -211,12 +230,12 @@ export default function Analytics({
             <input
               type="date"
               className="date-input"
+              aria-label="Range start date"
               value={startDate || today}
-              max={new Date().toISOString().slice(0, 10)}
+              max={endDate || localISODate()}
               onChange={(e) => {
                 const s = e.target.value;
-                onDateRangeChange?.(s, endDate || s);
-                onDateChange(s);
+                onDateRangeChange?.(s, endDate && endDate < s ? s : endDate || s);
               }}
               style={{
                 padding: '6px 12px',
@@ -231,8 +250,10 @@ export default function Analytics({
             <input
               type="date"
               className="date-input"
+              aria-label="Range end date"
               value={endDate || today}
-              max={new Date().toISOString().slice(0, 10)}
+              min={startDate || undefined}
+              max={localISODate()}
               onChange={(e) => {
                 const ed = e.target.value;
                 onDateRangeChange?.(startDate || today, ed);
@@ -250,9 +271,22 @@ export default function Analytics({
         </div>
       </div>
 
-      {loading ? (
+      {loadError && logs.length > 0 && (
+        <div className="alert alert-error" role="alert" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 16 }}>
+          <span>{loadError}</span>
+          {onRetry && <button className="btn btn-sm" onClick={onRetry}>Retry</button>}
+        </div>
+      )}
+      {loading && logs.length === 0 ? (
         <div className="card" style={{ padding: 32 }}>
           <div className="skeleton" style={{ width: '100%', height: 240 }} />
+        </div>
+      ) : loadError && logs.length === 0 ? (
+        <div className="card">
+          <div className="alert alert-error" role="alert" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, margin: 16 }}>
+            <span>{loadError}</span>
+            {onRetry && <button className="btn btn-sm" onClick={onRetry}>Retry</button>}
+          </div>
         </div>
       ) : logs.length === 0 ? (
         <div className="card">
@@ -269,8 +303,8 @@ export default function Analytics({
           <div className="stats-grid">
             <div className="stat-card">
               <span className="stat-label">AI Focus Rating</span>
-              <div className="stat-value" style={{ color: avgFocusScore >= 70 ? 'var(--accent-green)' : 'var(--accent-primary)' }}>
-                {avgFocusScore}%
+              <div className="stat-value" style={{ color: analyzedLogs.length === 0 ? 'var(--text-muted)' : avgFocusScore >= FOCUS_GOOD ? 'var(--accent-green)' : avgFocusScore >= FOCUS_OK ? 'var(--accent-amber)' : 'var(--accent-red)' }}>
+                {analyzedLogs.length === 0 ? '—' : `${avgFocusScore}%`}
               </div>
               <div className="stat-sub">{analyzedLogs.length} of {logs.length} captures evaluated</div>
             </div>
@@ -278,7 +312,7 @@ export default function Analytics({
             <div className="stat-card">
               <span className="stat-label">Active Work Duration</span>
               <div className="stat-value">
-                {logs.length > 0 ? (logs.length * 0.5 >= 60 ? `${(logs.length * 0.5 / 60).toFixed(1)} hrs` : `${Math.round(logs.length * 0.5)} mins`) : '0 mins'}
+                {activeMinutes >= 60 ? `${(activeMinutes / 60).toFixed(1)} hrs` : `${Math.round(activeMinutes)} mins`}
               </div>
               <div className="stat-sub">Based on {logs.length} background telemetry points</div>
             </div>
@@ -288,7 +322,7 @@ export default function Analytics({
               <div className="stat-value">
                 {logs.length > 0 ? Math.round(logs.reduce((acc, l) => acc + l.total_keys, 0) / logs.length) : 0} <span style={{ fontSize: 14, fontWeight: 500, color: 'var(--text-muted)' }}>keys / cap</span>
               </div>
-              <div className="stat-sub">Average keystrokes per 30s capture interval</div>
+              <div className="stat-sub">Average keystrokes per {intervalSec}s capture interval</div>
             </div>
           </div>
 
@@ -310,7 +344,7 @@ export default function Analytics({
 
             <div style={{ width: '100%', height: 200 }}>
               <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={hourlyData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                <BarChart data={hourlyData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }} accessibilityLayer>
                   <CartesianGrid strokeDasharray="3 3" stroke="var(--border-subtle)" vertical={false} />
                   <XAxis dataKey="hour" tick={{ fontSize: 11, fill: 'var(--text-muted)' }} axisLine={false} tickLine={false} />
                   <YAxis domain={[0, 100]} tick={{ fontSize: 11, fill: 'var(--text-muted)' }} axisLine={false} tickLine={false} />
@@ -344,7 +378,7 @@ export default function Analytics({
                         <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>({app.category})</span>
                       </div>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                        <span style={{ fontSize: 12, fontWeight: 600, color: app.avgScore >= 60 ? 'var(--accent-green)' : 'var(--accent-red)' }}>
+                        <span style={{ fontSize: 12, fontWeight: 600, color: app.avgScore >= FOCUS_OK ? 'var(--accent-green)' : 'var(--accent-red)' }}>
                           {app.avgScore}% Focus
                         </span>
                         <span style={{ fontSize: 12, color: 'var(--text-muted)', width: 36, textAlign: 'right' }}>
@@ -357,7 +391,7 @@ export default function Analytics({
                         style={{
                           width: `${app.percent}%`,
                           height: '100%',
-                          backgroundColor: app.avgScore >= 70 ? '#10b981' : app.avgScore >= 50 ? '#6366f1' : '#ef4444',
+                          backgroundColor: app.avgScore >= FOCUS_GOOD ? 'var(--accent-green)' : app.avgScore >= FOCUS_OK ? 'var(--accent-indigo)' : 'var(--accent-red)',
                           borderRadius: 99,
                         }}
                       />
@@ -378,18 +412,18 @@ export default function Analytics({
                 </p>
               </div>
 
-              <div style={{ width: '100%', height: 180 }}>
+              <div style={{ width: '100%', height: 220 }}>
                 {categoryData.length > 0 ? (
                   <ResponsiveContainer width="100%" height="100%">
-                    <PieChart>
+                    <PieChart accessibilityLayer>
                       <Pie
                         data={categoryData}
                         cx="50%"
                         cy="50%"
-                        outerRadius={65}
+                        outerRadius={70}
                         paddingAngle={3}
                         dataKey="value"
-                        label={({ name, percent }) => `${name} (${((percent ?? 0) * 100).toFixed(0)}%)`}
+                        label={false}
                         labelLine={false}
                       >
                         {categoryData.map((_, i) => (
@@ -397,6 +431,7 @@ export default function Analytics({
                         ))}
                       </Pie>
                       <Tooltip content={<CustomTooltip />} />
+                      <Legend verticalAlign="bottom" iconType="circle" wrapperStyle={{ fontSize: 11, color: 'var(--text-muted)' }} />
                     </PieChart>
                   </ResponsiveContainer>
                 ) : (
@@ -410,7 +445,7 @@ export default function Analytics({
           </div>
 
           {/* Keystroke Entropy & Focus Trend Line Chart */}
-          {entropyData.length > 1 && (
+          {(
             <div className="card" style={{ padding: 20 }}>
               <div style={{ marginBottom: 16 }}>
                 <h3 style={{ fontSize: 15, fontWeight: 600, color: 'var(--text-primary)', margin: 0 }}>
@@ -422,8 +457,13 @@ export default function Analytics({
               </div>
 
               <div style={{ width: '100%', height: 180 }}>
+                {entropyData.length < 2 ? (
+                  <div style={{ fontSize: 13, color: 'var(--text-muted)', textAlign: 'center', padding: '60px 0' }}>
+                    Need at least 2 captures to show a trend
+                  </div>
+                ) : (
                 <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={entropyData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                  <LineChart data={entropyData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }} accessibilityLayer>
                     <CartesianGrid strokeDasharray="3 3" stroke="var(--border-subtle)" vertical={false} />
                     <XAxis dataKey="time" tick={{ fontSize: 10, fill: 'var(--text-muted)' }} axisLine={false} tickLine={false} />
                     <YAxis domain={[0, 100]} tick={{ fontSize: 10, fill: 'var(--text-muted)' }} axisLine={false} tickLine={false} />
@@ -441,13 +481,15 @@ export default function Analytics({
                       type="monotone"
                       dataKey="Entropy"
                       name="Keystroke Entropy"
-                      stroke="#06b6d4"
+                      stroke="var(--accent-cyan)"
                       strokeWidth={1.5}
                       strokeDasharray="4 4"
                       dot={false}
                     />
+                    <Legend wrapperStyle={{ fontSize: 11 }} />
                   </LineChart>
                 </ResponsiveContainer>
+                )}
               </div>
             </div>
           )}

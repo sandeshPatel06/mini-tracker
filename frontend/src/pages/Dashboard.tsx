@@ -5,7 +5,29 @@ import { format } from 'date-fns';
 import { CategoryBadge } from '../components/CategoryBadge';
 import { ScreenshotThumb, ImageModal } from '../components/Screenshot';
 import { Icon, IconName } from '../components/Icon';
-import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, Cell } from 'recharts';
+import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Cell } from 'recharts';
+import { localISODate, isPendingLog, FOCUS_GOOD, FOCUS_OK } from '../utils';
+
+const prefersReducedMotion =
+  typeof window !== 'undefined' &&
+  typeof window.matchMedia === 'function' &&
+  window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+function focusColor(score: number): string {
+  return score >= FOCUS_GOOD
+    ? 'var(--accent-green)'
+    : score >= FOCUS_OK
+    ? 'var(--accent-amber)'
+    : 'var(--accent-red)';
+}
+
+function focusBarColor(score: number): string {
+  return score >= FOCUS_GOOD
+    ? 'var(--accent-green)'
+    : score >= FOCUS_OK
+    ? 'var(--accent-indigo)'
+    : 'var(--accent-red)';
+}
 
 declare const window: Window & {
   go?: {
@@ -25,6 +47,9 @@ interface Props {
   loading: boolean;
   today: string;
   onRefresh?: () => void;
+  onOpenSettings?: () => void;
+  loadError?: string | null;
+  onRetry?: () => void;
 }
 
 function StatCard({
@@ -66,7 +91,7 @@ function StatCard({
   );
 }
 
-export default function Dashboard({ logs, stats, config, loading, today, onRefresh }: Props) {
+export default function Dashboard({ logs, stats, config, loading, today, onRefresh, onOpenSettings, loadError, onRetry }: Props) {
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
   const [processingPending, setProcessingPending] = useState(false);
   const [workSessions, setWorkSessions] = useState<WorkSession[]>([]);
@@ -82,14 +107,9 @@ export default function Dashboard({ logs, stats, config, loading, today, onRefre
     }
   }, [today, logs.length]);
 
-  const pendingCount = logs.filter(
-    (l) => !l.ai_category || l.ai_category === 'Unknown' || l.ai_reason.includes('No Gemini API key')
-  ).length;
+  const pendingCount = logs.filter(isPendingLog).length;
 
-  // Filter analyzed logs
-  const analyzedLogs = logs.filter(
-    (l) => l.ai_category && l.ai_category !== 'Unknown' && !l.ai_reason.includes('No Gemini API key')
-  );
+  const analyzedLogs = logs.filter((l) => !isPendingLog(l));
 
   // Calculate Average AI-Returned Productivity Score
   const avgProductivityScore = analyzedLogs.length > 0
@@ -160,7 +180,7 @@ export default function Dashboard({ logs, stats, config, loading, today, onRefre
   // Latest 10 entries for Activity Feed
   const recent = [...logs].reverse().slice(0, 10);
 
-  const dateLabel = today === new Date().toISOString().slice(0, 10)
+  const dateLabel = today === localISODate()
     ? 'Today'
     : format(new Date(today + 'T00:00:00'), 'MMMM d, yyyy');
 
@@ -180,7 +200,7 @@ export default function Dashboard({ logs, stats, config, loading, today, onRefre
     }
   };
 
-  if (loading) {
+  if (loading && logs.length === 0) {
     return (
       <div>
         <div className="page-header">
@@ -202,7 +222,7 @@ export default function Dashboard({ logs, stats, config, loading, today, onRefre
   }
 
   return (
-    <div>
+    <div aria-busy={loading}>
       <ImageModal imagePath={selectedImage} onClose={() => setSelectedImage(null)} />
 
       {/* Header Bar */}

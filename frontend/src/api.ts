@@ -61,5 +61,10 @@ export function apiFetch(path: string, options: RequestInit = {}): Promise<Respo
     credentials: 'include',
     ...options,
     headers,
+  }).then((response) => {
+    if (response.status === 401) {
+      window.dispatchEvent(new CustomEvent('mini-auth-expired'));
+    }
+    return response;
   });
 }

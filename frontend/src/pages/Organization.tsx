@@ -46,6 +46,8 @@ export const OrganizationPage: React.FC = () => {
       const res = await apiFetch('/api/org/usage/reset', { method: 'POST' });
       if (res.ok) {
         fetchUsageData();
+      } else {
+        setErrorMessage('Failed to reset usage counters.');
       }
     } catch {} finally {
       setResettingUsage(false);
@@ -54,17 +56,21 @@ export const OrganizationPage: React.FC = () => {
 
   const fetchTeamData = async () => {
     setLoading(true);
+    setLoadFailed(false);
     try {
       const res = await apiFetch('/api/org/members?org_id=1');
-      if (res.ok) {
-        const data = await res.json();
-        setOrg(data.org);
-        setMembers(data.members || []);
-        setInvitations(data.invitations || []);
+      if (!res.ok) {
+        setLoadFailed(true);
+        return;
       }
+      const data = await res.json();
+      setOrg(data.org);
+      setMembers(data.members || []);
+      setInvitations(data.invitations || []);
       fetchUsageData();
     } catch (err) {
       console.error('Failed to fetch team data:', err);
+      setLoadFailed(true);
     } finally {
       setLoading(false);
     }
@@ -93,7 +99,13 @@ export const OrganizationPage: React.FC = () => {
         })
       });
 
-      const data = await res.json();
+      const raw = await res.text();
+      let data: any;
+      try {
+        data = JSON.parse(raw);
+      } catch {
+        data = { error: raw };
+      }
       if (!res.ok) {
         throw new Error(data.message || data.error || 'Failed to send invitation');
       }
@@ -107,17 +119,36 @@ export const OrganizationPage: React.FC = () => {
     }
   };
 
-  const copyToClipboard = (text: string, token: string) => {
-    navigator.clipboard.writeText(text);
-    setCopiedToken(token);
-    setTimeout(() => setCopiedToken(null), 2500);
+  const [loadFailed, setLoadFailed] = useState(false);
+
+  const copyToClipboard = async (text: string, token: string) => {
+    try {
+      if (!navigator.clipboard?.writeText) throw new Error('Clipboard unavailable');
+      await navigator.clipboard.writeText(text);
+      setCopiedToken(token);
+      setTimeout(() => setCopiedToken(null), 2500);
+    } catch {
+      setErrorMessage('Copy failed — select the link and copy it manually.');
+    }
   };
 
   if (loading && !org) {
     return (
       <div className="empty-state" style={{ minHeight: 400 }}>
         <div className="skeleton" style={{ width: 48, height: 48, borderRadius: '50%' }} />
-        <div className="empty-state-title" style={{ marginTop: 12 }}>Loading organization details...</div>
+        <div className="empty-state-title" style={{ marginTop: 12 }} aria-busy="true">Loading organization details...</div>
+      </div>
+    );
+  }
+
+  if (loadFailed && !org) {
+    return (
+      <div className="empty-state" style={{ minHeight: 400 }}>
+        <div className="empty-state-title">Couldn't load your team</div>
+        <div className="empty-state-desc">Check your connection or sign in again, then retry.</div>
+        <div style={{ marginTop: 12 }}>
+          <button className="btn btn-primary" onClick={fetchTeamData}>Retry</button>
+        </div>
       </div>
     );
   }
@@ -145,7 +176,7 @@ export const OrganizationPage: React.FC = () => {
           }}
           className="btn btn-primary"
         >
-          <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <svg width={20} height={20} fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z" />
           </svg>
           Invite Team Member
@@ -256,7 +287,7 @@ export const OrganizationPage: React.FC = () => {
       <div className="card" style={{ marginBottom: 24 }}>
         <div className="card-header">
           <h2 className="card-title flex items-center gap-8">
-            <svg className="w-5 h-5 text-purple" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <svg width={20} height={20} className="text-purple" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" />
             </svg>
             Active Team Members
@@ -304,7 +335,7 @@ export const OrganizationPage: React.FC = () => {
         <div className="card">
           <div className="card-header">
             <h2 className="card-title flex items-center gap-8">
-              <svg className="w-5 h-5 text-amber" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <svg width={20} height={20} className="text-amber" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
               </svg>
               Pending Email Invitations

@@ -1,6 +1,23 @@
 import React, { useState, useEffect } from 'react';
 import { apiFetch } from '../api';
 
+const parseJsonSafe = async (res: Response): Promise<any> => {
+  const text = await res.text();
+  try {
+    return JSON.parse(text);
+  } catch {
+    return { error: text };
+  }
+};
+
+const friendlyError = (msg: string): string => {
+  const m = (msg || '').toLowerCase();
+  if (m.includes('expired')) return 'This invitation has expired — ask an admin to resend it.';
+  if (m.includes('used') || m.includes('accepted')) return 'This invitation has already been used.';
+  if (m.includes('not found') || m.includes('invalid')) return 'Invalid invitation link.';
+  return msg;
+};
+
 interface AcceptInviteProps {
   token: string;
   onSuccess: () => void;
@@ -19,13 +36,13 @@ export const AcceptInvitePage: React.FC<AcceptInviteProps> = ({ token, onSuccess
       setLoading(true);
       try {
         const res = await apiFetch(`/api/org/invite-info?token=${token}`);
-        const data = await res.json();
+        const data = await parseJsonSafe(res);
         if (!res.ok || data.valid === false) {
           throw new Error(data.error || data.message || 'Invalid or expired invitation token');
         }
         setInvitation(data);
       } catch (err: any) {
-        setError(err.message || 'Invitation verification failed');
+        setError(friendlyError(err.message || 'Invitation verification failed'));
       } finally {
         setLoading(false);
       }
@@ -56,14 +73,14 @@ export const AcceptInvitePage: React.FC<AcceptInviteProps> = ({ token, onSuccess
         })
       });
 
-      const data = await res.json();
+      const data = await parseJsonSafe(res);
       if (!res.ok) {
         throw new Error(data.message || data.error || 'Failed to accept invitation');
       }
 
       onSuccess();
     } catch (err: any) {
-      setError(err.message || 'Error creating user account');
+      setError(friendlyError(err.message || 'Error creating user account'));
     } finally {
       setSubmitting(false);
     }

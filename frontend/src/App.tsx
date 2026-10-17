@@ -9,6 +9,8 @@ import { AcceptInvitePage } from './pages/AcceptInvite';
 import { AuthPage } from './pages/Auth';
 import { SettingsPage } from './pages/Settings';
 import { Icon, IconName } from './components/Icon';
+import { Modal } from './components/Modal';
+import { localISODate, isPendingLog } from './utils';
 import logoAsset from './assets/logo.png';
 import './style.css';
 
@@ -49,11 +51,15 @@ function callGo<T>(fn: () => Promise<T>): Promise<T | null> {
 export default function App() {
   const [page, setPage] = useState<Page>('dashboard');
   const [inviteToken, setInviteToken] = useState<string>('');
-  const [today, setToday] = useState(() => new Date().toISOString().slice(0, 10));
+  const [today, setToday] = useState(() => localISODate());
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [stats, setStats] = useState<ProductivityStats | null>(null);
   const [config, setConfig] = useState<AppConfig | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [hasLoaded, setHasLoaded] = useState(false);
+  const [aiKeyPresent, setAiKeyPresent] = useState(() => !!localStorage.getItem('mini_gemini_api_key'));
+  const [trackerError, setTrackerError] = useState<string | null>(null);
 
   // User Auth & Session state
   const [currentUser, setCurrentUser] = useState<User | null>(() => {
@@ -203,6 +209,25 @@ export default function App() {
   }, [isTrackingActive]);
 
   const handleToggleTracking = async () => {
+    const refreshStatus = async () => {
+      try {
+        const app = (window as any).go?.main?.App;
+        if (app?.GetTrackingStatus) {
+          const status: any = await callGo(() => app.GetTrackingStatus());
+          if (status) {
+            setIsTrackingActive(!!status.active);
+            setElapsedSeconds(status.elapsed_seconds || 0);
+            return;
+          }
+        }
+        const res = await apiFetch('/api/tracker/status');
+        if (res.ok) {
+          const data = await res.json();
+          setIsTrackingActive(!!data.active);
+          setElapsedSeconds(data.elapsed_seconds || 0);
+        }
+      } catch {}
+    };
     try {
       const app = (window as any).go?.main?.App;
       if (app?.ToggleTracking) {
@@ -210,6 +235,7 @@ export default function App() {
         if (res) {
           setIsTrackingActive(!!res.active);
           setElapsedSeconds(res.elapsed_seconds || 0);
+          setTrackerError(null);
           return;
         }
       }
@@ -218,11 +244,14 @@ export default function App() {
         const data = await res.json();
         setIsTrackingActive(!!data.active);
         setElapsedSeconds(data.elapsed_seconds || 0);
+        setTrackerError(null);
       } else {
-        setIsTrackingActive(!isTrackingActive);
+        setTrackerError('Failed to update tracker status.');
+        await refreshStatus();
       }
     } catch {
-      setIsTrackingActive(!isTrackingActive);
+      setTrackerError('Failed to update tracker status.');
+      await refreshStatus();
     }
   };
 
@@ -234,25 +263,24 @@ export default function App() {
     return `${pad(hrs)}:${pad(mins)}:${pad(secs)}`;
   };
 
-  // Hash-based routing handler for invitations & organization link
+  // Hash-based routing handler for invitations & page routes
   const checkHashRoute = useCallback(() => {
     const hash = window.location.hash;
-    if (hash.includes('/accept-invite')) {
+    if (hash.includes('accept-invite')) {
       const match = hash.match(/token=([^&]+)/);
       if (match && match[1]) {
         setInviteToken(match[1]);
         setPage('accept-invite');
       }
-    } else if (hash === '#organization') {
-      const isAdmin = currentUser?.role === 'admin' || currentUser?.role === 'owner' || isGuestMode;
-      if (isAdmin) {
-        setPage('organization');
-      } else {
-        window.location.hash = '';
-        setPage('dashboard');
-      }
+      return;
     }
-  }, [currentUser, isGuestMode]);
+    const route = hash.replace(/^#\/?/, '');
+    if (route === 'dashboard' || route === 'timeline' || route === 'analytics' || route === 'settings' || route === 'organization') {
+      setPage(route);
+    } else if (route === '') {
+      setPage('dashboard');
+    }
+  }, []);
 
   useEffect(() => {
     checkHashRoute();
@@ -265,8 +293,19 @@ export default function App() {
   const [endDate, setEndDate] = useState<string>(today);
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
   const [syncMessage, setSyncMessage] = useState<string>('');
+  const syncMessageTimerRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (syncMessageTimerRef.current) clearTimeout(syncMessageTimerRef.current);
+    };
+  }, []);
 
   const handleSyncNow = async () => {
+    if (syncMessageTimerRef.current) {
+      clearTimeout(syncMessageTimerRef.current);
+      syncMessageTimerRef.current = null;
+    }
     setIsSyncing(true);
     setSyncMessage('Syncing...');
     try {
@@ -282,29 +321,55 @@ export default function App() {
       setSyncMessage('Sync failed');
     } finally {
       setIsSyncing(false);
-      setTimeout(() => setSyncMessage(''), 4000);
+      syncMessageTimerRef.current = window.setTimeout(() => setSyncMessage(''), 4000);
     }
   };
 
-  const loadData = useCallback(async (date: string, filterUserId?: number | null, sDate?: string, eDate?: string) => {
-    setLoading(true);
+  const stateRef = useRef({} as any);
+  stateRef.current = { selectedUserId, startDate, endDate, userTask, isGuestMode, today };
+
+  const loadData = useCallback(async (date: string, filterUserId?: number | null, sDate?: string, eDate?: string, opts?: { background?: boolean }) => {
+    if (!opts?.background) {
+      setLoading(true);
+    }
     let logsData: LogEntry[] | null = null;
     let statsData: ProductivityStats | null = null;
     let configData: AppConfig | null = null;
 
-    const targetUser = filterUserId !== undefined ? filterUserId : selectedUserId;
-    const start = sDate || startDate || date;
-    const end = eDate || endDate || date;
+    const targetUser = filterUserId !== undefined ? filterUserId : stateRef.current.selectedUserId;
+    const start = sDate || stateRef.current.startDate || date;
+    const end = eDate || stateRef.current.endDate || date;
 
     const userParam = targetUser ? `&user_id=${targetUser}` : '';
     const dateParam = `start_date=${start}&end_date=${end}`;
 
     if (window.go?.main?.App) {
-      [logsData, statsData, configData] = await Promise.all([
-        callGo(() => window.go!.main.App.GetLogsByDate(date)),
-        callGo(() => window.go!.main.App.GetStats(date)),
+      const dates: string[] = [];
+      if (start !== end) {
+        const rangeStart = new Date(`${start}T00:00:00`);
+        const rangeEnd = new Date(`${end}T00:00:00`);
+        for (let d = new Date(rangeStart); d <= rangeEnd && dates.length < 31; d.setDate(d.getDate() + 1)) {
+          dates.push(localISODate(d));
+        }
+      }
+      if (dates.length === 0) dates.push(date);
+
+      const statsDate = start !== end ? end : date;
+      const [logsLists, statsResult, configResult] = await Promise.all([
+        Promise.all(dates.map(d => callGo(() => window.go!.main.App.GetLogsByDate(d)))),
+        callGo(() => window.go!.main.App.GetStats(statsDate)),
         callGo(() => window.go!.main.App.GetConfig()),
       ]);
+      const fetchedLists = logsLists.filter((list): list is LogEntry[] => Array.isArray(list));
+      if (fetchedLists.length === 0) {
+        logsData = null;
+      } else {
+        logsData = fetchedLists
+          .flat()
+          .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+      }
+      statsData = statsResult;
+      configData = configResult;
     } else {
       try {
         const [resLogs, resStats, resConfig] = await Promise.all([
@@ -321,17 +386,23 @@ export default function App() {
     }
 
     // Fallback local storage state if server is completely offline / standalone desktop guest mode
-    if (!logsData && isGuestMode) {
+    if (!logsData && stateRef.current.isGuestMode) {
       try {
         const cachedLogs = localStorage.getItem(`mini_logs_${date}`);
         if (cachedLogs) logsData = JSON.parse(cachedLogs);
       } catch {}
     }
-    if (!statsData && isGuestMode) {
+    if (!statsData && stateRef.current.isGuestMode) {
       try {
         const cachedStats = localStorage.getItem(`mini_stats_${date}`);
         if (cachedStats) statsData = JSON.parse(cachedStats);
       } catch {}
+    }
+
+    if (logsData === null) {
+      setLoadError("Couldn't reach the tracker backend.");
+    } else {
+      setLoadError(null);
     }
 
     if (configData?.backend_endpoint) {
@@ -339,17 +410,13 @@ export default function App() {
     }
 
     const localApiKey = localStorage.getItem('mini_gemini_api_key');
+    setAiKeyPresent(!!localApiKey);
     const rawModel = localStorage.getItem('mini_ai_model') || 'models/gemma-4-31b-it';
     const localModel = rawModel.startsWith('models/') ? rawModel : `models/${rawModel}`;
     const intervalSec = configData?.screenshot_interval_seconds || 30;
 
     if (localApiKey && logsData && logsData.length > 0) {
-      const pendingLogs = logsData.filter(log => 
-        !log.ai_category || 
-        log.ai_category === 'Unknown' || 
-        log.ai_reason.includes('No Gemini API key') ||
-        log.ai_reason.includes('Offline Mode')
-      );
+      const pendingLogs = logsData.filter(isPendingLog);
 
       // Wait until at least 3 pending logs are accumulated before sending batch AI analytics request
       if (pendingLogs.length >= 3) {
@@ -361,7 +428,8 @@ export default function App() {
         const bundle = pendingLogs.slice(0, Math.min(Math.max(3, targetBundleSize), 6));
 
         // Prepare enhanced multimodal contents array for Google Gemini REST API v1beta
-        const taskGoal = userTask.trim() ? `CURRENT TARGET USER TASK (GOAL): "${userTask.trim()}"\nEVALUATION RULE: Analyze how relevant the visible desktop content and user input (typing/mouse) are to achieving THIS SPECIFIC TASK. High scores require direct alignment with this task context.` : "CURRENT TARGET USER TASK: General software development and workstation tasks.";
+        const currentTask = stateRef.current.userTask as string;
+        const taskGoal = currentTask.trim() ? `CURRENT TARGET USER TASK (GOAL): "${currentTask.trim()}"\nEVALUATION RULE: Analyze how relevant the visible desktop content and user input (typing/mouse) are to achieving THIS SPECIFIC TASK. High scores require direct alignment with this task context.` : "CURRENT TARGET USER TASK: General software development and workstation tasks.";
 
         const promptText = `You are an expert, objective developer productivity analyst inspecting a sequence of ${bundle.length} desktop screenshots captured from a Linux workstation in chronological order.
 
@@ -567,6 +635,11 @@ Return ONLY a valid JSON array of ${bundle.length} objects in exact input order:
     setLoading(false);
   }, [isGuestMode]);
 
+  const loadDataRef = useRef(loadData);
+  loadDataRef.current = loadData;
+
+  const retryLoad = () => loadData(today, selectedUserId, startDate, endDate);
+
   // Initial load
   useEffect(() => {
     loadData(today);
@@ -660,14 +733,13 @@ Return ONLY a valid JSON array of ${bundle.length} objects in exact input order:
 
     // Auto-refresh timeline, stats, and AI analytics every 30 seconds
     const syncInterval = setInterval(() => {
-      const todayStr = new Date().toISOString().slice(0, 10);
-      loadData(todayStr);
+      loadDataRef.current(stateRef.current.today, undefined, undefined, undefined, { background: true });
 
       // Clean up client-side stored cached logs & usage entries older than 7 days
       try {
         const retentionCutoff = new Date();
         retentionCutoff.setDate(retentionCutoff.getDate() - 7);
-        const cutoffStr = retentionCutoff.toISOString().slice(0, 10);
+        const cutoffStr = localISODate(retentionCutoff);
         
         Object.keys(localStorage).forEach(key => {
           if (key.startsWith('mini_logs_') || key.startsWith('mini_stats_')) {
@@ -692,9 +764,20 @@ Return ONLY a valid JSON array of ${bundle.length} objects in exact input order:
   // Mobile navbar collapse state
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState<boolean>(false);
 
+  useEffect(() => {
+    if (!isMobileMenuOpen) return;
+    const handleEscape = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setIsMobileMenuOpen(false);
+    };
+    window.addEventListener('keydown', handleEscape);
+    return () => window.removeEventListener('keydown', handleEscape);
+  }, [isMobileMenuOpen]);
+
   // Close mobile menu on page transition
   const navigateTo = (targetPage: Page) => {
-    window.location.hash = targetPage === 'organization' ? 'organization' : '';
+    if (targetPage !== 'accept-invite') {
+      window.location.hash = `#${targetPage}`;
+    }
     setPage(targetPage);
     setIsMobileMenuOpen(false);
   };
@@ -710,10 +793,41 @@ Return ONLY a valid JSON array of ${bundle.length} objects in exact input order:
   ];
 
   const isTracking = isTrackingActive;
-  const isAIReady = config?.ai_configured ?? false;
+
+  const mainRef = useRef<HTMLElement | null>(null);
+
+  useEffect(() => {
+    const titles: Record<Page, string> = {
+      dashboard: 'Dashboard',
+      timeline: 'Timeline',
+      analytics: 'Analytics',
+      organization: 'Team / Org',
+      settings: 'Settings',
+      'accept-invite': 'Accept Invitation',
+      auth: 'Sign In',
+    };
+    document.title = `${titles[page]} — get-Hike`;
+    const main = mainRef.current;
+    if (main) {
+      main.scrollTop = 0;
+      main.focus();
+    }
+  }, [page]);
 
   // Show Auth Page if user is not authenticated and has not chosen guest mode
   if (authChecked && !currentUser && !isGuestMode) {
+    if (window.location.hash.includes('accept-invite')) {
+      return (
+        <main className="main-content" id="main-content" tabIndex={-1}>
+          <div className="page-container">
+            <AcceptInvitePage
+              token={inviteToken}
+              onSuccess={() => navigateTo('dashboard')}
+            />
+          </div>
+        </main>
+      );
+    }
     return (
       <AuthPage
         onAuthSuccess={(user, org, token) => {
@@ -738,6 +852,9 @@ Return ONLY a valid JSON array of ${bundle.length} objects in exact input order:
 
   return (
     <div className={`app-shell ${isMobileMenuOpen ? 'mobile-nav-active' : ''}`}>
+      <a href="#main-content" className="skip-link" style={{ position: 'absolute' }}>
+        Skip to content
+      </a>
       {/* Mobile Header Bar */}
       <header className="mobile-header">
         <div className="mobile-header-brand">
@@ -752,6 +869,8 @@ Return ONLY a valid JSON array of ${bundle.length} objects in exact input order:
             className="mobile-menu-toggle"
             onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
             aria-label="Toggle Navigation Menu"
+            aria-expanded={isMobileMenuOpen}
+            aria-controls="sidebar"
           >
             {isMobileMenuOpen ? '✕' : '☰'}
           </button>
@@ -764,7 +883,7 @@ Return ONLY a valid JSON array of ${bundle.length} objects in exact input order:
       )}
 
       {/* Sidebar */}
-      <aside className={`sidebar ${isMobileMenuOpen ? 'open' : ''}`}>
+      <aside className={`sidebar ${isMobileMenuOpen ? 'open' : ''}`} id="sidebar">
         <div className="sidebar-logo">
           <img src={logoAsset} alt="get-Hike Logo" className="app-brand-logo-img" style={{ width: 32, height: 32 }} />
           <div>
@@ -803,6 +922,11 @@ Return ONLY a valid JSON array of ${bundle.length} objects in exact input order:
             <Icon name={isTrackingActive ? 'pause' : 'play'} size={14} />
             <span>{isTrackingActive ? 'Pause Tracker' : 'Start Tracker'}</span>
           </button>
+          {trackerError && (
+            <div role="alert" style={{ fontSize: 11, color: 'var(--accent-red)', marginBottom: 8 }}>
+              {trackerError}
+            </div>
+          )}
           <button
             onClick={() => {
               setTaskInput(userTask);
@@ -829,17 +953,30 @@ Return ONLY a valid JSON array of ${bundle.length} objects in exact input order:
         </div>
 
         <div className="sidebar-section-label">Navigation</div>
-        {navItems.map((item) => (
-          <div
-            key={item.id}
-            id={`nav-${item.id}`}
-            className={`nav-item ${page === item.id ? 'active' : ''}`}
-            onClick={() => navigateTo(item.id)}
-          >
-            <Icon name={item.iconName} size={16} className="nav-icon" />
-            <span className="nav-text">{item.label}</span>
-          </div>
-        ))}
+        {navItems.map((item) => {
+          const active = page === item.id;
+          return (
+            <button
+              key={item.id}
+              id={`nav-${item.id}`}
+              type="button"
+              className={`nav-item ${active ? 'active' : ''}`}
+              onClick={() => navigateTo(item.id)}
+              aria-current={active ? 'page' : undefined}
+              style={{
+                background: active ? 'color-mix(in srgb, var(--accent-primary) 9%, transparent)' : 'none',
+                border: 'none',
+                borderLeft: active ? '3px solid var(--accent-primary)' : '3px solid transparent',
+                textAlign: 'left',
+                fontFamily: 'inherit',
+                cursor: 'pointer',
+              }}
+            >
+              <Icon name={item.iconName} size={16} className="nav-icon" />
+              <span className="nav-text">{item.label}</span>
+            </button>
+          );
+        })}
 
         <div className="sidebar-footer">
           {currentUser ? (
@@ -891,8 +1028,7 @@ Return ONLY a valid JSON array of ${bundle.length} objects in exact input order:
 
           <div className="status-badge">
             {(() => {
-              const localKey = localStorage.getItem('mini_gemini_api_key');
-              const isAIReady = Boolean(localKey && localKey.trim().length > 0) || Boolean(config?.ai_configured) || Boolean(currentUser?.role === 'member');
+              const isAIReady = aiKeyPresent || Boolean(config?.ai_configured) || Boolean(currentUser?.role === 'member');
               return (
                 <>
                   <div className={`status-dot ${isAIReady ? '' : 'inactive'}`} style={{ background: isAIReady ? 'var(--accent-teal)' : undefined, boxShadow: isAIReady ? '0 0 8px var(--accent-teal)' : undefined }} />
@@ -907,8 +1043,16 @@ Return ONLY a valid JSON array of ${bundle.length} objects in exact input order:
       </aside>
 
       {/* Main content area */}
-      <main className="main-content">
+      <main className="main-content" id="main-content" tabIndex={-1} ref={mainRef}>
         <div className="page-container">
+          {loadError && (
+            <div className="alert alert-error" role="alert">
+              <span>{loadError}</span>
+              <button type="button" className="btn btn-secondary btn-sm" onClick={retryLoad}>
+                Retry
+              </button>
+            </div>
+          )}
           {page === 'dashboard' && (
             <Dashboard
               logs={logs}
@@ -917,6 +1061,8 @@ Return ONLY a valid JSON array of ${bundle.length} objects in exact input order:
               loading={loading}
               today={today}
               onRefresh={() => loadData(today)}
+              loadError={loadError}
+              onRetry={retryLoad}
             />
           )}
           {page === 'timeline' && (
@@ -925,12 +1071,15 @@ Return ONLY a valid JSON array of ${bundle.length} objects in exact input order:
               loading={loading}
               today={today}
               onDateChange={(d) => { setToday(d); loadData(d); }}
+              loadError={loadError}
+              onRetry={retryLoad}
             />
           )}
           {page === 'analytics' && (
             <Analytics
               logs={logs}
               stats={stats}
+              config={config}
               loading={loading}
               today={today}
               onDateChange={(d) => { setToday(d); loadData(d, selectedUserId, d, d); }}
@@ -947,19 +1096,22 @@ Return ONLY a valid JSON array of ${bundle.length} objects in exact input order:
                 setEndDate(e);
                 loadData(today, selectedUserId, s, e);
               }}
+              loadError={loadError}
+              onRetry={retryLoad}
             />
           )}
           {page === 'organization' && (currentUser?.role === 'admin' || currentUser?.role === 'owner' || isGuestMode) ? (
             <OrganizationPage />
           ) : page === 'organization' ? (
-            <Dashboard
-              logs={logs}
-              stats={stats}
-              config={config}
-              loading={loading}
-              today={today}
-              onRefresh={() => loadData(today)}
-            />
+            <div className="empty-state">
+              <div className="empty-state-title">You don't have access</div>
+              <div className="empty-state-desc">
+                Your account doesn't have permission to view this page. Contact your organization admin if you believe this is a mistake.
+              </div>
+              <button type="button" className="btn btn-primary btn-sm" style={{ marginTop: 12 }} onClick={() => navigateTo('dashboard')}>
+                Back to Dashboard
+              </button>
+            </div>
           ) : null}
           {page === 'settings' && (currentUser?.role === 'admin' || currentUser?.role === 'owner' || isGuestMode) ? (
             <SettingsPage
@@ -967,143 +1119,82 @@ Return ONLY a valid JSON array of ${bundle.length} objects in exact input order:
               onThemeChange={(newTheme) => setTheme(newTheme)}
             />
           ) : page === 'settings' ? (
-            <Dashboard
-              logs={logs}
-              stats={stats}
-              config={config}
-              loading={loading}
-              today={today}
-              onRefresh={() => loadData(today)}
-            />
+            <div className="empty-state">
+              <div className="empty-state-title">You don't have access</div>
+              <div className="empty-state-desc">
+                Your account doesn't have permission to view this page. Contact your organization admin if you believe this is a mistake.
+              </div>
+              <button type="button" className="btn btn-primary btn-sm" style={{ marginTop: 12 }} onClick={() => navigateTo('dashboard')}>
+                Back to Dashboard
+              </button>
+            </div>
           ) : null}
           {page === 'accept-invite' && (
             <AcceptInvitePage
               token={inviteToken}
-              onSuccess={() => {
-                window.location.hash = 'organization';
-                setPage('organization');
-              }}
+              onSuccess={() => navigateTo('dashboard')}
             />
           )}
         </div>
       </main>
 
-      {/* Upwork-style floating tracker pill — opens as real separate OS window */}
-      <button
-        onClick={openWizardWindow}
-        style={{
-          position: 'fixed',
-          bottom: 20,
-          right: 20,
-          zIndex: 9998,
-          background: '#1c1c1e',
-          color: '#f5f5f7',
-          border: '1px solid rgba(255,255,255,0.12)',
-          borderRadius: 12,
-          padding: '8px 14px',
-          fontWeight: 600,
-          fontSize: 13,
-          cursor: 'pointer',
-          boxShadow: '0 4px 20px rgba(0,0,0,0.5)',
-          display: 'none', // hidden per user request
-          alignItems: 'center',
-          gap: 10,
-          fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
-          transition: 'box-shadow 0.2s',
-        }}
-        title="Open Time Tracker (separate window)"
-      >
-        {/* Status dot */}
-        <span style={{
-          width: 8,
-          height: 8,
-          borderRadius: '50%',
-          background: isTrackingActive ? '#30d158' : '#636366',
-          boxShadow: isTrackingActive ? '0 0 6px #30d158' : 'none',
-          flexShrink: 0,
-          transition: 'background 0.3s',
-        }} />
-        {/* Timer */}
-        <span style={{
-          fontFamily: '"SF Mono", "Courier New", monospace',
-          fontVariantNumeric: 'tabular-nums',
-          letterSpacing: '0.02em',
-          color: isTrackingActive ? '#f5f5f7' : '#8e8e93',
-        }}>
-          {formatTimer(elapsedSeconds)}
-        </span>
-        {/* Open icon */}
-        <span style={{ color: '#636366', fontSize: 11 }}>↗</span>
-      </button>
-
       {/* Target Task Goal Modal Dialog */}
-      {showTaskModal && (
-        <div className="modal-backdrop">
-          <div className="modal-card" style={{ maxWidth: 460 }}>
-            <div className="modal-header">
-              <div className="flex items-center gap-8">
-                <Icon name="target" size={18} style={{ color: 'var(--accent-primary)' }} />
-                <h3 className="modal-title">Set Target Work Task</h3>
-              </div>
-              <button
-                className="modal-close"
-                onClick={() => setShowTaskModal(false)}
-                aria-label="Close dialog"
-              >×</button>
-            </div>
+      <Modal
+        isOpen={showTaskModal}
+        onClose={() => setShowTaskModal(false)}
+        title="Set Target Work Task"
+        maxWidth={460}
+        footer={
+          <>
+            <button
+              onClick={() => setShowTaskModal(false)}
+              className="btn btn-secondary btn-sm"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={() => saveTask(taskInput)}
+              className="btn btn-primary btn-sm"
+            >
+              Save & Align AI Analytics
+            </button>
+          </>
+        }
+      >
+        <p style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 14, lineHeight: 1.5 }}>
+          Describe what you are currently working on. AI analytics will evaluate your screenshots, keypresses, and mouse activity specifically against this goal.
+        </p>
 
-            <div className="modal-body">
-              <p style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 14, lineHeight: 1.5 }}>
-                Describe what you are currently working on. AI analytics will evaluate your screenshots, keypresses, and mouse activity specifically against this goal.
-              </p>
+        <textarea
+          autoFocus
+          rows={3}
+          className="form-input"
+          value={taskInput}
+          onChange={e => setTaskInput(e.target.value)}
+          placeholder="e.g. Fixing database migration bug and optimizing mouse event loop performance..."
+          style={{
+            resize: 'none',
+            marginBottom: 8,
+          }}
+        />
 
-              <textarea
-                rows={3}
-                className="form-input"
-                value={taskInput}
-                onChange={e => setTaskInput(e.target.value)}
-                placeholder="e.g. Fixing database migration bug and optimizing mouse event loop performance..."
-                style={{
-                  resize: 'none',
-                  marginBottom: 8,
-                }}
-              />
-
-              <div className="flex items-center justify-between mt-4" style={{ marginBottom: 4 }}>
-                <span style={{
-                  fontSize: 11,
-                  color: taskInput.trim().split(/\s+/).filter(Boolean).length > 20 ? 'var(--accent-red)' : 'var(--text-muted)'
-                }}>
-                  Word count: {taskInput.trim().split(/\s+/).filter(Boolean).length} / 20 words max
-                </span>
-                {userTask && (
-                  <button
-                    onClick={() => saveTask('')}
-                    style={{ background: 'none', border: 'none', color: 'var(--accent-red)', fontSize: 11, fontWeight: 600, cursor: 'pointer' }}
-                  >
-                    Clear Task
-                  </button>
-                )}
-              </div>
-            </div>
-
-            <div className="modal-footer">
-              <button
-                onClick={() => setShowTaskModal(false)}
-                className="btn btn-secondary btn-sm"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={() => saveTask(taskInput)}
-                className="btn btn-primary btn-sm"
-              >
-                Save & Align AI Analytics
-              </button>
-            </div>
-          </div>
+        <div className="flex items-center justify-between mt-4" style={{ marginBottom: 4 }}>
+          <span style={{
+            fontSize: 11,
+            color: taskInput.trim().split(/\s+/).filter(Boolean).length > 20 ? 'var(--accent-red)' : 'var(--text-muted)'
+          }}>
+            Word count: {taskInput.trim().split(/\s+/).filter(Boolean).length} / 20 words max
+          </span>
+          {userTask && (
+            <button
+              onClick={() => saveTask('')}
+              style={{ background: 'none', border: 'none', color: 'var(--accent-red)', fontSize: 11, fontWeight: 600, cursor: 'pointer' }}
+            >
+              Clear Task
+            </button>
+          )}
         </div>
-      )}
+      </Modal>
     </div>
   );
 }

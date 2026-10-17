@@ -3,6 +3,7 @@ package db
 import (
 	"crypto/sha256"
 	"database/sql"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -1312,6 +1313,26 @@ func (db *DB) GetUnanalyzedLogs() ([]LogEntry, error) {
 	return entries, rows.Err()
 }
 
+// CountUnanalyzedLogs returns the number of logs pending AI analysis.
+func (db *DB) CountUnanalyzedLogs() (int, error) {
+	builder := entsql.Dialect(db.dialect).Select(entsql.Count("*")).From(entsql.Table("logs")).Where(
+		entsql.And(
+			entsql.Or(
+				entsql.EQ("ai_category", ""),
+				entsql.EQ("ai_category", "Unknown"),
+				entsql.Like("ai_reason", "%No Gemini API key%"),
+			),
+			entsql.LT("ai_retry_count", 10),
+		),
+	)
+	query, args := builder.Query()
+	var count int
+	if err := db.rawDB.QueryRow(query, args...).Scan(&count); err != nil {
+		return 0, err
+	}
+	return count, nil
+}
+
 // IncrementAIRetryCount increments the AI retry counter for a log entry.
 // If retry count reaches 10, marks the log entry as Failed so it won't be retried indefinitely.
 func (db *DB) IncrementAIRetryCount(id int64) error {
@@ -1640,4 +1661,110 @@ func (db *DB) Close() error {
 		return db.entDriver.Close()
 	}
 	return db.rawDB.Close()
+}
+
+// TableCounts returns row counts for the core local tables, skipping missing ones.
+func (db *DB) TableCounts() (map[string]int, error) {
+	tables := []string{"logs", "users", "organizations", "invitations", "work_sessions"}
+	counts := make(map[string]int, len(tables))
+	for _, table := range tables {
+		var count int
+		if err := db.rawDB.QueryRow("SELECT COUNT(*) FROM " + table).Scan(&count); err != nil {
+			log.Printf("[db] TableCounts: skipping %s: %v", table, err)
+			counts[table] = 0
+			continue
+		}
+		counts[table] = count
+	}
+	return counts, nil
+}
+
+// CountLogsBySyncStatus returns the number of logs with the given sync_status.
+func (db *DB) CountLogsBySyncStatus(status string) (int, error) {
+	builder := entsql.Dialect(db.dialect).Select(entsql.Count("*")).From(entsql.Table("logs")).Where(entsql.EQ("sync_status", status))
+	query, args := builder.Query()
+	var count int
+	if err := db.rawDB.QueryRow(query, args...).Scan(&count); err != nil {
+		return 0, err
+	}
+	return count, nil
+}
+
+// CountLogsByAppName returns the number of logs recorded for the given app name.
+func (db *DB) CountLogsByAppName(appName string) (int, error) {
+	builder := entsql.Dialect(db.dialect).Select(entsql.Count("*")).From(entsql.Table("logs")).Where(entsql.EQ("app_name", appName))
+	query, args := builder.Query()
+	var count int
+	if err := db.rawDB.QueryRow(query, args...).Scan(&count); err != nil {
+		return 0, err
+	}
+	return count, nil
+}
+
+// DeleteLogsByAppName removes all logs for an app and returns the deleted row count.
+func (db *DB) DeleteLogsByAppName(appName string) (int, error) {
+	builder := entsql.Dialect(db.dialect).Delete("logs").Where(entsql.EQ("app_name", appName))
+	query, args := builder.Query()
+	res, err := db.rawDB.Exec(query, args...)
+	if err != nil {
+		return 0, err
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return 0, err
+	}
+	return int(affected), nil
+}
+
+// GetLatestUnanalyzedLog returns the newest log awaiting AI analysis, or nil if none.
+func (db *DB) GetLatestUnanalyzedLog() (*LogEntry, error) {
+	builder := entsql.Dialect(db.dialect).Select(
+		"id", "org_id", "user_id", "timestamp", "image_path", "total_keys", "unique_keys", "entropy_score",
+		"total_clicks", "mouse_distance",
+		"app_name", "app_category", "window_title", "session_id", "session_title",
+		"ai_category", "is_productive", "productive_score", "ai_confidence", "ai_reason", "ai_retry_count",
+	).From(entsql.Table("logs")).Where(
+		entsql.And(
+			entsql.Or(
+				entsql.EQ("ai_category", ""),
+				entsql.EQ("ai_category", "Unknown"),
+				entsql.Like("ai_reason", "%No Gemini API key%"),
+			),
+			entsql.LT("ai_retry_count", 10),
+		),
+	).OrderBy(entsql.Desc("id")).Limit(1)
+
+	query, args := builder.Query()
+	var e LogEntry
+	var ts interface{}
+	var productive int
+	err := db.rawDB.QueryRow(query, args...).Scan(
+		&e.ID, &e.OrgID, &e.UserID, &ts, &e.ImagePath, &e.TotalKeys, &e.UniqueKeys, &e.EntropyScore,
+		&e.TotalClicks, &e.MouseDistance,
+		&e.AppName, &e.AppCategory, &e.WindowTitle, &e.SessionID, &e.SessionTitle,
+		&e.AICategory, &productive, &e.ProductiveScore, &e.AIConfidence, &e.AIReason, &e.AIRetryCount,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	e.Timestamp = parseFlexibleTime(ts)
+	e.IsProductive = productive == 1 || e.ProductiveScore >= 50
+	return &e, nil
+}
+
+// BackupTo writes a consistent copy of the SQLite database to path using VACUUM INTO.
+func (db *DB) BackupTo(path string) error {
+	if db.rawDB == nil {
+		return fmt.Errorf("database not open")
+	}
+	if db.dialect != dialect.SQLite {
+		return fmt.Errorf("database backup is only supported for SQLite")
+	}
+	if _, err := db.rawDB.Exec("VACUUM INTO ?", path); err != nil {
+		return fmt.Errorf("vacuum into %s: %w", path, err)
+	}
+	return nil
 }

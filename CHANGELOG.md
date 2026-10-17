@@ -24,6 +24,23 @@ and this project aims to follow [Semantic Versioning](https://semver.org/spec/v2
     SIGTERM cleans up PID file).
 - **MIT `LICENSE` file** (Copyright © 2026 REAK INFOTECH LLP) — the README previously mentioned
   MIT without shipping the license text.
+- **Developer Menu (desktop app)**: 7 quick taps (≤2 s apart) on the sidebar/mobile logo unlock
+  a session-only developer panel with Logs, Diagnostics, Actions, AI, Share and Debug tabs.
+  - Logs: live tail of the daily app log, file browser (7-day retention), level filter, search,
+    copy, clear, open logs folder.
+  - Diagnostics: build/env info, data/DB/log/screenshot sizes, tracker + background-daemon
+    status, AI model with masked key, pending-analysis count, sync status, DB table counts and
+    a client-side recent-error digest.
+  - Actions: collect now, sync now, process pending AI, toggle tracking, stop background
+    daemon, reload UI, purge screenshot cache, database backup (Save dialog) and clear-all-data.
+  - AI: analyze latest pending log with raw result/error, model discovery list, runtime log
+    level switch.
+  - Share (4 buttons): copy diagnostics bundle (markdown), create a prefilled GitHub issue,
+    save bundle to file (Save dialog), copy log file path.
+  - Debug: localStorage viewer, theme switch, feature-flag store, `apiFetch` network monitor and
+    app-event monitor (capped ring buffers), seed/clear demo logs, disable dev mode.
+  - Secrets are never displayed (API keys masked); destructive actions require confirmation;
+    web/server mode is unaffected (desktop-only bindings, guarded by `window.go`).
 - Web-mode mouse click reporting: `/api/tracker/input` now accepts `total_clicks` and forwards
   it to the native mouse tracker.
 

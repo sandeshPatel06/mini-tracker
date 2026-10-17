@@ -50,6 +50,7 @@ type listModelsResponse struct {
 type GeminiClient struct {
 	apiKey    string
 	modelName string
+	dataDir   string
 	client    *http.Client
 	mu        sync.Mutex
 }
@@ -98,6 +99,20 @@ func (g *GeminiClient) GetModel() string {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	return g.modelName
+}
+
+// SetDataDir sets the base directory used for cached AI thumbnails.
+func (g *GeminiClient) SetDataDir(dir string) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.dataDir = dir
+}
+
+// GetDataDir returns the base directory used for cached AI thumbnails.
+func (g *GeminiClient) GetDataDir() string {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.dataDir
 }
 
 // FetchAvailableModels queries Gemini API for models supporting generateContent,
@@ -275,12 +290,14 @@ func (g *GeminiClient) Analyze(ctx context.Context, windowTitle string, entropyS
 
 // BatchAnalysisItem represents a single screenshot item in a batch request.
 type BatchAnalysisItem struct {
-	LogID         int64
-	WindowTitle   string
-	EntropyScore  float64
-	ImagePath     string
-	TotalClicks   int
-	UserTask      string
+	LogID        int64
+	WindowTitle  string
+	EntropyScore float64
+	ImagePath    string
+	TotalClicks  int
+	UserTask     string
+	AppName      string
+	Timestamp    time.Time
 }
 
 // BatchAnalysisResult represents the result for a single item in a batch.
@@ -297,13 +314,48 @@ type BatchAnalysisResult struct {
 	Usage           UsageMetadata `json:"usage_metadata"`
 }
 
-// AnalyzeBatch sends multiple screenshots in a single Gemini API request.
+// AnalyzeBatch sends multiple items in grouped Gemini requests. Chunks of up to
+// maxItemsPerRequest are analyzed independently so one failure never blocks the rest.
+// Returns partial results together with the last error when some chunks fail.
 func (g *GeminiClient) AnalyzeBatch(ctx context.Context, items []BatchAnalysisItem) ([]BatchAnalysisResult, error) {
 	if !g.HasKey() || len(items) == 0 {
 		return nil, fmt.Errorf("no API key set or empty batch")
 	}
 
-	// Extract active user task context if provided (up to 20 words)
+	var all []BatchAnalysisResult
+	var lastErr error
+	for start := 0; start < len(items); start += maxItemsPerRequest {
+		if err := ctx.Err(); err != nil {
+			if len(all) > 0 {
+				return all, err
+			}
+			return nil, err
+		}
+		end := start + maxItemsPerRequest
+		if end > len(items) {
+			end = len(items)
+		}
+		results, err := g.analyzeChunk(ctx, items[start:end])
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		all = append(all, results...)
+	}
+
+	if len(all) == 0 {
+		if lastErr != nil {
+			return nil, lastErr
+		}
+		return nil, fmt.Errorf("gemini batch returned no results")
+	}
+	return all, lastErr
+}
+
+// analyzeChunk builds a compact prompt (plus thumbnails) for one group of items,
+// posts it with retry/backoff and model failover, and maps the parsed results back
+// to the input items. Items without a model result are omitted so callers can retry them.
+func (g *GeminiClient) analyzeChunk(ctx context.Context, items []BatchAnalysisItem) ([]BatchAnalysisResult, error) {
 	activeTask := ""
 	for _, item := range items {
 		if strings.TrimSpace(item.UserTask) != "" {
@@ -312,84 +364,49 @@ func (g *GeminiClient) AnalyzeBatch(ctx context.Context, items []BatchAnalysisIt
 		}
 	}
 
-	taskContextPrompt := "CURRENT TARGET USER TASK: General software development and workstation tasks."
-	if activeTask != "" {
-		taskContextPrompt = fmt.Sprintf("CURRENT TARGET USER TASK (GOAL): %q\nEVALUATION RULE: Analyze how relevant the visible desktop content and user input (typing/mouse) are to achieving THIS SPECIFIC TASK. High scores require direct alignment with this task context.", activeTask)
-	}
-
-	// Build per-item telemetry summary for the prompt
-	itemSummaries := ""
+	promptItems := make([]PromptItem, len(items))
 	for i, item := range items {
-		itemSummaries += fmt.Sprintf("  Item %d: Keystroke Entropy=%.1f/100, Mouse Clicks=%d\n",
-			i+1, item.EntropyScore, item.TotalClicks)
+		promptItems[i] = PromptItem{
+			LogID:        item.LogID,
+			WindowTitle:  item.WindowTitle,
+			EntropyScore: item.EntropyScore,
+			TotalClicks:  item.TotalClicks,
+			AppName:      item.AppName,
+			Timestamp:    item.Timestamp,
+		}
 	}
-
-	prompt := fmt.Sprintf(`You are a world-class developer productivity analyst inspecting a sequence of %d desktop window titles captured from a Linux workstation in chronological order.
-
-%s
-
-TELEMETRY CONTEXT (use this data to calibrate scores — do NOT ignore it):
-%s
-
-INSTRUCTIONS FOR EACH ITEM:
-1. Analyze the 'window_title' string. The application name is often at the end (e.g., "index.tsx - Visual Studio Code" -> app_name="Visual Studio Code").
-2. Identify the primary application (app_name, e.g. VS Code, Terminal, Chrome, Slack, Spotify).
-3. Infer the active document, URL, or context visible in the title.
-4. Classify the app_category (e.g. IDE / Code Editor, Terminal / CLI, Web Browser, Communication, Entertainment).
-5. Select the primary category from exactly one of these: [Coding, Writing, Browsing, Document Editing, Communication, Design, Social Media, Video/Entertainment, Idle, Other].
-6. Compute productivity_score (integer 0-100) dynamically based on TASK ALIGNMENT and TELEMETRY SIGNALS — NEVER default to static or 100%% scores:
-   - Task Relevance: Direct work on the stated task = +40 to +60 pts; related docs/research = +30 to +45 pts; unrelated browsing/messaging = +10 to +30 pts; social media/leisure/idle = 0 to 15 pts.
-   - Keystroke Entropy > 20: Active typing/writing (+25 pts)
-   - Keystroke Entropy 8-20: Moderate typing/reviewing (+15 pts)
-   - Keystroke Entropy < 8: Reading/idle mode — lowers score unless offset by heavy mouse-click activity
-   - Mouse Clicks > 20: Interactive workflow (+5 pts)
-   - Combined low entropy + few clicks + off-task window title = score 0-20.
-7. Set is_productive=true only if productivity_score >= 50.
-
-CRITICAL FORMATTING REQUIREMENT:
-You must output ONLY the raw JSON array starting with '[' and ending with ']'.
-Do NOT include any introduction text, conversational preamble, thinking thoughts, markdown code blocks, or explanatory text before or after the JSON.
-
-Respond ONLY with a valid JSON array of %d objects in EXACT input order:
-[
-`, len(items), taskContextPrompt, itemSummaries, len(items))
-
-	for i, item := range items {
-		prompt += fmt.Sprintf(`  {"item_index": %d, "app_name": "<detected app>", "app_category": "<detected category>", "window_title": "<detected title>", "category": "<category>", "productivity_score": <0-100 integer>, "is_productive": <true/false>, "confidence": <0.0-1.0>, "reason": "<1-sentence reason evaluating task alignment and telemetry (entropy %.1f)>"}%s
-`, i+1, item.EntropyScore, func() string {
-			if i < len(items)-1 {
-				return ","
-			}
-			return ""
-		}())
-	}
-	prompt += `]`
 
 	parts := []map[string]interface{}{
-		{"text": prompt},
+		{"text": BuildAnalysisPrompt(promptItems, activeTask)},
 	}
 
+	dataDir := g.GetDataDir()
 	for i, item := range items {
-		if item.ImagePath != "" {
-			if data, err := os.ReadFile(item.ImagePath); err == nil {
-				imgBase64 := base64.StdEncoding.EncodeToString(data)
-				mimeType := "image/webp"
-				if strings.HasSuffix(item.ImagePath, ".png") {
-					mimeType = "image/png"
-				} else if strings.HasSuffix(item.ImagePath, ".jpg") || strings.HasSuffix(item.ImagePath, ".jpeg") {
-					mimeType = "image/jpeg"
-				}
-				parts = append(parts, map[string]interface{}{
-					"inlineData": map[string]interface{}{
-						"mimeType": mimeType,
-						"data":     imgBase64,
-					},
-				})
-			}
+		imgPath := item.ImagePath
+		if imgPath == "" {
+			continue
 		}
-		parts = append(parts, map[string]interface{}{
-			"text": fmt.Sprintf("[Item %d | Title: %q | Entropy: %.1f/100 | Clicks: %d]", i+1, item.WindowTitle, item.EntropyScore, item.TotalClicks),
-		})
+		if dataDir != "" {
+			imgPath = ThumbnailForImage(imgPath, dataDir)
+		}
+		data, err := os.ReadFile(imgPath)
+		if err != nil {
+			continue
+		}
+		parts = append(parts,
+			map[string]interface{}{"text": fmt.Sprintf("IMAGE %d:", i)},
+			map[string]interface{}{
+				"inlineData": map[string]interface{}{
+					"mimeType": mimeTypeForPath(imgPath),
+					"data":     base64.StdEncoding.EncodeToString(data),
+				},
+			},
+		)
+	}
+
+	maxOutputTokens := 128 + 96*len(items)
+	if maxOutputTokens > 2048 {
+		maxOutputTokens = 2048
 	}
 
 	reqPayload := map[string]interface{}{
@@ -398,44 +415,110 @@ Respond ONLY with a valid JSON array of %d objects in EXACT input order:
 		},
 		"generationConfig": map[string]interface{}{
 			"temperature":      0.1,
-			"maxOutputTokens":  2048,
+			"maxOutputTokens":  maxOutputTokens,
 			"responseMimeType": "application/json",
+			"responseSchema":   AnalysisResponseSchema(),
 		},
 	}
 
-	reqBody, err := json.Marshal(reqPayload)
-	if err != nil {
-		return nil, fmt.Errorf("marshal batch request: %w", err)
-	}
-
-	model := g.GetModel()
-	if model == "" {
-		m, err := g.SelectBestModel(ctx, nil)
+	exclude := map[string]bool{}
+	var lastErr error
+	for attempt := 0; attempt < maxModelCandidates; attempt++ {
+		model, err := g.SelectBestModel(ctx, exclude)
 		if err != nil {
-			return nil, err
+			if lastErr == nil {
+				lastErr = err
+			}
+			break
 		}
-		model = m
+		exclude[model] = true
+
+		rawText, usage, err := g.postGenerateContentWithRetry(ctx, model, reqPayload)
+		if err != nil {
+			lastErr = err
+			log.Printf("[ai/gemini] model %s failed: %v — trying next model", model, err)
+			continue
+		}
+
+		parsed, err := ParseAnalysisJSON(rawText, len(items))
+		if err != nil {
+			lastErr = err
+			log.Printf("[ai/gemini] model %s returned unparsable output: %v — trying next model", model, err)
+			continue
+		}
+
+		log.Printf("[ai/gemini] analyzed %d items with model %s (tokens: prompt=%d output=%d)", len(items), model, usage.PromptTokenCount, usage.CandidatesTokenCount)
+		return mapChunkResults(items, parsed, usage), nil
 	}
 
+	if lastErr == nil {
+		lastErr = fmt.Errorf("no working Gemini models available")
+	}
+	return nil, lastErr
+}
+
+// postGenerateContentWithRetry performs a single generateContent call with retry,
+// honoring Retry-After and backing off on 429/5xx/network errors. If the model
+// rejects responseSchema with a 400, the payload is retried once without it.
+func (g *GeminiClient) postGenerateContentWithRetry(ctx context.Context, model string, reqPayload map[string]interface{}) (string, UsageMetadata, error) {
 	cleanModel := strings.TrimPrefix(model, "models/")
 	url := fmt.Sprintf("https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent?key=%s", cleanModel, g.apiKey)
-	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(reqBody))
+
+	payload := reqPayload
+	schemaDropped := false
+	var rawText string
+	var usage UsageMetadata
+
+	policy := RetryPolicy{MaxAttempts: 4, BaseDelay: time.Second, MaxDelay: 20 * time.Second}
+	err := DoWithRetry(ctx, policy, func(ctx context.Context) (error, bool, time.Duration) {
+		reqBody, err := json.Marshal(payload)
+		if err != nil {
+			return fmt.Errorf("marshal request: %w", err), false, 0
+		}
+
+		req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(reqBody))
+		if err != nil {
+			return err, false, 0
+		}
+		req.Header.Set("Content-Type", "application/json")
+
+		resp, err := g.client.Do(req)
+		if err != nil {
+			return fmt.Errorf("gemini request: %w", err), true, 0
+		}
+		defer resp.Body.Close()
+
+		respData, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
+
+		if resp.StatusCode == http.StatusOK {
+			text, meta, perr := extractResponseText(respData)
+			if perr != nil {
+				return perr, false, 0
+			}
+			rawText, usage = text, meta
+			return nil, false, 0
+		}
+
+		if resp.StatusCode == http.StatusBadRequest && !schemaDropped &&
+			bytes.Contains(respData, []byte("schema")) {
+			schemaDropped = true
+			payload = withoutResponseSchema(reqPayload)
+			return fmt.Errorf("gemini 400 (schema unsupported): %s", truncateString(string(respData), 200)), true, 0
+		}
+
+		return fmt.Errorf("gemini error %d: %s", resp.StatusCode, truncateString(string(respData), 300)),
+			IsRetryableStatus(resp.StatusCode),
+			RetryAfterFromHeader(resp.Header)
+	})
 	if err != nil {
-		return nil, err
+		return "", UsageMetadata{}, err
 	}
-	req.Header.Set("Content-Type", "application/json")
+	return rawText, usage, nil
+}
 
-	resp, err := g.client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("gemini batch request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		data, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("gemini batch error %d: %s", resp.StatusCode, string(data))
-	}
-
+// extractResponseText pulls the last non-thought text part and usage metadata
+// from a generateContent response body.
+func extractResponseText(respData []byte) (string, UsageMetadata, error) {
 	var geminiResp struct {
 		Candidates []struct {
 			Content struct {
@@ -447,72 +530,54 @@ Respond ONLY with a valid JSON array of %d objects in EXACT input order:
 		} `json:"candidates"`
 		UsageMetadata UsageMetadata `json:"usageMetadata"`
 	}
-
-	if err := json.NewDecoder(resp.Body).Decode(&geminiResp); err != nil || len(geminiResp.Candidates) == 0 || len(geminiResp.Candidates[0].Content.Parts) == 0 {
-		return nil, fmt.Errorf("invalid gemini batch response format")
+	if err := json.Unmarshal(respData, &geminiResp); err != nil {
+		return "", UsageMetadata{}, fmt.Errorf("decode gemini response: %w", err)
+	}
+	if len(geminiResp.Candidates) == 0 || len(geminiResp.Candidates[0].Content.Parts) == 0 {
+		return "", geminiResp.UsageMetadata, fmt.Errorf("invalid gemini response format")
 	}
 
-	// Extract non-thought text part (thinking models return thoughts in part 0 and JSON in part 1)
+	respParts := geminiResp.Candidates[0].Content.Parts
 	rawText := ""
-	candParts := geminiResp.Candidates[0].Content.Parts
-	for i := len(candParts) - 1; i >= 0; i-- {
-		p := candParts[i]
-		if !p.Thought && strings.TrimSpace(p.Text) != "" {
-			rawText = strings.TrimSpace(p.Text)
+	for i := len(respParts) - 1; i >= 0; i-- {
+		if !respParts[i].Thought && strings.TrimSpace(respParts[i].Text) != "" {
+			rawText = strings.TrimSpace(respParts[i].Text)
 			break
 		}
 	}
 	if rawText == "" {
-		rawText = strings.TrimSpace(candParts[0].Text)
+		rawText = strings.TrimSpace(respParts[0].Text)
 	}
-	jsonArrayStr := extractJSONArrayString(rawText)
-	var rawResults []struct {
-		ItemIndex         int     `json:"item_index"`
-		AppName           string  `json:"app_name"`
-		AppCategory       string  `json:"app_category"`
-		WindowTitle       string  `json:"window_title"`
-		Category          string  `json:"category"`
-		ProductivityScore *float64 `json:"productivity_score"`
-		ProductiveScore   *float64 `json:"productive_score"`
-		IsProductive      bool    `json:"is_productive"`
-		Productive        bool    `json:"productive"`
-		Confidence        float64 `json:"confidence"`
-		Reason            string  `json:"reason"`
-	}
+	return rawText, geminiResp.UsageMetadata, nil
+}
 
-	if err := json.Unmarshal([]byte(jsonArrayStr), &rawResults); err != nil {
-		return nil, fmt.Errorf("parse batch JSON (%q): %w", truncateString(rawText, 100), err)
-	}
-
-	if len(rawResults) == 0 {
-		return nil, fmt.Errorf("gemini batch returned no results")
-	}
-
-	// Map model results by their declared item_index instead of positional order.
-	indexMap := make(map[int]int, len(rawResults))
-	for ri, r := range rawResults {
-		if r.ItemIndex > 0 {
-			indexMap[r.ItemIndex] = ri
+// mapChunkResults maps parsed model output back to input items by index,
+// falling back to positional mapping when the model omits indexes.
+func mapChunkResults(items []BatchAnalysisItem, parsed []AnalysisResultItem, usage UsageMetadata) []BatchAnalysisResult {
+	byIndex := make(map[int]AnalysisResultItem, len(parsed))
+	for _, r := range parsed {
+		if _, exists := byIndex[r.Index]; !exists {
+			byIndex[r.Index] = r
 		}
 	}
+	positional := len(parsed) == len(items)
 
 	var results []BatchAnalysisResult
 	for i, item := range items {
-		ri, ok := indexMap[i+1]
-		if !ok && len(rawResults) == len(items) && rawResults[i].ItemIndex == 0 {
-			ri, ok = i, true
+		r, ok := byIndex[i]
+		if !ok && positional {
+			r, ok = parsed[i], true
 		}
 		if !ok {
-			// No model result for this item — leave it pending for retry instead of fabricating a score.
 			continue
 		}
 
-		r := rawResults[ri]
-		score := 0.0
-		if r.ProductivityScore != nil {
-			score = *r.ProductivityScore
-		} else if r.ProductiveScore != nil {
-			score = *r.ProductiveScore
+		score := r.Score
+		if score < 0 {
+			score = 0
+		}
+		if score > 100 {
+			score = 100
 		}
 
 		resItem := BatchAnalysisResult{
@@ -520,8 +585,8 @@ Respond ONLY with a valid JSON array of %d objects in EXACT input order:
 			Category:        r.Category,
 			AppName:         r.AppName,
 			AppCategory:     r.AppCategory,
-			WindowTitle:     r.WindowTitle,
-			Productive:      r.IsProductive || r.Productive || score >= 50,
+			WindowTitle:     item.WindowTitle,
+			Productive:      score >= 50,
 			ProductiveScore: score,
 			Confidence:      r.Confidence,
 			Reason:          r.Reason,
@@ -529,21 +594,56 @@ Respond ONLY with a valid JSON array of %d objects in EXACT input order:
 		if resItem.Category == "" {
 			resItem.Category = "Unknown"
 		}
-		if resItem.Confidence == 0 {
+		if resItem.Confidence <= 0 || resItem.Confidence > 1 {
 			resItem.Confidence = 0.5
 		}
 		if resItem.Reason == "" {
 			resItem.Reason = "AI response incomplete"
 		}
-		// Record usage once per batch request (first result), not per item.
-		if i == 0 {
-			resItem.Usage = geminiResp.UsageMetadata
-		}
 		results = append(results, resItem)
 	}
 
-	return results, nil
+	if len(results) > 0 {
+		results[0].Usage = usage
+	}
+	return results
 }
+
+// withoutResponseSchema returns a copy of the payload with responseSchema removed
+// from generationConfig (for models that reject structured output schemas).
+func withoutResponseSchema(payload map[string]interface{}) map[string]interface{} {
+	cloned := make(map[string]interface{}, len(payload))
+	for k, v := range payload {
+		cloned[k] = v
+	}
+	if gcRaw, ok := cloned["generationConfig"].(map[string]interface{}); ok {
+		gc := make(map[string]interface{}, len(gcRaw))
+		for k, v := range gcRaw {
+			gc[k] = v
+		}
+		delete(gc, "responseSchema")
+		cloned["generationConfig"] = gc
+	}
+	return cloned
+}
+
+// mimeTypeForPath maps an image extension to a MIME type.
+func mimeTypeForPath(path string) string {
+	lower := strings.ToLower(path)
+	switch {
+	case strings.HasSuffix(lower, ".png"):
+		return "image/png"
+	case strings.HasSuffix(lower, ".jpg"), strings.HasSuffix(lower, ".jpeg"):
+		return "image/jpeg"
+	default:
+		return "image/webp"
+	}
+}
+
+const (
+	maxItemsPerRequest = 10
+	maxModelCandidates = 3
+)
 
 func (g *GeminiClient) executeAnalysis(ctx context.Context, modelName string, reqBody []byte) (*AnalysisResult, error) {
 	cleanModelName := strings.TrimPrefix(modelName, "models/")

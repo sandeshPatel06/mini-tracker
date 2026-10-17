@@ -10,6 +10,8 @@ import { AuthPage } from './pages/Auth';
 import { SettingsPage } from './pages/Settings';
 import { Icon, IconName } from './components/Icon';
 import { Modal } from './components/Modal';
+import { DevMenu } from './components/DevMenu';
+import { useDevMode } from './hooks/useDevMode';
 import { localISODate, isPendingLog } from './utils';
 import logoAsset from './assets/logo.png';
 import './style.css';
@@ -315,6 +317,20 @@ export default function App() {
     document.documentElement.setAttribute('data-theme', theme);
     localStorage.setItem('mini_theme', theme);
   }, [theme]);
+
+  // Developer menu (unlocked by 7 quick taps on a logo, session-only)
+  const dev = useDevMode();
+  const [devToastVisible, setDevToastVisible] = useState(false);
+
+  useEffect(() => {
+    if (dev.tapProgress < 4 || dev.tapProgress >= 7) {
+      setDevToastVisible(false);
+      return;
+    }
+    setDevToastVisible(true);
+    const timer = window.setTimeout(() => setDevToastVisible(false), 1600);
+    return () => window.clearTimeout(timer);
+  }, [dev.tapProgress]);
 
   // Tracker Work Clock State
   const [isTrackingActive, setIsTrackingActive] = useState<boolean>(true);
@@ -926,7 +942,7 @@ export default function App() {
       </a>
       {/* Mobile Header Bar */}
       <header className="mobile-header">
-        <div className="mobile-header-brand">
+        <div className="mobile-header-brand" onClick={() => dev.registerTap()} style={{ cursor: 'default' }}>
           <img src={logoAsset} alt="get-Hike Logo" className="app-brand-logo-img" style={{ width: 34, height: 34 }} />
           <span className="sidebar-logo-text" style={{ fontSize: 14 }}>get-Hike</span>
         </div>
@@ -953,7 +969,7 @@ export default function App() {
 
       {/* Sidebar */}
       <aside className={`sidebar ${isMobileMenuOpen ? 'open' : ''}`} id="sidebar">
-        <div className="sidebar-logo">
+        <div className="sidebar-logo" onClick={() => dev.registerTap()} style={{ cursor: 'default' }}>
           <img src={logoAsset} alt="get-Hike Logo" className="app-brand-logo-img" style={{ width: 32, height: 32 }} />
           <div>
             <div className="sidebar-logo-text">get-Hike</div>
@@ -1098,6 +1114,17 @@ export default function App() {
                 <span>Sign In / Sign Up</span>
               </button>
             </div>
+          )}
+
+          {dev.enabled && (
+            <button
+              type="button"
+              className="dev-badge dev-badge-btn"
+              onClick={() => dev.setOpen(true)}
+              title="Open Developer Menu (Ctrl+Shift+D)"
+            >
+              DEV
+            </button>
           )}
 
           <div className="status-badge">
@@ -1276,6 +1303,24 @@ export default function App() {
           )}
         </div>
       </Modal>
+
+      {/* Dev mode tap-progress toast */}
+      {devToastVisible && dev.tapProgress >= 4 && dev.tapProgress < 7 && (
+        <div className="dev-toast" role="status" aria-live="polite">
+          Dev mode: {dev.tapProgress}/7
+        </div>
+      )}
+
+      {/* Developer Menu (desktop-only, session unlocked) */}
+      {dev.enabled && (
+        <DevMenu
+          isOpen={dev.open}
+          onClose={() => dev.setOpen(false)}
+          theme={theme}
+          onThemeChange={setTheme}
+          onDisable={dev.disable}
+        />
+      )}
     </div>
   );
 }

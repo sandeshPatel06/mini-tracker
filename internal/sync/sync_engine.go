@@ -238,6 +238,27 @@ func (s *SyncEngine) TriggerSyncNow(ctx context.Context) error {
 	return nil
 }
 
+// LastSyncedAt returns the time of the last completed pull cycle (zero if never synced).
+func (s *SyncEngine) LastSyncedAt() time.Time {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+	return s.lastSyncedAt
+}
+
+// Enabled reports whether an auth token is set (authenticated org sync mode).
+func (s *SyncEngine) Enabled() bool {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+	return s.authToken != ""
+}
+
+// Endpoint returns the currently configured backend endpoint.
+func (s *SyncEngine) Endpoint() string {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+	return s.backendEndpoint
+}
+
 // StartBackgroundPullCron starts a ticker routine executing periodic sync (e.g., 3-hour pull window).
 func (s *SyncEngine) StartBackgroundPullCron(ctx context.Context, interval time.Duration) {
 	if interval <= 0 {

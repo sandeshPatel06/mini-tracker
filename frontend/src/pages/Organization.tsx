@@ -8,7 +8,8 @@ export const OrganizationPage: React.FC = () => {
   const [members, setMembers] = useState<User[]>([]);
   const [invitations, setInvitations] = useState<Invitation[]>([]);
   const [loading, setLoading] = useState(true);
-  
+  const [loadFailed, setLoadFailed] = useState(false);
+
   // Modal state
   const [showInviteModal, setShowInviteModal] = useState(false);
   const [inviteEmail, setInviteEmail] = useState('');
@@ -119,8 +120,6 @@ export const OrganizationPage: React.FC = () => {
     }
   };
 
-  const [loadFailed, setLoadFailed] = useState(false);
-
   const copyToClipboard = async (text: string, token: string) => {
     try {
       if (!navigator.clipboard?.writeText) throw new Error('Clipboard unavailable');
@@ -153,10 +152,12 @@ export const OrganizationPage: React.FC = () => {
     );
   }
 
+  const cellPad: React.CSSProperties = { padding: '8px 12px' };
+
   return (
     <div className="fade-in-up">
-      {/* Header Banner */}
-      <div className="page-header" style={{ marginBottom: 24 }}>
+      {/* Header */}
+      <div className="page-header" style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 12 }}>
         <div style={{ minWidth: 0, flex: '1 1 auto' }}>
           <div className="flex items-center gap-12" style={{ minWidth: 0 }}>
             <h1
@@ -173,120 +174,107 @@ export const OrganizationPage: React.FC = () => {
           </p>
         </div>
 
-        <button
-          onClick={() => {
-            setShowInviteModal(true);
-            setInviteEmail('');
-            setInviteUrl(null);
-            setErrorMessage(null);
-          }}
-          className="btn btn-primary"
-        >
-          <svg width={20} height={20} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z" />
-          </svg>
-          Invite Team Member
-        </button>
-      </div>
-
-      {/* Summary Stat Grid */}
-      <div className="stats-grid" style={{ marginBottom: 24 }}>
-        <div className="stat-card">
-          <span className="stat-label">Total Active Members</span>
-          <div className="stat-value">{members.length}</div>
-        </div>
-        <div className="stat-card">
-          <span className="stat-label">Pending Invitations</span>
-          <div className="stat-value text-amber">{invitations.length}</div>
-        </div>
-        <div className="stat-card">
-          <span className="stat-label">Org Token Usage</span>
-          <div className="stat-value text-purple">
-            {orgUsage ? (orgUsage.total_tokens || 0).toLocaleString() : '—'}
-          </div>
-          <div className="stat-sub">Tokens across all key sources</div>
+        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+          <button
+            onClick={() => {
+              setShowInviteModal(true);
+              setInviteEmail('');
+              setInviteUrl(null);
+              setErrorMessage(null);
+            }}
+            className="btn btn-primary"
+            style={{ padding: '10px 18px', fontSize: 14, fontWeight: 600 }}
+          >
+            ➕ Invite Team Member
+          </button>
         </div>
       </div>
 
-      {/* Admin-Only Organization API Key & Token Usage Section */}
+      {errorMessage && !showInviteModal && (
+        <div className="alert alert-error" style={{ marginBottom: 16 }}>
+          {errorMessage}
+        </div>
+      )}
+
+      {/* Admin-only organization API usage */}
       {!usageForbidden && orgUsage && (
-        <div className="card" style={{ marginBottom: 24, border: '1px solid var(--accent-purple)' }}>
-          <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-            <h2 className="card-title flex items-center gap-8 text-purple" style={{ minWidth: 0 }}>
-              ⚡ Organization API Key & Token Usage (Admin View)
-            </h2>
+        <div className="card" style={{ marginBottom: 16, border: '1px solid color-mix(in srgb, var(--accent-purple) 30%, transparent)' }}>
+          <div className="card-header">
+            <span className="card-title" style={{ color: 'var(--text-secondary)' }}>
+              ⚡ Organization API Usage <span style={{ color: 'var(--text-muted)', fontWeight: 600 }}>(Admin View)</span>
+            </span>
             <button
               onClick={handleResetUsage}
               disabled={resettingUsage}
-              className="btn btn-secondary"
-              style={{ fontSize: 12, padding: '4px 12px', opacity: resettingUsage ? 0.6 : undefined, cursor: resettingUsage ? 'not-allowed' : undefined }}
+              className="btn btn-secondary btn-sm"
+              title="Recommended after Google resets your API key quota"
+              style={{ opacity: resettingUsage ? 0.6 : undefined, cursor: resettingUsage ? 'not-allowed' : undefined, flexShrink: 0 }}
             >
-              {resettingUsage ? 'Resetting...' : '🔄 Reset Usage (Google Quota Reset)'}
+              {resettingUsage ? 'Resetting…' : '🔄 Reset Usage'}
             </button>
           </div>
 
           <div className="card-body">
-            <div className="stats-grid" style={{ marginBottom: 16 }}>
+            <div className="stats-grid" style={{ marginBottom: orgUsage.user_breakdown && orgUsage.user_breakdown.length > 0 ? 16 : 0 }}>
               <div className="stat-card">
                 <span className="stat-label">Total Requests</span>
-                <div className="stat-value">{orgUsage.total_requests || 0}</div>
+                <div className="stat-value" style={{ fontSize: 22 }}>{orgUsage.total_requests || 0}</div>
               </div>
               <div className="stat-card">
                 <span className="stat-label">Prompt Tokens</span>
-                <div className="stat-value text-cyan">{(orgUsage.prompt_tokens || 0).toLocaleString()}</div>
+                <div className="stat-value text-cyan" style={{ fontSize: 22 }}>{(orgUsage.prompt_tokens || 0).toLocaleString()}</div>
               </div>
               <div className="stat-card">
                 <span className="stat-label">Candidate Tokens</span>
-                <div className="stat-value text-amber">{(orgUsage.candidate_tokens || 0).toLocaleString()}</div>
+                <div className="stat-value text-amber" style={{ fontSize: 22 }}>{(orgUsage.candidate_tokens || 0).toLocaleString()}</div>
               </div>
               <div className="stat-card">
                 <span className="stat-label">Total Tokens</span>
-                <div className="stat-value text-green">{(orgUsage.total_tokens || 0).toLocaleString()}</div>
+                <div className="stat-value text-green" style={{ fontSize: 22 }}>{(orgUsage.total_tokens || 0).toLocaleString()}</div>
               </div>
             </div>
 
-            {/* Member Token Usage Breakdown */}
             {orgUsage.user_breakdown && orgUsage.user_breakdown.length > 0 && (
-              <div style={{ marginTop: 16 }}>
-                <h4 style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 8 }}>
+              <div>
+                <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.7px', marginBottom: 8 }}>
                   Member API Usage Breakdown
-                </h4>
+                </div>
                 <div className="table-container">
                   <table className="data-table">
                     <thead>
                       <tr>
-                        <th>Member</th>
-                        <th>Email</th>
-                        <th>Role</th>
-                        <th>API Requests</th>
-                        <th>Prompt Tokens</th>
-                        <th>Output Tokens</th>
-                        <th>Total Tokens</th>
+                        <th style={cellPad}>Member</th>
+                        <th style={cellPad}>Email</th>
+                        <th style={cellPad}>Role</th>
+                        <th style={cellPad}>API Requests</th>
+                        <th style={cellPad}>Prompt Tokens</th>
+                        <th style={cellPad}>Output Tokens</th>
+                        <th style={cellPad}>Total Tokens</th>
                       </tr>
                     </thead>
                     <tbody>
                       {orgUsage.user_breakdown.map((u: any) => (
                         <tr key={u.user_id}>
                           <td
-                            style={{ fontWeight: 600, maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                            style={{ ...cellPad, fontWeight: 600, maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
                             title={u.full_name}
                           >
                             {u.full_name}
                           </td>
                           <td
                             className="text-muted"
-                            style={{ maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                            style={{ ...cellPad, maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
                             title={u.email}
                           >
                             {u.email}
                           </td>
-                          <td>
+                          <td style={cellPad}>
                             <span className="badge badge-pending">{u.role.toUpperCase()}</span>
                           </td>
-                          <td>{u.total_requests}</td>
-                          <td className="text-muted">{u.prompt_tokens.toLocaleString()}</td>
-                          <td className="text-muted">{u.candidate_tokens.toLocaleString()}</td>
-                          <td style={{ fontWeight: 700, color: 'var(--teal-text)' }}>
+                          <td style={cellPad}>{u.total_requests}</td>
+                          <td className="text-muted" style={cellPad}>{u.prompt_tokens.toLocaleString()}</td>
+                          <td className="text-muted" style={cellPad}>{u.candidate_tokens.toLocaleString()}</td>
+                          <td style={{ ...cellPad, fontWeight: 700, color: 'var(--teal-text)' }}>
                             {u.total_tokens.toLocaleString()}
                           </td>
                         </tr>
@@ -300,123 +288,113 @@ export const OrganizationPage: React.FC = () => {
         </div>
       )}
 
-      {/* Active Team Members List */}
-      <div className="card" style={{ marginBottom: 24 }}>
+      {/* Team members + pending invitations (merged) */}
+      <div className="card">
         <div className="card-header">
-          <h2 className="card-title flex items-center gap-8">
-            <svg width={20} height={20} className="text-purple" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" />
-            </svg>
-            Active Team Members
-          </h2>
+          <span className="card-title">👥 Team Members</span>
+          <span
+            style={{ fontSize: 12, color: 'var(--text-muted)', fontWeight: 500, flexShrink: 0, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+            title={`${members.length} active members · ${invitations.length} pending invitations · ${orgUsage ? (orgUsage.total_tokens || 0).toLocaleString() : '—'} tokens across all key sources`}
+          >
+            {members.length} active · {invitations.length} pending · {orgUsage ? (orgUsage.total_tokens || 0).toLocaleString() : '—'} tokens
+          </span>
         </div>
 
         <div className="card-body" style={{ padding: 0 }}>
-          <div className="table-container" style={{ border: 'none' }}>
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <th>User</th>
-                  <th>Email</th>
-                  <th>Role</th>
-                  <th>Joined Date</th>
-                </tr>
-              </thead>
-              <tbody>
-                {members.map((u) => (
-                  <tr key={u.id}>
-                    <td
-                      style={{ fontWeight: 600, maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
-                      title={u.full_name}
-                    >
-                      {u.full_name}
-                    </td>
-                    <td
-                      className="text-muted"
-                      style={{ maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
-                      title={u.email}
-                    >
-                      {u.email}
-                    </td>
-                    <td>
-                      <span className={`badge ${
-                        u.role === 'owner' ? 'badge-productive' :
-                        u.role === 'admin' ? 'badge-productive' :
-                        'badge-pending'
-                      }`}>
-                        {u.role.toUpperCase()}
-                      </span>
-                    </td>
-                    <td className="text-muted" style={{ fontSize: 12 }}>
-                      {new Date(u.created_at).toLocaleDateString()}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          {members.length === 0 ? (
+            <div style={{ padding: '14px 18px', fontSize: 13, color: 'var(--text-muted)' }}>No team members yet.</div>
+          ) : (
+            members.map((u, i) => (
+              <div
+                key={u.id}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 12,
+                  padding: '10px 18px',
+                  borderBottom: i < members.length - 1 ? '1px solid var(--border-subtle)' : 'none',
+                }}
+              >
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div
+                    style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                    title={u.full_name}
+                  >
+                    {u.full_name}
+                  </div>
+                  <div
+                    style={{ fontSize: 12, color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                    title={u.email}
+                  >
+                    {u.email}
+                  </div>
+                </div>
+                <span
+                  className={`badge ${
+                    u.role === 'owner' ? 'badge-productive' :
+                    u.role === 'admin' ? 'badge-productive' :
+                    'badge-pending'
+                  }`}
+                  style={{ flexShrink: 0 }}
+                >
+                  {u.role.toUpperCase()}
+                </span>
+                <span style={{ fontSize: 12, color: 'var(--text-muted)', flexShrink: 0 }}>
+                  {new Date(u.created_at).toLocaleDateString()}
+                </span>
+              </div>
+            ))
+          )}
         </div>
-      </div>
 
-      {/* Pending Invitations Section */}
-      {invitations.length > 0 && (
-        <div className="card">
-          <div className="card-header">
-            <h2 className="card-title flex items-center gap-8">
-              <svg width={20} height={20} className="text-amber" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
-              </svg>
-              Pending Email Invitations
-            </h2>
-          </div>
-
-          <div className="card-body" style={{ padding: 0 }}>
-            <div className="table-container" style={{ border: 'none' }}>
-              <table className="data-table">
-                <thead>
-                  <tr>
-                    <th>Invited Email</th>
-                    <th>Target Role</th>
-                    <th>Expires</th>
-                    <th style={{ textAlign: 'right' }}>Invite Link</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {invitations.map((inv) => {
-                    const inviteLink = `${window.location.origin}/#/accept-invite?token=${inv.token}`;
-                    return (
-                      <tr key={inv.id}>
-                        <td
-                          style={{ fontWeight: 500, maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
-                          title={inv.email}
-                        >
-                          {inv.email}
-                        </td>
-                        <td>
-                          <span className="badge badge-pending">
-                            {inv.role.toUpperCase()}
-                          </span>
-                        </td>
-                        <td className="text-muted" style={{ fontSize: 12 }}>
-                          {new Date(inv.expires_at).toLocaleString()}
-                        </td>
-                        <td style={{ textAlign: 'right' }}>
-                          <button
-                            onClick={() => copyToClipboard(inviteLink, inv.token)}
-                            className="btn btn-secondary btn-sm"
-                          >
-                            {copiedToken === inv.token ? '✓ Copied!' : '📋 Copy Link'}
-                          </button>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+        {invitations.length > 0 && (
+          <>
+            <div className="card-header" style={{ borderTop: '1px solid var(--border-subtle)' }}>
+              <span className="card-title">📨 Pending Invitations</span>
+              <span style={{ fontSize: 12, color: 'var(--text-muted)', fontWeight: 500 }}>{invitations.length}</span>
             </div>
-          </div>
-        </div>
-      )}
+            <div className="card-body" style={{ padding: 0 }}>
+              {invitations.map((inv, i) => {
+                const inviteLink = `${window.location.origin}/#/accept-invite?token=${inv.token}`;
+                return (
+                  <div
+                    key={inv.id}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 12,
+                      padding: '10px 18px',
+                      borderBottom: i < invitations.length - 1 ? '1px solid var(--border-subtle)' : 'none',
+                    }}
+                  >
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div
+                        style={{ fontSize: 13, fontWeight: 500, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                        title={inv.email}
+                      >
+                        {inv.email}
+                      </div>
+                      <div style={{ fontSize: 12, color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        Expires {new Date(inv.expires_at).toLocaleString()}
+                      </div>
+                    </div>
+                    <span className="badge badge-pending" style={{ flexShrink: 0 }}>
+                      {inv.role.toUpperCase()}
+                    </span>
+                    <button
+                      onClick={() => copyToClipboard(inviteLink, inv.token)}
+                      className="btn btn-secondary btn-sm"
+                      style={{ flexShrink: 0 }}
+                    >
+                      {copiedToken === inv.token ? '✓ Copied!' : '📋 Copy Link'}
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          </>
+        )}
+      </div>
 
       {/* Invite Modal */}
       <Modal
@@ -481,14 +459,23 @@ export const OrganizationPage: React.FC = () => {
 
             <div className="form-group" style={{ marginBottom: 20 }}>
               <label className="form-label">Role & Permissions</label>
-              <select
-                value={inviteRole}
-                onChange={(e) => setInviteRole(e.target.value as 'admin' | 'member')}
-                className="form-select"
-              >
-                <option value="member">Member — Standard User Access</option>
-                <option value="admin">Admin — Team Management Access</option>
-              </select>
+              <div style={{ display: 'flex', gap: 8 }}>
+                {([
+                  { id: 'member', label: '👤 Member', desc: 'Standard user access' },
+                  { id: 'admin', label: '🛡️ Admin', desc: 'Team management access' },
+                ] as const).map((r) => (
+                  <button
+                    key={r.id}
+                    type="button"
+                    title={r.desc}
+                    onClick={() => setInviteRole(r.id)}
+                    className={inviteRole === r.id ? 'btn btn-primary' : 'btn btn-secondary'}
+                    style={{ flex: 1, padding: '8px 10px', fontSize: 13, fontWeight: inviteRole === r.id ? 700 : 500 }}
+                  >
+                    {r.label}
+                  </button>
+                ))}
+              </div>
             </div>
 
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, paddingTop: 12, borderTop: '1px solid var(--border-subtle)' }}>

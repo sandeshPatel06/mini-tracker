@@ -258,7 +258,7 @@ export function ImageModal({ imagePath, onClose }: ImageModalProps) {
         className="btn btn-secondary btn-sm"
         title="Zoom Out (-)"
         aria-label="Zoom out"
-        style={{ height: 28, padding: '0 8px', display: 'inline-flex', alignItems: 'center' }}
+        style={{ height: 28, padding: '0 8px', display: 'inline-flex', alignItems: 'center', opacity: zoomScale <= 0.5 ? 0.6 : undefined, cursor: zoomScale <= 0.5 ? 'not-allowed' : undefined }}
       >
         <Icon name="minus" size={14} />
       </button>
@@ -277,7 +277,7 @@ export function ImageModal({ imagePath, onClose }: ImageModalProps) {
         className="btn btn-secondary btn-sm"
         title="Zoom In (+)"
         aria-label="Zoom in"
-        style={{ height: 28, padding: '0 8px', display: 'inline-flex', alignItems: 'center' }}
+        style={{ height: 28, padding: '0 8px', display: 'inline-flex', alignItems: 'center', opacity: zoomScale >= 3 ? 0.6 : undefined, cursor: zoomScale >= 3 ? 'not-allowed' : undefined }}
       >
         <Icon name="plus" size={14} />
       </button>
@@ -323,7 +323,7 @@ export function ImageModal({ imagePath, onClose }: ImageModalProps) {
       </div>
 
       {imagePath && (
-        <div style={{ marginTop: 10, fontSize: 11, fontFamily: 'monospace', color: 'var(--text-muted)', textAlign: 'center', wordBreak: 'break-all', opacity: 0.8 }}>
+        <div style={{ marginTop: 10, fontSize: 11, fontFamily: 'monospace', color: 'var(--text-muted)', textAlign: 'center', wordBreak: 'break-all' }}>
           {imagePath}
         </div>
       )}

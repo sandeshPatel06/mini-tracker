@@ -55,12 +55,14 @@ interface Props {
 function StatCard({
   label,
   value,
+  valueTitle,
   sub,
   iconName,
   iconColor = 'var(--text-secondary)',
 }: {
   label: string;
   value: string | number;
+  valueTitle?: string;
   sub?: string;
   iconName: IconName;
   iconColor?: string;
@@ -85,7 +87,7 @@ function StatCard({
           <Icon name={iconName} size={18} />
         </div>
       </div>
-      <div className="stat-value">{value}</div>
+      <div className="stat-value" title={valueTitle} style={{ fontVariantNumeric: 'tabular-nums', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{value}</div>
       {sub && <div className="stat-sub">{sub}</div>}
     </div>
   );
@@ -231,7 +233,7 @@ export default function Dashboard({ logs, stats, config, loading, today, onRefre
           <h1 className="page-title" style={{ fontSize: 24, fontWeight: 700, letterSpacing: '-0.4px', color: 'var(--text-primary)' }}>
             Productivity Intelligence
           </h1>
-          <div className="page-subtitle" style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 4, fontSize: 13, color: 'var(--text-muted)' }}>
+          <div className="page-subtitle" style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 10, marginTop: 4, fontSize: 13, color: 'var(--text-muted)', fontVariantNumeric: 'tabular-nums' }}>
             <span>{dateLabel}</span>
             <span>•</span>
             <span>{logs.length} activity captures analyzed</span>
@@ -302,6 +304,7 @@ export default function Dashboard({ logs, stats, config, loading, today, onRefre
         <StatCard
           label="Top Application"
           value={topApps[0]?.appName || stats?.top_category || '—'}
+          valueTitle={topApps[0]?.appName || stats?.top_category || undefined}
           sub={topApps[0] ? `${topApps[0].percent}% of work time` : `${logs.length} snapshots recorded`}
           iconName="award"
           iconColor="var(--accent-teal)"
@@ -322,7 +325,7 @@ export default function Dashboard({ logs, stats, config, loading, today, onRefre
                 AI-assessed focus percentage (0-100%) across active work hours
               </p>
             </div>
-            <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--accent-purple)' }}>
+            <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--purple-text)', fontVariantNumeric: 'tabular-nums' }}>
               Avg: {analyzedLogs.length === 0 ? '—' : `${avgProductivityScore}%`}
             </span>
           </div>
@@ -333,13 +336,16 @@ export default function Dashboard({ logs, stats, config, loading, today, onRefre
                 <XAxis dataKey="hour" tick={{ fontSize: 11, fill: 'var(--text-muted)' }} axisLine={false} tickLine={false} />
                 <YAxis domain={[0, 100]} tick={{ fontSize: 11, fill: 'var(--text-muted)' }} axisLine={false} tickLine={false} />
                 <Tooltip
+                  cursor={{ fill: 'color-mix(in srgb, var(--accent-primary) 8%, transparent)' }}
                   contentStyle={{
-                    backgroundColor: 'var(--bg-surface)',
+                    backgroundColor: 'var(--bg-elevated)',
                     borderColor: 'var(--border-medium)',
                     borderRadius: 8,
                     fontSize: 12,
                     color: 'var(--text-primary)',
                   }}
+                  labelStyle={{ color: 'var(--text-primary)', fontWeight: 600 }}
+                  itemStyle={{ color: 'var(--text-secondary)', fontVariantNumeric: 'tabular-nums' }}
                   formatter={(val: any, _name: any, item: any) => {
                     const captures = item?.payload?.count ?? 0;
                     return [
@@ -359,7 +365,7 @@ export default function Dashboard({ logs, stats, config, loading, today, onRefre
                           ? 'var(--accent-indigo)'
                           : entry.score > 0
                           ? 'var(--accent-amber)'
-                          : 'var(--border-subtle)'
+                          : 'var(--border-medium)'
                       }
                     />
                   ))}
@@ -388,16 +394,16 @@ export default function Dashboard({ logs, stats, config, loading, today, onRefre
             ) : (
               topApps.map((app) => (
                 <div key={app.appName} style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: 13 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{app.appName}</span>
-                      <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>({app.category})</span>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, fontSize: 13 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0, flex: 1 }}>
+                      <span title={app.appName} style={{ fontWeight: 600, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{app.appName}</span>
+                      <span title={app.category} style={{ fontSize: 11, color: 'var(--text-muted)', maxWidth: 120, flexShrink: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>({app.category})</span>
                     </div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                      <span style={{ fontSize: 12, fontWeight: 600, color: app.avgScore >= 60 ? 'var(--accent-green)' : 'var(--accent-red)' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
+                      <span style={{ fontSize: 12, fontWeight: 600, fontVariantNumeric: 'tabular-nums', color: app.avgScore >= 60 ? 'var(--badge-productive-text)' : 'var(--badge-unproductive-text)' }}>
                         {app.avgScore}% Focus
                       </span>
-                      <span style={{ fontSize: 12, color: 'var(--text-muted)', width: 36, textAlign: 'right' }}>
+                      <span style={{ fontSize: 12, color: 'var(--text-muted)', width: 36, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
                         {app.percent}%
                       </span>
                     </div>
@@ -447,49 +453,59 @@ export default function Dashboard({ logs, stats, config, loading, today, onRefre
                     alignItems: 'center',
                     justifyContent: 'space-between',
                     gap: 16,
+                    minWidth: 0,
                   }}
                 >
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 12, minWidth: 0, flex: 1 }}>
                     <div
                       style={{
                         width: 36,
                         height: 36,
                         borderRadius: 8,
                         background: 'var(--bg-elevated)',
-                        color: 'var(--accent-purple)',
+                        color: 'var(--purple-text)',
                         display: 'flex',
                         alignItems: 'center',
                         justifyContent: 'center',
                         border: '1px solid var(--border-subtle)',
+                        flexShrink: 0,
                       }}
                     >
                       <Icon name="clock" size={18} />
                     </div>
-                    <div>
-                      <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>
+                    <div style={{ minWidth: 0 }}>
+                      <div title={session.title} style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                         {session.title}
                       </div>
-                      <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>
+                      <div title={session.summary} style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                         {session.summary}
                       </div>
                     </div>
                   </div>
 
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
                     <span
                       style={{
                         padding: '4px 10px',
                         borderRadius: 99,
                         fontSize: 12,
                         fontWeight: 600,
-                        background: session.productive_pct >= 60 ? 'rgba(16, 185, 129, 0.12)' : 'rgba(239, 68, 68, 0.12)',
-                        color: session.productive_pct >= 60 ? 'var(--accent-green)' : 'var(--accent-red)',
-                        border: `1px solid ${session.productive_pct >= 60 ? 'rgba(16, 185, 129, 0.25)' : 'rgba(239, 68, 68, 0.25)'}`,
+                        whiteSpace: 'nowrap',
+                        fontVariantNumeric: 'tabular-nums',
+                        background: session.productive_pct >= 60
+                          ? 'color-mix(in srgb, var(--accent-green) 12%, transparent)'
+                          : 'color-mix(in srgb, var(--accent-red) 12%, transparent)',
+                        color: session.productive_pct >= 60 ? 'var(--badge-productive-text)' : 'var(--badge-unproductive-text)',
+                        border: `1px solid ${
+                          session.productive_pct >= 60
+                            ? 'color-mix(in srgb, var(--accent-green) 25%, transparent)'
+                            : 'color-mix(in srgb, var(--accent-red) 25%, transparent)'
+                        }`,
                       }}
                     >
                       {Math.round(session.productive_pct)}% AI Focus Score
                     </span>
-                    <span style={{ fontSize: 12, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
+                    <span style={{ fontSize: 12, color: 'var(--text-muted)', whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}>
                       {session.log_count} captures
                     </span>
                   </div>
@@ -562,6 +578,7 @@ export default function Dashboard({ logs, stats, config, loading, today, onRefre
                         <CategoryBadge category={log.ai_category} />
                         {log.app_name && (
                           <span
+                            title={log.app_name}
                             style={{
                               fontSize: 11,
                               fontWeight: 600,
@@ -570,6 +587,10 @@ export default function Dashboard({ logs, stats, config, loading, today, onRefre
                               background: 'var(--bg-elevated)',
                               color: 'var(--text-secondary)',
                               border: '1px solid var(--border-subtle)',
+                              maxWidth: 180,
+                              overflow: 'hidden',
+                              textOverflow: 'ellipsis',
+                              whiteSpace: 'nowrap',
                             }}
                           >
                             💻 {log.app_name}
@@ -577,10 +598,15 @@ export default function Dashboard({ logs, stats, config, loading, today, onRefre
                         )}
                         {log.app_category && (
                           <span
+                            title={log.app_category}
                             style={{
                               fontSize: 11,
                               color: 'var(--text-muted)',
                               fontStyle: 'italic',
+                              maxWidth: 160,
+                              overflow: 'hidden',
+                              textOverflow: 'ellipsis',
+                              whiteSpace: 'nowrap',
                             }}
                           >
                             ({log.app_category})
@@ -605,7 +631,7 @@ export default function Dashboard({ logs, stats, config, loading, today, onRefre
                         </div>
                       )}
 
-                      <div className="timeline-reason" style={{ marginTop: 2 }}>
+                      <div className="timeline-reason" style={{ marginTop: 2 }} title={log.ai_reason || undefined}>
                         {log.ai_reason || '—'}
                       </div>
                     </div>
@@ -622,6 +648,7 @@ export default function Dashboard({ logs, stats, config, loading, today, onRefre
                               ? 'badge-productive'
                               : 'badge-unproductive'
                           }`}
+                          style={{ fontVariantNumeric: 'tabular-nums' }}
                         >
                           <Icon
                             name={scoreVal >= 50 ? 'check' : 'x'}

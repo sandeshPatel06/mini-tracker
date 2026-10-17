@@ -228,7 +228,12 @@ export function SettingsPage({ theme = 'auto', onThemeChange, syncIntervalSecond
               Fetch models, rate limits, configure API keys, and track direct client-side usage.
             </p>
           </div>
-          <button type="submit" disabled={saving} className="btn btn-primary" style={{ padding: '10px 24px', fontSize: 14, fontWeight: 700 }}>
+          <button
+            type="submit"
+            disabled={saving}
+            className="btn btn-primary"
+            style={{ padding: '10px 24px', fontSize: 14, fontWeight: 700, opacity: saving ? 0.6 : undefined, cursor: saving ? 'not-allowed' : undefined }}
+          >
             {saving ? 'Saving…' : '💾 Save Settings & Selected Model'}
           </button>
         </div>
@@ -270,7 +275,7 @@ export function SettingsPage({ theme = 'auto', onThemeChange, syncIntervalSecond
                     gap: 4
                   }}
                 >
-                  <div style={{ fontWeight: 700, fontSize: 13, color: theme === t.id ? 'var(--accent-primary)' : 'var(--text-primary)' }}>
+                  <div style={{ fontWeight: 700, fontSize: 13, color: theme === t.id ? 'var(--accent-primary-text)' : 'var(--text-primary)' }}>
                     {t.title}
                   </div>
                   <div style={{ fontSize: 11, color: 'var(--text-secondary)' }}>
@@ -330,7 +335,11 @@ export function SettingsPage({ theme = 'auto', onThemeChange, syncIntervalSecond
                   onClick={() => fetchAvailableModels(apiKey)}
                   disabled={fetchingModels || !apiKey.trim()}
                   className="btn btn-secondary"
-                  style={{ whiteSpace: 'nowrap' }}
+                  style={{
+                    whiteSpace: 'nowrap',
+                    opacity: fetchingModels || !apiKey.trim() ? 0.6 : undefined,
+                    cursor: fetchingModels || !apiKey.trim() ? 'not-allowed' : undefined,
+                  }}
                 >
                   {fetchingModels ? 'Fetching Models...' : '🔄 Fetch Models'}
                 </button>
@@ -365,7 +374,7 @@ export function SettingsPage({ theme = 'auto', onThemeChange, syncIntervalSecond
 
             {selectedModelInfo && (
               <div style={{ padding: 12, background: 'var(--bg-elevated)', borderRadius: 'var(--radius-md)', marginBottom: 16, border: '1px solid var(--border-subtle)' }}>
-                <div style={{ fontWeight: 600, fontSize: 13, color: 'var(--accent-teal)', marginBottom: 4 }}>
+                <div style={{ fontWeight: 600, fontSize: 13, color: 'var(--teal-text)', marginBottom: 4 }}>
                   {selectedModelInfo.displayName} Limits & Specifications:
                 </div>
                 <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
@@ -377,7 +386,12 @@ export function SettingsPage({ theme = 'auto', onThemeChange, syncIntervalSecond
             )}
 
             <div style={{ display: 'flex', gap: 12, marginTop: 20 }}>
-              <button type="submit" disabled={saving} className="btn btn-primary" style={{ padding: '10px 24px', fontSize: 14, fontWeight: 700 }}>
+              <button
+                type="submit"
+                disabled={saving}
+                className="btn btn-primary"
+                style={{ padding: '10px 24px', fontSize: 14, fontWeight: 700, opacity: saving ? 0.6 : undefined, cursor: saving ? 'not-allowed' : undefined }}
+              >
                 💾 Save Configuration & Selected Model
               </button>
               <button type="button" onClick={handleTestAPI} className="btn btn-secondary">
@@ -401,14 +415,17 @@ export function SettingsPage({ theme = 'auto', onThemeChange, syncIntervalSecond
             </div>
             <div className="card-body">
               {/* Active Model Header Banner */}
-              <div style={{ padding: 14, background: 'var(--bg-elevated)', borderRadius: 'var(--radius-md)', marginBottom: 20, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                <div>
+              <div style={{ padding: 14, background: 'var(--bg-elevated)', borderRadius: 'var(--radius-md)', marginBottom: 20, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+                <div style={{ minWidth: 0 }}>
                   <div style={{ fontSize: 11, textTransform: 'uppercase', color: 'var(--text-muted)', fontWeight: 700, letterSpacing: 0.5 }}>Currently Active Model</div>
-                  <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--accent-teal)', marginTop: 2 }}>
+                  <div
+                    style={{ fontSize: 16, fontWeight: 700, color: 'var(--teal-text)', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                    title={selectedModelInfo?.displayName || model.replace('models/', '')}
+                  >
                     {selectedModelInfo?.displayName || model.replace('models/', '')}
                   </div>
                 </div>
-                <div className="badge badge-productive" style={{ fontSize: 12 }}>
+                <div className="badge badge-productive" style={{ fontSize: 12, flexShrink: 0 }}>
                   {isGemma ? 'Gemma family' : isPro ? 'Gemini Pro family' : 'Gemini Flash family'}
                 </div>
               </div>
@@ -416,8 +433,8 @@ export function SettingsPage({ theme = 'auto', onThemeChange, syncIntervalSecond
               {/* Live tracked usage stat cards */}
               <div className="stats-grid" style={{ marginBottom: 20 }}>
                 <div className="stat-card" style={{ border: '1px solid var(--accent-purple)', background: 'var(--bg-elevated)' }}>
-                  <span className="stat-label" style={{ color: 'var(--accent-teal)', fontWeight: 700 }}>⏳ Next AI Sync In</span>
-                  <div className="stat-value text-purple" style={{ fontSize: 24, fontWeight: 800 }}>
+                  <span className="stat-label" style={{ color: 'var(--teal-text)', fontWeight: 700 }}>⏳ Next AI Sync In</span>
+                  <div className="stat-value text-purple" style={{ fontSize: 24, fontWeight: 800, fontVariantNumeric: 'tabular-nums' }}>
                     {nextSyncSeconds}s
                   </div>
                   <div className="stat-sub">Based on your {syncIntervalSeconds}s capture interval</div>
@@ -446,7 +463,7 @@ export function SettingsPage({ theme = 'auto', onThemeChange, syncIntervalSecond
 
               {/* Provider-limits note + batching behaviour */}
               <div style={{ padding: 14, background: 'var(--bg-elevated)', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-subtle)', fontSize: 12, color: 'var(--text-secondary)' }}>
-                <div style={{ fontWeight: 600, color: 'var(--accent-teal)', marginBottom: 4, display: 'flex', alignItems: 'center', gap: 6 }}>
+                <div style={{ fontWeight: 600, color: 'var(--teal-text)', marginBottom: 4, display: 'flex', alignItems: 'center', gap: 6 }}>
                   ℹ️ Provider rate-limit reference (not live quota)
                 </div>
                 <div>
@@ -461,9 +478,9 @@ export function SettingsPage({ theme = 'auto', onThemeChange, syncIntervalSecond
       })()}
 
       {/* Danger Zone: Separate & Hidden from Primary Action Bar */}
-      <div className="card" style={{ marginTop: 24, border: '1px solid rgba(239, 68, 68, 0.3)' }}>
-        <div className="card-header" style={{ borderBottom: '1px solid rgba(239, 68, 68, 0.2)' }}>
-          <span className="card-title" style={{ color: 'var(--accent-red)' }}>⚠️ Danger Zone - Data Purge</span>
+      <div className="card" style={{ marginTop: 24, border: '1px solid color-mix(in srgb, var(--accent-red) 30%, transparent)' }}>
+        <div className="card-header" style={{ borderBottom: '1px solid color-mix(in srgb, var(--accent-red) 20%, transparent)' }}>
+          <span className="card-title" style={{ color: 'var(--danger-text)' }}>⚠️ Danger Zone - Data Purge</span>
         </div>
         <div className="card-body">
           <p style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 16 }}>
@@ -473,9 +490,9 @@ export function SettingsPage({ theme = 'auto', onThemeChange, syncIntervalSecond
             onClick={handleClearData}
             className="btn"
             style={{
-              background: 'rgba(239, 68, 68, 0.15)',
+              background: 'color-mix(in srgb, var(--accent-red) 15%, transparent)',
               border: '1px solid var(--accent-red)',
-              color: 'var(--accent-red)',
+              color: 'var(--danger-text)',
               fontWeight: 600,
               cursor: 'pointer'
             }}

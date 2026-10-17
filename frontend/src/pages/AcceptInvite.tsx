@@ -97,11 +97,11 @@ export const AcceptInvitePage: React.FC<AcceptInviteProps> = ({ token, onSuccess
 
   if (error && !invitation) {
     return (
-      <div className="card fade-in-up" style={{ maxWidth: 440, margin: '48px auto', textAlign: 'center' }}>
+      <div className="card fade-in-up" style={{ maxWidth: 440, margin: '48px auto', textAlign: 'center', borderColor: 'var(--border-medium)' }}>
         <div className="card-body" style={{ padding: 32 }}>
           <div style={{ fontSize: 36, marginBottom: 12 }}>⚠️</div>
           <h2 style={{ fontSize: 18, fontWeight: 700, color: 'var(--text-primary)', marginBottom: 8 }}>Invalid Invitation</h2>
-          <p style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 20 }}>{error}</p>
+          <p style={{ fontSize: 13, color: 'var(--danger-text)', marginBottom: 20 }}>{error}</p>
           <button
             onClick={() => window.location.hash = ''}
             className="btn btn-secondary"
@@ -115,13 +115,16 @@ export const AcceptInvitePage: React.FC<AcceptInviteProps> = ({ token, onSuccess
 
   return (
     <div className="fade-in-up" style={{ maxWidth: 440, margin: '32px auto' }}>
-      <div className="card">
+      <div className="card" style={{ borderColor: 'var(--border-medium)' }}>
         <div className="card-body" style={{ padding: 28 }}>
           <div style={{ textAlign: 'center', marginBottom: 20 }}>
             <span className="badge badge-productive" style={{ marginBottom: 10 }}>
               Team Onboarding
             </span>
-            <h1 style={{ fontSize: 20, fontWeight: 700, color: 'var(--text-primary)', marginTop: 8 }}>
+            <h1
+              style={{ fontSize: 20, fontWeight: 700, color: 'var(--text-primary)', marginTop: 8, overflowWrap: 'break-word' }}
+              title={invitation?.org_name}
+            >
               Join {invitation?.org_name}
             </h1>
             <p style={{ fontSize: 13, color: 'var(--text-secondary)', marginTop: 4 }}>
@@ -143,7 +146,8 @@ export const AcceptInvitePage: React.FC<AcceptInviteProps> = ({ token, onSuccess
                 disabled
                 value={invitation?.email || ''}
                 className="form-input"
-                style={{ opacity: 0.7, cursor: 'not-allowed' }}
+                title={invitation?.email || ''}
+                style={{ opacity: 0.7, cursor: 'not-allowed', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
               />
             </div>
 
@@ -176,7 +180,7 @@ export const AcceptInvitePage: React.FC<AcceptInviteProps> = ({ token, onSuccess
               type="submit"
               disabled={submitting}
               className="btn btn-primary w-full"
-              style={{ marginTop: 12, padding: '10px 16px' }}
+              style={{ marginTop: 12, padding: '10px 16px', opacity: submitting ? 0.6 : undefined, cursor: submitting ? 'not-allowed' : undefined }}
             >
               {submitting ? 'Creating Account...' : 'Complete Onboarding & Join Team'}
             </button>

@@ -168,7 +168,12 @@ export function Modal({
         {hasHeader ? (
           <div className="modal-header">
             {title && (
-              <h3 className="modal-title" id={titleId}>
+              <h3
+                className="modal-title"
+                id={titleId}
+                title={typeof title === 'string' ? title : undefined}
+                style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+              >
                 {title}
               </h3>
             )}
@@ -178,6 +183,7 @@ export function Modal({
                 alignItems: 'center',
                 gap: 8,
                 marginLeft: 'auto',
+                flexShrink: 0,
               }}
             >
               {actions}

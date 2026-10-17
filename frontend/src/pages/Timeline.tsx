@@ -182,9 +182,9 @@ export default function Timeline({ logs, loading, today, onDateChange, loadError
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: 14, fontSize: 13, color: 'var(--text-muted)' }}>
-            <span>Showing <strong style={{ color: 'var(--text-primary)' }}>{paginatedLogs.length}</strong> of {filteredLogs.length}</span>
+            <span style={{ fontVariantNumeric: 'tabular-nums' }}>Showing <strong style={{ color: 'var(--text-primary)' }}>{paginatedLogs.length}</strong> of {filteredLogs.length}</span>
             <span>•</span>
-            <span style={{ fontWeight: 600, color: avgDayScore >= FOCUS_OK ? 'var(--accent-green)' : 'var(--accent-primary)' }}>
+            <span style={{ fontWeight: 600, fontVariantNumeric: 'tabular-nums', color: avgDayScore >= FOCUS_OK ? 'var(--badge-productive-text)' : 'var(--accent-primary-text)' }}>
               Avg Day Focus: {analyzedLogs.length === 0 ? '—' : `${avgDayScore}%`}
             </span>
           </div>
@@ -197,7 +197,7 @@ export default function Timeline({ logs, loading, today, onDateChange, loadError
           <span className="card-title" style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-primary)', textTransform: 'none' }}>
             {today === localISODate() ? 'Today\'s Log Feed' : format(new Date(today + 'T00:00:00'), 'MMMM d, yyyy')}
           </span>
-          <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+          <span style={{ fontSize: 12, color: 'var(--text-muted)', fontVariantNumeric: 'tabular-nums' }}>
             Page {currentPage} of {totalPages}
           </span>
         </div>
@@ -265,7 +265,7 @@ export default function Timeline({ logs, loading, today, onDateChange, loadError
 
                 return (
                   <div key={log.id} className="timeline-item">
-                    <span className="timeline-time">
+                    <span className="timeline-time" style={{ fontVariantNumeric: 'tabular-nums' }}>
                       {format(new Date(log.timestamp), 'HH:mm:ss')}
                     </span>
 
@@ -279,6 +279,7 @@ export default function Timeline({ logs, loading, today, onDateChange, loadError
                         <CategoryBadge category={log.ai_category} />
                         {log.app_name && (
                           <span
+                            title={log.app_name}
                             style={{
                               fontSize: 11,
                               fontWeight: 600,
@@ -287,13 +288,20 @@ export default function Timeline({ logs, loading, today, onDateChange, loadError
                               background: 'var(--bg-elevated)',
                               color: 'var(--text-secondary)',
                               border: '1px solid var(--border-subtle)',
+                              maxWidth: 180,
+                              overflow: 'hidden',
+                              textOverflow: 'ellipsis',
+                              whiteSpace: 'nowrap',
                             }}
                           >
                             💻 {log.app_name}
                           </span>
                         )}
                         {log.app_category && (
-                          <span style={{ fontSize: 11, color: 'var(--text-muted)', fontStyle: 'italic' }}>
+                          <span
+                            title={log.app_category}
+                            style={{ fontSize: 11, color: 'var(--text-muted)', fontStyle: 'italic', maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                          >
                             ({log.app_category})
                           </span>
                         )}
@@ -320,24 +328,24 @@ export default function Timeline({ logs, loading, today, onDateChange, loadError
                         {log.ai_reason || '—'}
                       </div>
 
-                      <div style={{ marginTop: 4, display: 'flex', gap: 12, alignItems: 'center', fontSize: 11, color: 'var(--text-muted)' }}>
+                      <div style={{ marginTop: 4, display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'center', fontSize: 11, color: 'var(--text-muted)', fontVariantNumeric: 'tabular-nums' }}>
                         <span>⌨️ {log.total_keys} keys · {log.unique_keys} unique</span>
                         <span>•</span>
                         <span>Entropy: {log.entropy_score.toFixed(1)}</span>
                       </div>
                     </div>
 
-                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
+                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4, flexShrink: 0 }}>
                       {isPendingLog(log) ? (
-                        <span className="badge badge-pending">Pending AI</span>
+                        <span className="badge badge-pending" style={{ fontVariantNumeric: 'tabular-nums' }}>Pending AI</span>
                       ) : (
-                        <span className={`badge ${scoreVal >= 50 ? 'badge-productive' : 'badge-unproductive'}`}>
+                        <span className={`badge ${scoreVal >= 50 ? 'badge-productive' : 'badge-unproductive'}`} style={{ fontVariantNumeric: 'tabular-nums' }}>
                           <Icon name={scoreVal >= 50 ? 'check' : 'x'} size={13} />
                           {scoreVal}% Focus
                         </span>
                       )}
                       {log.ai_confidence > 0 && (
-                        <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>
+                        <span style={{ fontSize: 10, color: 'var(--text-muted)', fontVariantNumeric: 'tabular-nums' }}>
                           {(log.ai_confidence * 100).toFixed(0)}% AI confidence
                         </span>
                       )}
@@ -381,7 +389,7 @@ export default function Timeline({ logs, loading, today, onDateChange, loadError
               >
                 Previous
               </button>
-              <span style={{ fontSize: 12, color: 'var(--text-primary)', fontWeight: 600 }}>
+              <span style={{ fontSize: 12, color: 'var(--text-primary)', fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>
                 {currentPage} / {totalPages}
               </span>
               <button

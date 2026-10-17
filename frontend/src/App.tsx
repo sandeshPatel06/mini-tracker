@@ -888,7 +888,7 @@ export default function App() {
           <div
             className="alert alert-error"
             role="alert"
-            style={{ position: 'fixed', top: 16, left: '50%', transform: 'translateX(-50%)', zIndex: 2000, maxWidth: 440, boxShadow: '0 10px 30px rgba(0, 0, 0, 0.35)' }}
+            style={{ position: 'fixed', top: 16, left: '50%', transform: 'translateX(-50%)', zIndex: 2000, maxWidth: 440, boxShadow: 'var(--shadow-md)' }}
           >
             {authNotice}
           </div>
@@ -931,7 +931,7 @@ export default function App() {
           <span className="sidebar-logo-text" style={{ fontSize: 14 }}>get-Hike</span>
         </div>
         <div className="mobile-header-actions">
-          <div style={{ fontFamily: 'monospace', fontSize: 13, fontWeight: 700, color: 'var(--accent-teal)' }}>
+          <div style={{ fontFamily: 'monospace', fontSize: 13, fontWeight: 700, color: 'var(--teal-text)', fontVariantNumeric: 'tabular-nums' }}>
             {formatTimer(elapsedSeconds)}
           </div>
           <button
@@ -967,20 +967,20 @@ export default function App() {
             <span className="sidebar-widget-label">Work Session</span>
             <span
               style={{
-                fontSize: 10,
+                fontSize: 11,
                 padding: '2px 6px',
                 borderRadius: 4,
                 fontWeight: 600,
-                background: isGuestMode ? 'rgba(139, 92, 246, 0.15)' : 'rgba(16, 185, 129, 0.15)',
-                color: isGuestMode ? 'var(--accent-purple)' : 'var(--accent-green)',
-                border: isGuestMode ? '1px solid rgba(139, 92, 246, 0.3)' : '1px solid rgba(16, 185, 129, 0.3)',
+                background: isGuestMode ? 'color-mix(in srgb, var(--accent-purple) 15%, transparent)' : 'color-mix(in srgb, var(--accent-green) 15%, transparent)',
+                color: isGuestMode ? 'var(--accent-purple)' : 'var(--accent-primary-text)',
+                border: isGuestMode ? '1px solid color-mix(in srgb, var(--accent-purple) 30%, transparent)' : '1px solid color-mix(in srgb, var(--accent-green) 30%, transparent)',
                 whiteSpace: 'nowrap',
               }}
             >
               {isGuestMode ? 'Offline Guest' : 'Synced'}
             </span>
           </div>
-          <div className="sidebar-widget-timer">
+          <div className="sidebar-widget-timer" style={{ fontVariantNumeric: 'tabular-nums' }}>
             {formatTimer(elapsedSeconds)}
           </div>
           <button
@@ -992,7 +992,7 @@ export default function App() {
             <span>{isTrackingActive ? 'Pause Tracker' : 'Start Tracker'}</span>
           </button>
           {trackerError && (
-            <div role="alert" style={{ fontSize: 11, color: 'var(--accent-red)', marginBottom: 8 }}>
+            <div role="alert" style={{ fontSize: 11, color: 'var(--danger-text)', marginBottom: 8 }}>
               {trackerError}
             </div>
           )}
@@ -1005,7 +1005,7 @@ export default function App() {
             title={userTask || 'Set target task goal (max 20 words)'}
           >
             <Icon name="target" size={12} />
-            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
               {userTask ? `Task: ${userTask}` : 'Set Target Task Goal'}
             </span>
           </button>
@@ -1050,9 +1050,14 @@ export default function App() {
         <div className="sidebar-footer">
           {currentUser ? (
             <div style={{ marginBottom: 12, paddingBottom: 10, borderBottom: '1px solid var(--border-subtle)' }}>
-              <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', display: 'flex', alignItems: 'center', gap: 6 }}>
+              <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: 6 }}>
                 <Icon name="user" size={14} color="var(--text-secondary)" />
-                <span>{currentUser.full_name || currentUser.email}</span>
+                <span
+                  style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                  title={currentUser.full_name || currentUser.email}
+                >
+                  {currentUser.full_name || currentUser.email}
+                </span>
               </div>
               <div style={{ fontSize: 11, color: 'var(--text-muted)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 6 }}>
                 <span style={{ textTransform: 'capitalize' }}>Role: {currentUser.role}</span>
@@ -1061,7 +1066,7 @@ export default function App() {
                   style={{
                     background: 'transparent',
                     border: 'none',
-                    color: 'var(--accent-red)',
+                    color: 'var(--danger-text)',
                     fontSize: 11,
                     fontWeight: 600,
                     cursor: 'pointer',
@@ -1257,14 +1262,14 @@ export default function App() {
         <div className="flex items-center justify-between mt-4" style={{ marginBottom: 4 }}>
           <span style={{
             fontSize: 11,
-            color: taskInput.trim().split(/\s+/).filter(Boolean).length > 20 ? 'var(--accent-red)' : 'var(--text-muted)'
+            color: taskInput.trim().split(/\s+/).filter(Boolean).length > 20 ? 'var(--danger-text)' : 'var(--text-muted)'
           }}>
             Word count: {taskInput.trim().split(/\s+/).filter(Boolean).length} / 20 words max
           </span>
           {userTask && (
             <button
               onClick={() => saveTask('')}
-              style={{ background: 'none', border: 'none', color: 'var(--accent-red)', fontSize: 11, fontWeight: 600, cursor: 'pointer' }}
+              style={{ background: 'none', border: 'none', color: 'var(--danger-text)', fontSize: 11, fontWeight: 600, cursor: 'pointer' }}
             >
               Clear Task
             </button>

@@ -25,32 +25,20 @@ interface Props {
   config?: AppConfig | null;
 }
 
-const COLORS = {
-  productive:   'var(--accent-green)',
-  unproductive: 'var(--accent-red)',
-  entropy:      'var(--accent-indigo)',
-  teal:         'var(--accent-teal)',
-  amber:        'var(--accent-amber)',
-  purple:       'var(--accent-purple)',
-  cyan:         'var(--accent-cyan)',
-};
-
 // Custom Tooltip Component
 const CustomTooltip = ({ active, payload, label }: { active?: boolean; payload?: any[]; label?: string }) => {
   if (!active || !payload?.length) return null;
   return (
     <div style={{
-      background: 'var(--bg-glass)',
-      backdropFilter: 'blur(8px)',
-      WebkitBackdropFilter: 'blur(8px)',
+      background: 'var(--bg-elevated)',
       border: '1px solid var(--border-medium)',
       borderRadius: 'var(--radius-md)',
       padding: '10px 14px',
       fontSize: 12,
-      boxShadow: '0 4px 15px rgba(0, 0, 0, 0.2), inset 0 1px 1px rgba(255, 255, 255, 0.05)',
+      boxShadow: 'var(--shadow-md)',
       color: 'var(--text-primary)',
     }}>
-      <div style={{ color: 'var(--text-muted)', marginBottom: 6, fontWeight: 600 }}>{label}</div>
+      <div style={{ color: 'var(--text-secondary)', marginBottom: 6, fontWeight: 600 }}>{label}</div>
       {payload.map((p, i) => {
         const noCaptures = p.name === 'Focus Rating' && p.payload?.Captures === 0;
         const display = noCaptures
@@ -59,7 +47,7 @@ const CustomTooltip = ({ active, payload, label }: { active?: boolean; payload?:
             ? (Number.isInteger(p.value) ? `${p.value}${p.unit || ''}` : p.value.toFixed(1))
             : p.value;
         return (
-          <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4 }}>
+          <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4, fontVariantNumeric: 'tabular-nums' }}>
             <div style={{ width: 8, height: 8, borderRadius: '50%', background: p.color || p.fill }} />
             <span>{p.name}: <strong>{display}</strong></span>
           </div>
@@ -176,8 +164,13 @@ export default function Analytics({
   }, [logs]);
 
   const PIE_COLORS = [
-    COLORS.entropy, COLORS.teal, COLORS.amber, COLORS.productive,
-    COLORS.purple, COLORS.cyan, 'var(--accent-red)'
+    'var(--accent-green)',
+    'var(--accent-indigo)',
+    'var(--accent-teal)',
+    'var(--accent-amber)',
+    'var(--accent-purple)',
+    'var(--accent-cyan)',
+    'var(--accent-red)',
   ];
 
   const dateLabel = startDate && endDate && startDate !== endDate
@@ -303,7 +296,7 @@ export default function Analytics({
           <div className="stats-grid">
             <div className="stat-card">
               <span className="stat-label">AI Focus Rating</span>
-              <div className="stat-value" style={{ color: analyzedLogs.length === 0 ? 'var(--text-muted)' : avgFocusScore >= FOCUS_GOOD ? 'var(--accent-green)' : avgFocusScore >= FOCUS_OK ? 'var(--accent-amber)' : 'var(--accent-red)' }}>
+              <div className="stat-value" style={{ color: analyzedLogs.length === 0 ? 'var(--text-muted)' : avgFocusScore >= FOCUS_GOOD ? 'var(--accent-green)' : avgFocusScore >= FOCUS_OK ? 'var(--accent-amber)' : 'var(--accent-red)', fontVariantNumeric: 'tabular-nums' }}>
                 {analyzedLogs.length === 0 ? '—' : `${avgFocusScore}%`}
               </div>
               <div className="stat-sub">{analyzedLogs.length} of {logs.length} captures evaluated</div>
@@ -311,7 +304,7 @@ export default function Analytics({
 
             <div className="stat-card">
               <span className="stat-label">Active Work Duration</span>
-              <div className="stat-value">
+              <div className="stat-value" style={{ fontVariantNumeric: 'tabular-nums' }}>
                 {activeMinutes >= 60 ? `${(activeMinutes / 60).toFixed(1)} hrs` : `${Math.round(activeMinutes)} mins`}
               </div>
               <div className="stat-sub">Based on {logs.length} background telemetry points</div>
@@ -319,7 +312,7 @@ export default function Analytics({
 
             <div className="stat-card">
               <span className="stat-label">Avg Input Telemetry</span>
-              <div className="stat-value">
+              <div className="stat-value" style={{ fontVariantNumeric: 'tabular-nums' }}>
                 {logs.length > 0 ? Math.round(logs.reduce((acc, l) => acc + l.total_keys, 0) / logs.length) : 0} <span style={{ fontSize: 14, fontWeight: 500, color: 'var(--text-muted)' }}>keys / cap</span>
               </div>
               <div className="stat-sub">Average keystrokes per {intervalSec}s capture interval</div>
@@ -337,7 +330,7 @@ export default function Analytics({
                   Average AI productivity percentage score for each active hour
                 </p>
               </div>
-              <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--accent-purple)' }}>
+              <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--purple-text)', fontVariantNumeric: 'tabular-nums' }}>
                 Overall Focus: {avgFocusScore}%
               </span>
             </div>
@@ -348,7 +341,7 @@ export default function Analytics({
                   <CartesianGrid strokeDasharray="3 3" stroke="var(--border-subtle)" vertical={false} />
                   <XAxis dataKey="hour" tick={{ fontSize: 11, fill: 'var(--text-muted)' }} axisLine={false} tickLine={false} />
                   <YAxis domain={[0, 100]} tick={{ fontSize: 11, fill: 'var(--text-muted)' }} axisLine={false} tickLine={false} />
-                  <Tooltip content={<CustomTooltip />} />
+                  <Tooltip content={<CustomTooltip />} cursor={{ fill: 'color-mix(in srgb, var(--accent-primary) 8%, transparent)' }} />
                   <Bar dataKey="Focus Rating" fill="var(--accent-purple)" radius={[4, 4, 0, 0]} unit="%" />
                 </BarChart>
               </ResponsiveContainer>
@@ -372,16 +365,16 @@ export default function Analytics({
               <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
                 {appData.map((app) => (
                   <div key={app.name} style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: 13 }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                        <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>💻 {app.name}</span>
-                        <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>({app.category})</span>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, fontSize: 13 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0, flex: 1 }}>
+                        <span title={app.name} style={{ fontWeight: 600, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>💻 {app.name}</span>
+                        <span title={app.category} style={{ fontSize: 11, color: 'var(--text-muted)', maxWidth: 120, flexShrink: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>({app.category})</span>
                       </div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                        <span style={{ fontSize: 12, fontWeight: 600, color: app.avgScore >= FOCUS_OK ? 'var(--accent-green)' : 'var(--accent-red)' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
+                        <span style={{ fontSize: 12, fontWeight: 600, fontVariantNumeric: 'tabular-nums', color: app.avgScore >= FOCUS_OK ? 'var(--badge-productive-text)' : 'var(--badge-unproductive-text)' }}>
                           {app.avgScore}% Focus
                         </span>
-                        <span style={{ fontSize: 12, color: 'var(--text-muted)', width: 36, textAlign: 'right' }}>
+                        <span style={{ fontSize: 12, color: 'var(--text-muted)', width: 36, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
                           {app.percent}%
                         </span>
                       </div>
@@ -431,7 +424,12 @@ export default function Analytics({
                         ))}
                       </Pie>
                       <Tooltip content={<CustomTooltip />} />
-                      <Legend verticalAlign="bottom" iconType="circle" wrapperStyle={{ fontSize: 11, color: 'var(--text-muted)' }} />
+                      <Legend
+                        verticalAlign="bottom"
+                        iconType="circle"
+                        wrapperStyle={{ fontSize: 11 }}
+                        formatter={(value: any) => <span style={{ color: 'var(--text-secondary)' }}>{value}</span>}
+                      />
                     </PieChart>
                   </ResponsiveContainer>
                 ) : (
@@ -467,7 +465,7 @@ export default function Analytics({
                     <CartesianGrid strokeDasharray="3 3" stroke="var(--border-subtle)" vertical={false} />
                     <XAxis dataKey="time" tick={{ fontSize: 10, fill: 'var(--text-muted)' }} axisLine={false} tickLine={false} />
                     <YAxis domain={[0, 100]} tick={{ fontSize: 10, fill: 'var(--text-muted)' }} axisLine={false} tickLine={false} />
-                    <Tooltip content={<CustomTooltip />} />
+                    <Tooltip content={<CustomTooltip />} cursor={{ stroke: 'var(--border-medium)', strokeDasharray: '3 3' }} />
                     <Line
                       type="monotone"
                       dataKey="FocusScore"
@@ -486,7 +484,10 @@ export default function Analytics({
                       strokeDasharray="4 4"
                       dot={false}
                     />
-                    <Legend wrapperStyle={{ fontSize: 11 }} />
+                    <Legend
+                      wrapperStyle={{ fontSize: 11 }}
+                      formatter={(value: any) => <span style={{ color: 'var(--text-secondary)' }}>{value}</span>}
+                    />
                   </LineChart>
                 </ResponsiveContainer>
                 )}

@@ -157,10 +157,16 @@ export const OrganizationPage: React.FC = () => {
     <div className="fade-in-up">
       {/* Header Banner */}
       <div className="page-header" style={{ marginBottom: 24 }}>
-        <div>
-          <div className="flex items-center gap-12">
-            <h1 className="page-title">{org?.name || 'Company Organization'}</h1>
-            <span className="badge badge-productive">Corporate Beta</span>
+        <div style={{ minWidth: 0, flex: '1 1 auto' }}>
+          <div className="flex items-center gap-12" style={{ minWidth: 0 }}>
+            <h1
+              className="page-title"
+              style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+              title={org?.name || 'Company Organization'}
+            >
+              {org?.name || 'Company Organization'}
+            </h1>
+            <span className="badge badge-productive" style={{ flexShrink: 0 }}>Corporate Beta</span>
           </div>
           <p className="page-subtitle">
             Manage your team members, permissions, and email invitations for beta productivity tracking.
@@ -205,15 +211,15 @@ export const OrganizationPage: React.FC = () => {
       {/* Admin-Only Organization API Key & Token Usage Section */}
       {!usageForbidden && orgUsage && (
         <div className="card" style={{ marginBottom: 24, border: '1px solid var(--accent-purple)' }}>
-          <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <h2 className="card-title flex items-center gap-8 text-purple">
+          <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+            <h2 className="card-title flex items-center gap-8 text-purple" style={{ minWidth: 0 }}>
               ⚡ Organization API Key & Token Usage (Admin View)
             </h2>
             <button
               onClick={handleResetUsage}
               disabled={resettingUsage}
               className="btn btn-secondary"
-              style={{ fontSize: 12, padding: '4px 12px' }}
+              style={{ fontSize: 12, padding: '4px 12px', opacity: resettingUsage ? 0.6 : undefined, cursor: resettingUsage ? 'not-allowed' : undefined }}
             >
               {resettingUsage ? 'Resetting...' : '🔄 Reset Usage (Google Quota Reset)'}
             </button>
@@ -261,15 +267,26 @@ export const OrganizationPage: React.FC = () => {
                     <tbody>
                       {orgUsage.user_breakdown.map((u: any) => (
                         <tr key={u.user_id}>
-                          <td style={{ fontWeight: 600 }}>{u.full_name}</td>
-                          <td className="text-muted">{u.email}</td>
+                          <td
+                            style={{ fontWeight: 600, maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                            title={u.full_name}
+                          >
+                            {u.full_name}
+                          </td>
+                          <td
+                            className="text-muted"
+                            style={{ maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                            title={u.email}
+                          >
+                            {u.email}
+                          </td>
                           <td>
                             <span className="badge badge-pending">{u.role.toUpperCase()}</span>
                           </td>
                           <td>{u.total_requests}</td>
                           <td className="text-muted">{u.prompt_tokens.toLocaleString()}</td>
                           <td className="text-muted">{u.candidate_tokens.toLocaleString()}</td>
-                          <td style={{ fontWeight: 700, color: 'var(--accent-teal)' }}>
+                          <td style={{ fontWeight: 700, color: 'var(--teal-text)' }}>
                             {u.total_tokens.toLocaleString()}
                           </td>
                         </tr>
@@ -308,8 +325,19 @@ export const OrganizationPage: React.FC = () => {
               <tbody>
                 {members.map((u) => (
                   <tr key={u.id}>
-                    <td style={{ fontWeight: 600 }}>{u.full_name}</td>
-                    <td className="text-muted">{u.email}</td>
+                    <td
+                      style={{ fontWeight: 600, maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                      title={u.full_name}
+                    >
+                      {u.full_name}
+                    </td>
+                    <td
+                      className="text-muted"
+                      style={{ maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                      title={u.email}
+                    >
+                      {u.email}
+                    </td>
                     <td>
                       <span className={`badge ${
                         u.role === 'owner' ? 'badge-productive' :
@@ -358,7 +386,12 @@ export const OrganizationPage: React.FC = () => {
                     const inviteLink = `${window.location.origin}/#/accept-invite?token=${inv.token}`;
                     return (
                       <tr key={inv.id}>
-                        <td style={{ fontWeight: 500 }}>{inv.email}</td>
+                        <td
+                          style={{ fontWeight: 500, maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                          title={inv.email}
+                        >
+                          {inv.email}
+                        </td>
                         <td>
                           <span className="badge badge-pending">
                             {inv.role.toUpperCase()}
@@ -410,7 +443,8 @@ export const OrganizationPage: React.FC = () => {
                   readOnly
                   value={inviteUrl}
                   className="form-input"
-                  style={{ fontFamily: 'monospace', fontSize: 12 }}
+                  title={inviteUrl}
+                  style={{ fontFamily: 'monospace', fontSize: 12, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
                 />
                 <button
                   onClick={() => copyToClipboard(inviteUrl, 'modal')}
@@ -469,6 +503,7 @@ export const OrganizationPage: React.FC = () => {
                 type="submit"
                 disabled={sending}
                 className="btn btn-primary"
+                style={{ opacity: sending ? 0.6 : undefined, cursor: sending ? 'not-allowed' : undefined }}
               >
                 {sending ? 'Sending...' : 'Send Invitation'}
               </button>

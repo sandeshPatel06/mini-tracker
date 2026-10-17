@@ -144,7 +144,7 @@ export function AuthPage({ onAuthSuccess, onSkip }: AuthProps) {
       <div className="auth-card">
         {/* Logo & Header */}
         <div className="auth-header">
-          <img src={logoAsset} alt="get-Hike Logo" style={{ width: 72, height: 72, margin: '0 auto 12px', display: 'block', filter: 'drop-shadow(0 6px 12px rgba(99, 102, 241, 0.4))' }} />
+          <img src={logoAsset} alt="get-Hike Logo" style={{ width: 72, height: 72, margin: '0 auto 12px', display: 'block', filter: 'drop-shadow(0 6px 12px color-mix(in srgb, var(--accent-indigo) 40%, transparent))' }} />
           <h1 className="auth-title">get-Hike</h1>
           <p className="auth-subtitle">
             Privacy-First Linux Productivity Platform & AI Analyzer
@@ -183,6 +183,7 @@ export function AuthPage({ onAuthSuccess, onSkip }: AuthProps) {
             className="btn-oauth btn-google"
             onClick={() => handleOAuth('google')}
             disabled={loading || oauthLoading !== null}
+            style={{ opacity: loading || oauthLoading !== null ? 0.6 : undefined, cursor: loading || oauthLoading !== null ? 'not-allowed' : undefined }}
           >
             <svg width="18" height="18" viewBox="0 0 24 24" className="oauth-icon">
               <path
@@ -210,6 +211,7 @@ export function AuthPage({ onAuthSuccess, onSkip }: AuthProps) {
             className="btn-oauth btn-azure"
             onClick={() => handleOAuth('azure')}
             disabled={loading || oauthLoading !== null}
+            style={{ opacity: loading || oauthLoading !== null ? 0.6 : undefined, cursor: loading || oauthLoading !== null ? 'not-allowed' : undefined }}
           >
             <svg width="18" height="18" viewBox="0 0 23 23" className="oauth-icon">
               <path fill="#f35325" d="M1 1h10v10H1z" />

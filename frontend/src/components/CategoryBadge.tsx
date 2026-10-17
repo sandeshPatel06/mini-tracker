@@ -5,13 +5,13 @@ interface CategoryBadgeProps {
 }
 
 const CATEGORY_STYLES: Record<string, { varName: string }> = {
-  Coding: { varName: '--accent-green' },
-  Writing: { varName: '--accent-teal' },
-  Browsing: { varName: '--accent-cyan' },
+  Coding: { varName: '--badge-productive-text' },
+  Writing: { varName: '--teal-text' },
+  Browsing: { varName: '--cyan-text' },
   Communication: { varName: '--accent-indigo' },
   Design: { varName: '--accent-purple' },
-  'Social Media': { varName: '--accent-amber' },
-  'Video/Entertainment': { varName: '--accent-red' },
+  'Social Media': { varName: '--badge-amber-text' },
+  'Video/Entertainment': { varName: '--badge-unproductive-text' },
   Idle: { varName: '--text-muted' },
   Other: { varName: '--text-muted' },
 };
@@ -24,7 +24,7 @@ export function CategoryBadge({ category }: CategoryBadgeProps) {
   let label: string;
 
   if (isFailed) {
-    colorVar = 'var(--accent-red)';
+    colorVar = 'var(--badge-unproductive-text)';
     label = 'Analysis Failed';
   } else if (isPending) {
     colorVar = 'var(--text-muted)';

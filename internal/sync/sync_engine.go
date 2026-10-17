@@ -91,6 +91,7 @@ func (s *SyncEngine) PushTelemetry(ctx context.Context) (int, error) {
 			"total_keys":    entry.TotalKeys,
 			"unique_keys":   entry.UniqueKeys,
 			"entropy_score": entry.EntropyScore,
+			"total_clicks":  entry.TotalClicks,
 			"app_name":      entry.AppName,
 			"window_title":  entry.WindowTitle,
 		}
@@ -123,7 +124,12 @@ func (s *SyncEngine) PushTelemetry(ctx context.Context) (int, error) {
 			if err := json.NewDecoder(resp.Body).Decode(&respData); err == nil && respData.Success {
 				localIDs = append(localIDs, entry.ID)
 				remoteIDs = append(remoteIDs, respData.RemoteID)
+			} else {
+				log.Printf("[sync] telemetry push response invalid for local log #%d (status %d)", entry.ID, resp.StatusCode)
 			}
+		} else {
+			body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+			log.Printf("[sync] telemetry push rejected for local log #%d: HTTP %d %s", entry.ID, resp.StatusCode, string(body))
 		}
 		resp.Body.Close()
 	}
@@ -186,11 +192,11 @@ func (s *SyncEngine) PullAnalytics(ctx context.Context) (int, error) {
 	syncedCount := 0
 	for _, remoteLog := range remoteLogs {
 		if remoteLog.ID > 0 {
-			// Update local log with AI analysis results
-			_ = s.database.UpdateAIResult(
+			_ = s.database.UpdateAIResultByRemoteID(
 				remoteLog.ID,
 				remoteLog.AICategory,
 				remoteLog.IsProductive,
+				remoteLog.ProductiveScore,
 				remoteLog.AIConfidence,
 				remoteLog.AIReason,
 			)

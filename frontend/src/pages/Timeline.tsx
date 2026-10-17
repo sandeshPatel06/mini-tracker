@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { LogEntry } from '../types';
 import { format } from 'date-fns';
 import { CategoryBadge } from '../components/CategoryBadge';
@@ -62,15 +62,29 @@ export default function Timeline({ logs, loading, today, onDateChange, loadError
 
   const totalPages = Math.ceil(filteredLogs.length / pageSize) || 1;
 
+  // Reset to page 1 when the selected day changes
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [today]);
+
+  // Never leave the paginator on a page that no longer exists
+  useEffect(() => {
+    if (currentPage > totalPages) {
+      setCurrentPage(totalPages);
+    }
+  }, [currentPage, totalPages]);
+
   const paginatedLogs = useMemo(() => {
     const start = (currentPage - 1) * pageSize;
     return filteredLogs.slice(start, start + pageSize);
   }, [filteredLogs, currentPage, pageSize]);
 
-  // Calculate day summary metrics
-  const avgDayScore = logs.length > 0
+  // Calculate day summary metrics from analyzed captures only
+  const analyzedLogs = useMemo(() => logs.filter((l) => !isPendingLog(l)), [logs]);
+
+  const avgDayScore = analyzedLogs.length > 0
     ? Math.round(
-        logs.reduce((acc, l) => acc + (typeof l.productive_score === 'number' ? l.productive_score : l.is_productive ? 100 : 0), 0) / logs.length
+        analyzedLogs.reduce((acc, l) => acc + (typeof l.productive_score === 'number' ? l.productive_score : l.is_productive ? 100 : 0), 0) / analyzedLogs.length
       )
     : 0;
 
@@ -171,7 +185,7 @@ export default function Timeline({ logs, loading, today, onDateChange, loadError
             <span>Showing <strong style={{ color: 'var(--text-primary)' }}>{paginatedLogs.length}</strong> of {filteredLogs.length}</span>
             <span>•</span>
             <span style={{ fontWeight: 600, color: avgDayScore >= FOCUS_OK ? 'var(--accent-green)' : 'var(--accent-primary)' }}>
-              Avg Day Focus: {avgDayScore}%
+              Avg Day Focus: {analyzedLogs.length === 0 ? '—' : `${avgDayScore}%`}
             </span>
           </div>
         </div>

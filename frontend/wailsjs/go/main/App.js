@@ -50,8 +50,8 @@ export function RecordInputActivity(arg1, arg2) {
   return window['go']['main']['App']['RecordInputActivity'](arg1, arg2);
 }
 
-export function RecordMouseActivity(arg1, arg2) {
-  return window['go']['main']['App']['RecordMouseActivity'](arg1, arg2);
+export function RecordMouseActivity(arg1) {
+  return window['go']['main']['App']['RecordMouseActivity'](arg1);
 }
 
 export function SetActiveTask(arg1) {

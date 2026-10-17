@@ -685,8 +685,8 @@ func (db *DB) GetPendingInvitations(orgID int64) ([]Invitation, error) {
 // InsertLog stores a new log entry using Ent SQL Builder.
 func (db *DB) InsertLog(e *LogEntry) (int64, error) {
 	builder := entsql.Dialect(db.dialect).Insert("logs").
-		Columns("timestamp", "image_path", "total_keys", "unique_keys", "entropy_score", "total_clicks", "mouse_distance").
-		Values(e.Timestamp.UTC().Format(time.RFC3339), e.ImagePath, e.TotalKeys, e.UniqueKeys, e.EntropyScore, e.TotalClicks, e.MouseDistance)
+		Columns("org_id", "user_id", "timestamp", "image_path", "total_keys", "unique_keys", "entropy_score", "total_clicks", "mouse_distance", "app_name", "window_title").
+		Values(e.OrgID, e.UserID, e.Timestamp.UTC().Format(time.RFC3339), e.ImagePath, e.TotalKeys, e.UniqueKeys, e.EntropyScore, e.TotalClicks, e.MouseDistance, e.AppName, e.WindowTitle)
 	if db.dialect == dialect.Postgres {
 		builder.Returning("id")
 		query, args := builder.Query()
@@ -703,13 +703,31 @@ func (db *DB) InsertLog(e *LogEntry) (int64, error) {
 	return res.LastInsertId()
 }
 
-// UpdateAIResult patches AI fields for a given log ID.
-func (db *DB) UpdateAIResult(id int64, category string, productive bool, confidence float64, reason string) error {
-	score := 0.0
-	if productive {
-		score = 100.0
+// UpdateAIResult patches AI fields for a given log ID using the real model score.
+func (db *DB) UpdateAIResult(id int64, category string, productive bool, productiveScore float64, confidence float64, reason string) error {
+	return db.UpdateLogAnalysis(id, category, "", "", "", 0, "", productive, productiveScore, confidence, reason)
+}
+
+// UpdateAIResultByRemoteID patches AI fields on the local log that was synced
+// to the given remote/server log ID.
+func (db *DB) UpdateAIResultByRemoteID(remoteID int64, category string, productive bool, productiveScore float64, confidence float64, reason string) error {
+	if remoteID <= 0 {
+		return nil
 	}
-	return db.UpdateLogAnalysis(id, category, "", "", "", 0, "", productive, score, confidence, reason)
+	productiveInt := 0
+	if productive || productiveScore >= 50 {
+		productiveInt = 1
+	}
+	builder := entsql.Dialect(db.dialect).Update("logs").
+		Set("ai_category", category).
+		Set("is_productive", productiveInt).
+		Set("productive_score", productiveScore).
+		Set("ai_confidence", confidence).
+		Set("ai_reason", reason).
+		Where(entsql.EQ("remote_id", remoteID))
+	query, args := builder.Query()
+	_, err := db.rawDB.Exec(query, args...)
+	return err
 }
 
 // UpdateLogAnalysis patches AI fields using Ent SQL Builder.
@@ -717,9 +735,6 @@ func (db *DB) UpdateLogAnalysis(id int64, category, appName, appCategory, window
 	productiveInt := 0
 	if productive || productiveScore >= 50 {
 		productiveInt = 1
-	}
-	if productiveScore == 0 && productive {
-		productiveScore = 100.0
 	}
 
 	builder := entsql.Dialect(db.dialect).Update("logs").
@@ -1534,7 +1549,7 @@ func (db *DB) GetOrgUsageSummary(orgID int64) (*APIUsageSummary, error) {
 	rows, err := db.rawDB.Query(`
 		SELECT key_source, COUNT(*), COALESCE(SUM(prompt_tokens), 0), COALESCE(SUM(candidate_tokens), 0), COALESCE(SUM(total_tokens), 0)
 		FROM api_usage_logs
-		WHERE org_id = `+placeholder+` OR key_source = 'org_admin'
+		WHERE org_id = `+placeholder+`
 		GROUP BY key_source
 	`, orgID)
 	if err == nil {
@@ -1589,24 +1604,13 @@ func (db *DB) GetUserUsageSummary(userID int64) (*APIUsageSummary, error) {
 		ByKeySource: make(map[string]int64),
 	}
 
-	var query string
-	var args []interface{}
-
-	if userID > 0 {
-		query = `
+	query := `
 			SELECT key_source, COUNT(*), COALESCE(SUM(prompt_tokens), 0), COALESCE(SUM(candidate_tokens), 0), COALESCE(SUM(total_tokens), 0)
 			FROM api_usage_logs
 			WHERE user_id = $1
 			GROUP BY key_source
 		`
-		args = append(args, userID)
-	} else {
-		query = `
-			SELECT key_source, COUNT(*), COALESCE(SUM(prompt_tokens), 0), COALESCE(SUM(candidate_tokens), 0), COALESCE(SUM(total_tokens), 0)
-			FROM api_usage_logs
-			GROUP BY key_source
-		`
-	}
+	args := []interface{}{userID}
 
 	rows, err := db.rawDB.Query(query, args...)
 	if err != nil {

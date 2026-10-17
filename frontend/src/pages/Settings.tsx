@@ -12,9 +12,10 @@ interface AIModel {
 interface SettingsPageProps {
   theme?: 'dark' | 'light' | 'auto';
   onThemeChange?: (theme: 'dark' | 'light' | 'auto') => void;
+  syncIntervalSeconds?: number;
 }
 
-export function SettingsPage({ theme = 'auto', onThemeChange }: SettingsPageProps) {
+export function SettingsPage({ theme = 'auto', onThemeChange, syncIntervalSeconds = 30 }: SettingsPageProps) {
   const [apiKey, setApiKey] = useState(() => localStorage.getItem('mini_gemini_api_key') || '');
   const [model, setModel] = useState(() => localStorage.getItem('mini_ai_model') || 'models/gemma-4-31b-it');
   const [availableModels, setAvailableModels] = useState<AIModel[]>([]);
@@ -26,7 +27,7 @@ export function SettingsPage({ theme = 'auto', onThemeChange }: SettingsPageProp
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
-  const [nextSyncSeconds, setNextSyncSeconds] = useState<number>(30);
+  const [nextSyncSeconds, setNextSyncSeconds] = useState<number>(Math.max(5, syncIntervalSeconds));
 
   const fetchUsageSummary = useCallback(async () => {
     try {
@@ -60,8 +61,11 @@ export function SettingsPage({ theme = 'auto', onThemeChange }: SettingsPageProp
     window.addEventListener('ai_usage_updated', handleCustomUsageEvent);
     window.addEventListener('storage', syncUsage);
 
+    // Derive the countdown from the real configured capture/sync interval
+    const intervalSeconds = Math.max(5, syncIntervalSeconds || 30);
+    setNextSyncSeconds(intervalSeconds);
     const timer = setInterval(() => {
-      setNextSyncSeconds(prev => (prev <= 1 ? 30 : prev - 1));
+      setNextSyncSeconds(prev => (prev <= 1 ? intervalSeconds : prev - 1));
     }, 1000);
     const usageTimer = setInterval(syncUsage, 20000);
 
@@ -71,7 +75,7 @@ export function SettingsPage({ theme = 'auto', onThemeChange }: SettingsPageProp
       window.removeEventListener('ai_usage_updated', handleCustomUsageEvent);
       window.removeEventListener('storage', syncUsage);
     };
-  }, [fetchUsageSummary]);
+  }, [fetchUsageSummary, syncIntervalSeconds]);
 
   const fetchAvailableModels = useCallback(async (key: string) => {
     if (!key.trim()) return;
@@ -177,7 +181,10 @@ export function SettingsPage({ theme = 'auto', onThemeChange }: SettingsPageProp
         })
       });
       if (res.ok) {
-        setUsageCount(prev => prev + 1);
+        const newUsage = parseInt(localStorage.getItem('mini_ai_usage_count') || '0', 10) + 1;
+        localStorage.setItem('mini_ai_usage_count', newUsage.toString());
+        setUsageCount(newUsage);
+        window.dispatchEvent(new CustomEvent('ai_usage_updated', { detail: newUsage }));
         setStatusMessage(`✓ Connected successfully to ${cleanModel}!`);
       } else {
         const err = await res.json();
@@ -191,14 +198,15 @@ export function SettingsPage({ theme = 'auto', onThemeChange }: SettingsPageProp
   };
 
   const handleClearData = async () => {
+    if (!(window as any).go?.main?.App) {
+      setStatusMessage('✕ Clearing stored data is only available in the desktop app.');
+      return;
+    }
     if (!window.confirm('Are you sure you want to delete all stored screenshots, logs, and activity records? This action cannot be undone.')) {
       return;
     }
     try {
-      if ((window as any).go?.main?.App) {
-        await (window as any).go.main.App.ClearAllLocalData();
-      }
-      localStorage.removeItem('mini_guest_logs');
+      await (window as any).go.main.App.ClearAllLocalData();
       localStorage.setItem('mini_ai_usage_count', '0');
       setUsageCount(0);
       setStatusMessage('✓ Successfully deleted all local screenshots and reset database!');
@@ -346,10 +354,10 @@ export function SettingsPage({ theme = 'auto', onThemeChange }: SettingsPageProp
                   ))
                 ) : (
                   <>
-                    <option value="models/gemma-4-31b-it">Gemini 2.5 Flash (Fast & Recommended)</option>
+                    <option value="models/gemma-4-31b-it">Gemma 4 31B IT (Fast & Recommended)</option>
                     <option value="models/gemini-2.5-pro">Gemini 2.5 Pro (Deep Reasoning)</option>
-                    <option value="models/Gemma 4 31B IT">Gemini 2.0 Flash</option>
-                    <option value="models/gemma-2-27b-it">Gemma 2 27B IT (Open Multimodal Fallback)</option>
+                    <option value="models/gemini-2.0-flash">Gemini 2.0 Flash (Open Multimodal Fallback)</option>
+                    <option value="models/gemini-2.5-flash">Gemini 2.5 Flash (Balanced)</option>
                   </>
                 )}
               </select>
@@ -380,25 +388,16 @@ export function SettingsPage({ theme = 'auto', onThemeChange }: SettingsPageProp
         </div>
       </form>
 
-      {/* Active Model Quota & Remaining Capacity Monitor */}
+      {/* Live usage & static provider rate-limit reference */}
       {(() => {
-        const isPro = model.includes('gemini-1.5-pro');
-        const isFlash2 = model.includes('Gemma 4 31B IT');
-
-        const rpmLimit = isPro ? 2 : isFlash2 ? 10 : 15;
-        const rpdLimit = isPro ? 50 : 1500;
-        const tpmLimit = isPro ? '32,000' : isFlash2 ? '4,000,000' : '1,000,000';
-        const contextLimit = selectedModelInfo?.inputTokenLimit
-          ? selectedModelInfo.inputTokenLimit.toLocaleString()
-          : isPro ? '2,097,152' : '1,048,576';
-
-        const remainingRpd = Math.max(0, rpdLimit - usageCount);
-        const usedPercent = Math.min(100, Math.round((usageCount / rpdLimit) * 100));
+        const modelLower = model.toLowerCase();
+        const isGemma = modelLower.includes('gemma');
+        const isPro = modelLower.includes('pro');
 
         return (
           <div className="card">
             <div className="card-header">
-              <span className="card-title">📊 Active Model Quota & Remaining Capacity</span>
+              <span className="card-title">📊 AI Usage & Provider Rate Limits</span>
             </div>
             <div className="card-body">
               {/* Active Model Header Banner */}
@@ -410,18 +409,18 @@ export function SettingsPage({ theme = 'auto', onThemeChange }: SettingsPageProp
                   </div>
                 </div>
                 <div className="badge badge-productive" style={{ fontSize: 12 }}>
-                  {rpdLimit.toLocaleString()} RPD Quota
+                  {isGemma ? 'Gemma family' : isPro ? 'Gemini Pro family' : 'Gemini Flash family'}
                 </div>
               </div>
 
-              {/* Progress & Remaining Stat Cards */}
+              {/* Live tracked usage stat cards */}
               <div className="stats-grid" style={{ marginBottom: 20 }}>
                 <div className="stat-card" style={{ border: '1px solid var(--accent-purple)', background: 'var(--bg-elevated)' }}>
                   <span className="stat-label" style={{ color: 'var(--accent-teal)', fontWeight: 700 }}>⏳ Next AI Sync In</span>
                   <div className="stat-value text-purple" style={{ fontSize: 24, fontWeight: 800 }}>
                     {nextSyncSeconds}s
                   </div>
-                  <div className="stat-sub">Auto screenshot analysis sync</div>
+                  <div className="stat-sub">Based on your {syncIntervalSeconds}s capture interval</div>
                 </div>
                 <div className="stat-card">
                   <span className="stat-label">Total AI Requests</span>
@@ -445,32 +444,15 @@ export function SettingsPage({ theme = 'auto', onThemeChange }: SettingsPageProp
                 </div>
               </div>
 
-              {/* Visual Usage Progress Bar */}
-              <div style={{ marginBottom: 16 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginBottom: 6, fontWeight: 600 }}>
-                  <span style={{ color: 'var(--text-secondary)' }}>Daily Quota Consumption</span>
-                  <span style={{ color: 'var(--accent-teal)' }}>{usedPercent}% Used</span>
-                </div>
-                <div className="entropy-bar-track" style={{ height: 8 }}>
-                  <div
-                    className="entropy-bar-fill"
-                    style={{
-                      width: `${usedPercent}%`,
-                      background: usedPercent > 80 ? 'var(--accent-red)' : 'var(--accent-purple)'
-                    }}
-                  />
-                </div>
-              </div>
-
-              {/* Dynamic Screenshot Bundling & Rate Guard Information */}
+              {/* Provider-limits note + batching behaviour */}
               <div style={{ padding: 14, background: 'var(--bg-elevated)', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-subtle)', fontSize: 12, color: 'var(--text-secondary)' }}>
                 <div style={{ fontWeight: 600, color: 'var(--accent-teal)', marginBottom: 4, display: 'flex', alignItems: 'center', gap: 6 }}>
-                  📦 Multi-Screenshot Adaptive Bundling & Rate Guard Enabled
+                  ℹ️ Provider rate-limit reference (not live quota)
                 </div>
                 <div>
-                  • <strong>Dynamic Batching:</strong> Automatically bundles captures based on interval ({screenshotInterval}s) to preserve your <code>{rpmLimit} RPM</code> rate limit.<br />
-                  • <strong>Request Optimization:</strong> Enforces max 1 batch request per minute with structured JSON payload responses.<br />
-                  • <strong>Quota Protection:</strong> Saves up to 75% of your API quota while analyzing activity with high precision.
+                  • Free-tier RPM / RPD / TPM limits are enforced by Google per model and are <strong>not</strong> tracked or displayed here — check <strong>Google AI Studio → Rate limits</strong> for the current limits of <code>{model.replace('models/', '')}</code>.<br />
+                  • The token and request numbers above are live usage accumulated by this app.<br />
+                  • <strong>Dynamic Batching:</strong> Captures are bundled based on the capture interval ({screenshotInterval}s) to reduce API calls.
                 </div>
               </div>
             </div>

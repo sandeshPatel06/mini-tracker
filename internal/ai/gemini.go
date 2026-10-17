@@ -81,7 +81,9 @@ func (g *GeminiClient) SetAPIKey(apiKey string) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	g.apiKey = apiKey
-	g.modelName = os.Getenv("GEMINI_MODEL")
+	if envModel := os.Getenv("GEMINI_MODEL"); envModel != "" {
+		g.modelName = envModel
+	}
 }
 
 // HasKey checks if an API key is currently set.
@@ -242,11 +244,12 @@ func (g *GeminiClient) SelectBestModel(ctx context.Context, exclude map[string]b
 }
 
 // Analyze sends window title and telemetry to Gemini by wrapping it in AnalyzeBatch.
-func (g *GeminiClient) Analyze(ctx context.Context, windowTitle string, entropyScore float64) (*AnalysisResult, error) {
+func (g *GeminiClient) Analyze(ctx context.Context, windowTitle string, entropyScore float64, totalClicks int) (*AnalysisResult, error) {
 	batchResults, err := g.AnalyzeBatch(ctx, []BatchAnalysisItem{
 		{
 			WindowTitle:  windowTitle,
 			EntropyScore: entropyScore,
+			TotalClicks:  totalClicks,
 		},
 	})
 	if err != nil {
@@ -277,7 +280,6 @@ type BatchAnalysisItem struct {
 	EntropyScore  float64
 	ImagePath     string
 	TotalClicks   int
-	MouseDistance float64
 	UserTask      string
 }
 
@@ -318,8 +320,8 @@ func (g *GeminiClient) AnalyzeBatch(ctx context.Context, items []BatchAnalysisIt
 	// Build per-item telemetry summary for the prompt
 	itemSummaries := ""
 	for i, item := range items {
-		itemSummaries += fmt.Sprintf("  Item %d: Keystroke Entropy=%.1f/100, Mouse Clicks=%d, Mouse Distance=%.0fpx\n",
-			i+1, item.EntropyScore, item.TotalClicks, item.MouseDistance)
+		itemSummaries += fmt.Sprintf("  Item %d: Keystroke Entropy=%.1f/100, Mouse Clicks=%d\n",
+			i+1, item.EntropyScore, item.TotalClicks)
 	}
 
 	prompt := fmt.Sprintf(`You are a world-class developer productivity analyst inspecting a sequence of %d desktop window titles captured from a Linux workstation in chronological order.
@@ -339,10 +341,9 @@ INSTRUCTIONS FOR EACH ITEM:
    - Task Relevance: Direct work on the stated task = +40 to +60 pts; related docs/research = +30 to +45 pts; unrelated browsing/messaging = +10 to +30 pts; social media/leisure/idle = 0 to 15 pts.
    - Keystroke Entropy > 20: Active typing/writing (+25 pts)
    - Keystroke Entropy 8-20: Moderate typing/reviewing (+15 pts)
-   - Keystroke Entropy < 8: Reading/idle mode — lowers score unless offset by heavy mouse activity
-   - Mouse Distance > 5000px: Active navigation/design work (+10 pts)
+   - Keystroke Entropy < 8: Reading/idle mode — lowers score unless offset by heavy mouse-click activity
    - Mouse Clicks > 20: Interactive workflow (+5 pts)
-   - Combined low entropy + low mouse + off-task window title = score 0-20.
+   - Combined low entropy + few clicks + off-task window title = score 0-20.
 7. Set is_productive=true only if productivity_score >= 50.
 
 CRITICAL FORMATTING REQUIREMENT:
@@ -387,7 +388,7 @@ Respond ONLY with a valid JSON array of %d objects in EXACT input order:
 			}
 		}
 		parts = append(parts, map[string]interface{}{
-			"text": fmt.Sprintf("[Item %d | Title: %q | Entropy: %.1f/100 | Clicks: %d | Mouse Distance: %.0fpx]", i+1, item.WindowTitle, item.EntropyScore, item.TotalClicks, item.MouseDistance),
+			"text": fmt.Sprintf("[Item %d | Title: %q | Entropy: %.1f/100 | Clicks: %d]", i+1, item.WindowTitle, item.EntropyScore, item.TotalClicks),
 		})
 	}
 
@@ -471,8 +472,8 @@ Respond ONLY with a valid JSON array of %d objects in EXACT input order:
 		AppCategory       string  `json:"app_category"`
 		WindowTitle       string  `json:"window_title"`
 		Category          string  `json:"category"`
-		ProductivityScore float64 `json:"productivity_score"`
-		ProductiveScore   float64 `json:"productive_score"`
+		ProductivityScore *float64 `json:"productivity_score"`
+		ProductiveScore   *float64 `json:"productive_score"`
 		IsProductive      bool    `json:"is_productive"`
 		Productive        bool    `json:"productive"`
 		Confidence        float64 `json:"confidence"`
@@ -483,53 +484,60 @@ Respond ONLY with a valid JSON array of %d objects in EXACT input order:
 		return nil, fmt.Errorf("parse batch JSON (%q): %w", truncateString(rawText, 100), err)
 	}
 
+	if len(rawResults) == 0 {
+		return nil, fmt.Errorf("gemini batch returned no results")
+	}
+
+	// Map model results by their declared item_index instead of positional order.
+	indexMap := make(map[int]int, len(rawResults))
+	for ri, r := range rawResults {
+		if r.ItemIndex > 0 {
+			indexMap[r.ItemIndex] = ri
+		}
+	}
+
 	var results []BatchAnalysisResult
 	for i, item := range items {
-		// Default: derive a conservative score from entropy rather than hard-coding 95%
-		defaultScore := 0.0
-		if item.EntropyScore > 20 {
-			defaultScore = 70.0
-		} else if item.EntropyScore > 8 {
-			defaultScore = 40.0
+		ri, ok := indexMap[i+1]
+		if !ok && len(rawResults) == len(items) && rawResults[i].ItemIndex == 0 {
+			ri, ok = i, true
 		}
+		if !ok {
+			// No model result for this item — leave it pending for retry instead of fabricating a score.
+			continue
+		}
+
+		r := rawResults[ri]
+		score := 0.0
+		if r.ProductivityScore != nil {
+			score = *r.ProductivityScore
+		} else if r.ProductiveScore != nil {
+			score = *r.ProductiveScore
+		}
+
 		resItem := BatchAnalysisResult{
 			LogID:           item.LogID,
-			Category:        "Unknown",
-			Productive:      defaultScore >= 50,
-			ProductiveScore: defaultScore,
-			Confidence:      0.5,
-			Reason:          "AI partial analysis — fallback based on entropy",
-			Usage:           geminiResp.UsageMetadata,
+			Category:        r.Category,
+			AppName:         r.AppName,
+			AppCategory:     r.AppCategory,
+			WindowTitle:     r.WindowTitle,
+			Productive:      r.IsProductive || r.Productive || score >= 50,
+			ProductiveScore: score,
+			Confidence:      r.Confidence,
+			Reason:          r.Reason,
 		}
-		if i < len(rawResults) {
-			r := rawResults[i]
-			if r.Category != "" {
-				resItem.Category = r.Category
-			}
-			if r.AppName != "" {
-				resItem.AppName = r.AppName
-			}
-			if r.AppCategory != "" {
-				resItem.AppCategory = r.AppCategory
-			}
-			if r.WindowTitle != "" {
-				resItem.WindowTitle = r.WindowTitle
-			}
-			score := r.ProductivityScore
-			if score == 0 {
-				score = r.ProductiveScore
-			}
-			// Only accept AI score if it's non-zero and not suspiciously round-100 with zero entropy
-			if score > 0 && !(score == 100 && item.EntropyScore < 5 && item.TotalClicks < 3) {
-				resItem.ProductiveScore = score
-			}
-			resItem.Productive = r.IsProductive || r.Productive || resItem.ProductiveScore >= 50
-			if r.Confidence > 0 {
-				resItem.Confidence = r.Confidence
-			}
-			if r.Reason != "" {
-				resItem.Reason = r.Reason
-			}
+		if resItem.Category == "" {
+			resItem.Category = "Unknown"
+		}
+		if resItem.Confidence == 0 {
+			resItem.Confidence = 0.5
+		}
+		if resItem.Reason == "" {
+			resItem.Reason = "AI response incomplete"
+		}
+		// Record usage once per batch request (first result), not per item.
+		if i == 0 {
+			resItem.Usage = geminiResp.UsageMetadata
 		}
 		results = append(results, resItem)
 	}

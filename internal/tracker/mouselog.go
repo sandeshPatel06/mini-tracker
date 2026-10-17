@@ -2,7 +2,6 @@ package tracker
 
 import (
 	"log"
-	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,20 +11,18 @@ import (
 	"github.com/holoplot/go-evdev"
 )
 
-// MouseStats holds mouse interaction metrics for one flush interval.
+// MouseStats holds mouse click metrics for one flush interval.
 type MouseStats struct {
-	TotalClicks   int     `json:"total_clicks"`
-	MouseDistance float64 `json:"mouse_distance"`
+	TotalClicks int `json:"total_clicks"`
 }
 
-// MouseTracker monitors mouse/pointer input devices and aggregates click/movement metrics.
+// MouseTracker monitors mouse/pointer input devices and aggregates click metrics.
 type MouseTracker struct {
-	mu            sync.Mutex
-	stopOnce      sync.Once
-	clicks        int
-	distanceSqAcc float64 // accumulated squared-distance components; sqrt taken only at flush
-	stopCh        chan struct{}
-	interval      time.Duration
+	mu       sync.Mutex
+	stopOnce sync.Once
+	clicks   int
+	stopCh   chan struct{}
+	interval time.Duration
 }
 
 // NewMouseTracker creates a new MouseTracker with the given flush interval.
@@ -39,7 +36,6 @@ func NewMouseTracker(interval time.Duration) *MouseTracker {
 // mouseEvent is a lightweight tagged union sent from device readers to the aggregator.
 type mouseEvent struct {
 	isClick bool
-	dx, dy  int32 // accumulated relative/delta values for one SYN_REPORT packet
 }
 
 // Start launches goroutines for all discovered pointer/mouse devices and a flush ticker.
@@ -64,23 +60,6 @@ func (m *MouseTracker) Start() (<-chan MouseStats, error) {
 			defer dev.Close()
 			log.Printf("[tracker] listening on mouse dev %s", devPath)
 
-			var (
-				currX, currY         float64
-				pendingDX, pendingDY int32
-				hasPending           bool
-			)
-
-			flushMove := func() {
-				if hasPending && (pendingDX != 0 || pendingDY != 0) {
-					select {
-					case eventCh <- mouseEvent{dx: pendingDX, dy: pendingDY}:
-					default:
-					}
-					pendingDX, pendingDY = 0, 0
-				}
-				hasPending = false
-			}
-
 			for {
 				// BLOCKING read — goroutine sleeps until the kernel delivers an event.
 				// No select/default spin-loop → zero idle CPU.
@@ -95,44 +74,10 @@ func (m *MouseTracker) Start() (<-chan MouseStats, error) {
 				default:
 				}
 
-				switch ev.Type {
-				case evdev.EV_SYN:
-					// SYN_REPORT = end of event packet; flush accumulated movement.
-					flushMove()
-
-				case evdev.EV_KEY:
-					if ev.Value == 1 && isMouseButton(ev.Code) {
-						flushMove()
-						select {
-						case eventCh <- mouseEvent{isClick: true}:
-						default:
-						}
-					}
-
-				case evdev.EV_REL:
-					switch ev.Code {
-					case evdev.REL_X:
-						pendingDX += ev.Value
-					case evdev.REL_Y:
-						pendingDY += ev.Value
-					}
-					hasPending = true
-
-				case evdev.EV_ABS:
-					if ev.Code == evdev.ABS_X {
-						newVal := float64(ev.Value)
-						if currX > 0 {
-							pendingDX += int32(math.Round(newVal - currX))
-							hasPending = true
-						}
-						currX = newVal
-					} else if ev.Code == evdev.ABS_Y {
-						newVal := float64(ev.Value)
-						if currY > 0 {
-							pendingDY += int32(math.Round(newVal - currY))
-							hasPending = true
-						}
-						currY = newVal
+				if ev.Type == evdev.EV_KEY && ev.Value == 1 && isMouseButton(ev.Code) {
+					select {
+					case eventCh <- mouseEvent{isClick: true}:
+					default:
 					}
 				}
 			}
@@ -143,16 +88,9 @@ func (m *MouseTracker) Start() (<-chan MouseStats, error) {
 	go func() {
 		for {
 			select {
-			case ev := <-eventCh:
+			case <-eventCh:
 				m.mu.Lock()
-				if ev.isClick {
-					m.clicks++
-				} else {
-					dx := float64(ev.dx)
-					dy := float64(ev.dy)
-					// Accumulate squared distance — only take sqrt once at flush time.
-					m.distanceSqAcc += dx*dx + dy*dy
-				}
+				m.clicks++
 				m.mu.Unlock()
 			case <-m.stopCh:
 				return
@@ -182,12 +120,10 @@ func (m *MouseTracker) Start() (<-chan MouseStats, error) {
 	return statsCh, nil
 }
 
-// RecordMouseActivity records mouse activity submitted via the frontend (zero-sudo mode).
-func (m *MouseTracker) RecordMouseActivity(clicks int, distance float64) {
+// RecordMouseActivity records mouse clicks submitted via the frontend (zero-sudo mode).
+func (m *MouseTracker) RecordMouseActivity(clicks int) {
 	m.mu.Lock()
 	m.clicks += clicks
-	// Frontend reports straight pixel distance; square it to match flush math.
-	m.distanceSqAcc += distance * distance
 	m.mu.Unlock()
 }
 
@@ -196,23 +132,14 @@ func (m *MouseTracker) Stop() {
 	m.stopOnce.Do(func() { close(m.stopCh) })
 }
 
-// flush atomically reads and resets the counters, computing final distance only here.
+// flush atomically reads and resets the click counter.
 func (m *MouseTracker) flush() MouseStats {
 	m.mu.Lock()
 	clicks := m.clicks
-	sqAcc := m.distanceSqAcc
 	m.clicks = 0
-	m.distanceSqAcc = 0
 	m.mu.Unlock()
 
-	dist := 0.0
-	if sqAcc > 0 {
-		dist = math.Round(math.Sqrt(sqAcc)*10) / 10
-	}
-	return MouseStats{
-		TotalClicks:   clicks,
-		MouseDistance: dist,
-	}
+	return MouseStats{TotalClicks: clicks}
 }
 
 // isMouseButton checks if an evdev code is a mouse button (BTN_LEFT … BTN_TASK).

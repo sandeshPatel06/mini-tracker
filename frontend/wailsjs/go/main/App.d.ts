@@ -26,7 +26,7 @@ export function ProcessPendingLogs():Promise<number>;
 
 export function RecordInputActivity(arg1:number,arg2:number):Promise<void>;
 
-export function RecordMouseActivity(arg1:number,arg2:number):Promise<void>;
+export function RecordMouseActivity(arg1:number):Promise<void>;
 
 export function SetActiveTask(arg1:string):Promise<string>;
 

@@ -272,10 +272,18 @@ export default function Dashboard({ logs, stats, config, loading, today, onRefre
       <div className="stats-grid" style={{ marginBottom: 24 }}>
         <StatCard
           label="AI Focus Rating"
-          value={`${avgProductivityScore}%`}
-          sub={`Evaluated dynamically by Gemini AI vision`}
+          value={analyzedLogs.length === 0 ? '—' : `${avgProductivityScore}%`}
+          sub={analyzedLogs.length === 0 ? 'No captures analyzed yet' : 'Evaluated dynamically by Gemini AI vision'}
           iconName="target"
-          iconColor={avgProductivityScore >= 70 ? 'var(--accent-green)' : avgProductivityScore >= 50 ? 'var(--accent-amber)' : 'var(--accent-red)'}
+          iconColor={
+            analyzedLogs.length === 0
+              ? 'var(--text-secondary)'
+              : avgProductivityScore >= 70
+              ? 'var(--accent-green)'
+              : avgProductivityScore >= 50
+              ? 'var(--accent-amber)'
+              : 'var(--accent-red)'
+          }
         />
         <StatCard
           label="Total Keystrokes"
@@ -315,7 +323,7 @@ export default function Dashboard({ logs, stats, config, loading, today, onRefre
               </p>
             </div>
             <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--accent-purple)' }}>
-              Avg: {avgProductivityScore}%
+              Avg: {analyzedLogs.length === 0 ? '—' : `${avgProductivityScore}%`}
             </span>
           </div>
 
@@ -332,7 +340,13 @@ export default function Dashboard({ logs, stats, config, loading, today, onRefre
                     fontSize: 12,
                     color: 'var(--text-primary)',
                   }}
-                  formatter={(val: any) => [`${val}% AI Focus Rating`, 'Productivity']}
+                  formatter={(val: any, _name: any, item: any) => {
+                    const captures = item?.payload?.count ?? 0;
+                    return [
+                      captures === 0 ? 'No captures' : `${val}% AI Focus Rating`,
+                      captures === 0 ? 'Focus rating' : `Focus · ${captures} capture${captures === 1 ? '' : 's'}`,
+                    ];
+                  }}
                 />
                 <Bar dataKey="score" radius={[4, 4, 0, 0]}>
                   {hourlyChartData.map((entry, index) => (

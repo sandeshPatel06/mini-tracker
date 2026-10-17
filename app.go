@@ -26,13 +26,15 @@ type App struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 
-	cfg            *config.Config
-	database       *db.DB
-	gemini         *ai.GeminiClient
-	keyTracker     *tracker.KeystrokeTracker
-	mouseTracker   *tracker.MouseTracker
-	syncEngine     *syncp.SyncEngine
-	tickerResetCh  chan time.Duration
+	headless bool
+
+	cfg           *config.Config
+	database      *db.DB
+	gemini        *ai.GeminiClient
+	keyTracker    *tracker.KeystrokeTracker
+	mouseTracker  *tracker.MouseTracker
+	syncEngine    *syncp.SyncEngine
+	tickerResetCh chan time.Duration
 
 	isGuest   bool
 	authToken string
@@ -67,6 +69,11 @@ func (a *App) startup(ctx context.Context) {
 
 	// Initialize Desktop File Logger with automatic 7-day log retention
 	_ = logger.InitDesktopLogger(cfg.DataDir)
+
+	// Reclaim tracking from a detached background tracker spawned by a previous run.
+	if !a.headless {
+		stopBackgroundDaemon(cfg.DataDir)
+	}
 
 	// Open database
 	dbConn, err := db.Open(cfg.DataDir)
@@ -238,15 +245,14 @@ func (a *App) collect() {
 	}
 
 	entry := &db.LogEntry{
-		Timestamp:     time.Now(),
-		ImagePath:     imagePath,
-		WindowTitle:   windowTitle,
-		TotalKeys:     keyStats.TotalKeys,
-		UniqueKeys:    keyStats.UniqueKeys,
-		EntropyScore:  keyStats.EntropyScore,
-		TotalClicks:   mouseStats.TotalClicks,
-		MouseDistance: mouseStats.MouseDistance,
-		SyncStatus:    syncStatus,
+		Timestamp:    time.Now(),
+		ImagePath:    imagePath,
+		WindowTitle:  windowTitle,
+		TotalKeys:    keyStats.TotalKeys,
+		UniqueKeys:   keyStats.UniqueKeys,
+		EntropyScore: keyStats.EntropyScore,
+		TotalClicks:  mouseStats.TotalClicks,
+		SyncStatus:   syncStatus,
 	}
 
 	if a.database == nil {
@@ -261,12 +267,12 @@ func (a *App) collect() {
 
 	if a.isGuest {
 		// Guest Mode: Perform direct client-side local Gemini AI analysis
-		go func(logID int64, title string, score float64) {
+		go func(logID int64, title string, score float64, clicks int) {
 			ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 			defer cancel()
 
-			if result, err := a.gemini.Analyze(ctx, title, score); err == nil {
-				if err := a.database.UpdateAIResult(logID, result.Category, result.Productive, result.Confidence, result.Reason); err != nil {
+			if result, err := a.gemini.Analyze(ctx, title, score, clicks); err == nil {
+				if err := a.database.UpdateAIResult(logID, result.Category, result.Productive, result.ProductiveScore, result.Confidence, result.Reason); err != nil {
 					log.Printf("[app] update local AI result error: %v", err)
 				}
 				_ = a.database.RecordAPIUsage(0, 0, "guest", result.Usage.PromptTokenCount, result.Usage.CandidatesTokenCount, result.Usage.TotalTokenCount, a.gemini.GetModel())
@@ -275,13 +281,13 @@ func (a *App) collect() {
 			} else {
 				log.Printf("[app] guest AI analysis offline/error for #%d: %v — leaving log pending for re-analysis", logID, err)
 			}
-		}(id, windowTitle, keyStats.EntropyScore)
+		}(id, windowTitle, keyStats.EntropyScore, mouseStats.TotalClicks)
 	} else {
-		// Authenticated Mode: Push raw telemetry to backend
+		// Authenticated Mode: Push raw telemetry to backend (single-flight guarded).
 		go func() {
 			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			defer cancel()
-			_, _ = a.syncEngine.PushTelemetry(ctx)
+			_ = a.syncEngine.TriggerSyncNow(ctx)
 		}()
 	}
 }
@@ -339,6 +345,21 @@ func (a *App) SetOrgGeminiKey(orgID int64, apiKey string) (bool, error) {
 
 // shutdown is called when the app terminates.
 func (a *App) shutdown(_ context.Context) {
+	// If tracking is still active, hand it off to a detached background process
+	// so capture continues after this app exits.
+	if !a.headless && a.cfg != nil {
+		a.statsMu.Lock()
+		active := a.isTrackingActive
+		a.statsMu.Unlock()
+		if active {
+			if err := spawnBackgroundDaemon(a.cfg.DataDir); err != nil {
+				log.Printf("[app] failed to start background tracker: %v", err)
+			} else {
+				log.Printf("[app] tracking will continue in background (pid %d)", readPIDFile(pidPath(a.cfg.DataDir)))
+			}
+		}
+	}
+
 	// Flush any accumulated in-memory stats before stopping trackers.
 	// This ensures activity counts from the current interval are saved to the DB
 	// so daily totals are continuous across restarts.
@@ -349,22 +370,21 @@ func (a *App) shutdown(_ context.Context) {
 	a.latestMouseStats = tracker.MouseStats{}
 	a.statsMu.Unlock()
 
-	if a.database != nil && (keyStats.TotalKeys > 0 || mouseStats.TotalClicks > 0 || mouseStats.MouseDistance > 0) {
+	if a.database != nil && (keyStats.TotalKeys > 0 || mouseStats.TotalClicks > 0) {
 		syncStatus := "local_only"
 		if !a.isGuest {
 			syncStatus = "pending_upload"
 		}
 		if _, err := a.database.InsertLog(&db.LogEntry{
-			OrgID:         0,
-			UserID:        0,
-			ImagePath:     "",
-			TotalKeys:     keyStats.TotalKeys,
-			UniqueKeys:    keyStats.UniqueKeys,
-			EntropyScore:  keyStats.EntropyScore,
-			TotalClicks:   mouseStats.TotalClicks,
-			MouseDistance: mouseStats.MouseDistance,
-			SyncStatus:    syncStatus,
-			Timestamp:     time.Now(),
+			OrgID:        0,
+			UserID:       0,
+			ImagePath:    "",
+			TotalKeys:    keyStats.TotalKeys,
+			UniqueKeys:   keyStats.UniqueKeys,
+			EntropyScore: keyStats.EntropyScore,
+			TotalClicks:  mouseStats.TotalClicks,
+			SyncStatus:   syncStatus,
+			Timestamp:    time.Now(),
 		}); err != nil {
 			log.Printf("[app] shutdown flush error: %v", err)
 		} else {
@@ -492,9 +512,9 @@ func (a *App) RecordInputActivity(totalKeys, uniqueKeys int) {
 	}
 }
 
-// RecordMouseActivity allows the frontend desktop application to report mouse clicks and movement
+// RecordMouseActivity allows the frontend desktop application to report mouse clicks
 // without requiring root/sudo/evdev input group permissions on Linux.
-func (a *App) RecordMouseActivity(clicks int, distancePx float64) {
+func (a *App) RecordMouseActivity(clicks int) {
 	a.statsMu.Lock()
 	active := a.isTrackingActive
 	a.statsMu.Unlock()
@@ -502,7 +522,7 @@ func (a *App) RecordMouseActivity(clicks int, distancePx float64) {
 		return
 	}
 	if a.mouseTracker != nil {
-		a.mouseTracker.RecordMouseActivity(clicks, distancePx)
+		a.mouseTracker.RecordMouseActivity(clicks)
 	}
 }
 
@@ -563,8 +583,14 @@ func (a *App) UpdateGeminiAPIKey(apiKey string) (bool, error) {
 func (a *App) UpdateAIModel(modelName string) (bool, error) {
 	if a.gemini != nil {
 		a.gemini.SetModel(modelName)
-		log.Printf("[app] Updated AI model to: %s", modelName)
 	}
+	if a.cfg != nil {
+		a.cfg.GeminiModel = modelName
+		if err := config.Save(a.cfg); err != nil {
+			log.Printf("[app] save model error: %v", err)
+		}
+	}
+	log.Printf("[app] Updated AI model to: %s", modelName)
 	return true, nil
 }
 
@@ -645,7 +671,7 @@ func (a *App) ProcessPendingLogs() (int, error) {
 
 	for _, entry := range logs {
 		ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
-		res, err := a.gemini.Analyze(ctx, entry.WindowTitle, entry.EntropyScore)
+		res, err := a.gemini.Analyze(ctx, entry.WindowTitle, entry.EntropyScore, entry.TotalClicks)
 		cancel()
 
 		if err != nil {
@@ -654,7 +680,7 @@ func (a *App) ProcessPendingLogs() (int, error) {
 			continue
 		}
 
-		if err := a.database.UpdateAIResult(entry.ID, res.Category, res.Productive, res.Confidence, res.Reason); err == nil {
+		if err := a.database.UpdateAIResult(entry.ID, res.Category, res.Productive, res.ProductiveScore, res.Confidence, res.Reason); err == nil {
 			_ = a.database.RecordAPIUsage(entry.OrgID, entry.UserID, "guest", res.Usage.PromptTokenCount, res.Usage.CandidatesTokenCount, res.Usage.TotalTokenCount, a.gemini.GetModel())
 			processed++
 		}
@@ -687,4 +713,3 @@ func (a *App) OpenTrackerWizard(token string) error {
 	}
 	return nil
 }
-

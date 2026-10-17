@@ -96,7 +96,26 @@ func main() {
 
 	serverTickerResetCh := make(chan time.Duration, 1)
 
-	var latestKeyStats tracker.KeystrokeStats
+	var (
+		latestKeyStats   tracker.KeystrokeStats
+		latestMouseStats tracker.MouseStats
+	)
+
+	// Native mouse click capture (evdev when permitted; /api/tracker/input total_clicks as fallback)
+	mouseTracker := tracker.NewMouseTracker(cfg.ScreenshotInterval)
+	if mouseStatsCh, err := mouseTracker.Start(); err != nil {
+		log.Printf("[server] mouse tracker info: %v (continuing without native click capture)", err)
+	} else {
+		defer mouseTracker.Stop()
+		go func() {
+			for ms := range mouseStatsCh {
+				trackerMutex.Lock()
+				latestMouseStats = ms
+				trackerMutex.Unlock()
+			}
+		}()
+	}
+
 	go func() {
 		dur := cfg.ScreenshotInterval
 		ticker := time.NewTicker(dur)
@@ -110,7 +129,9 @@ func main() {
 				log.Printf("[server] background collector ticker reset to %v", dur)
 			case stats, ok := <-statsCh:
 				if ok {
+					trackerMutex.Lock()
 					latestKeyStats = stats
+					trackerMutex.Unlock()
 				}
 			case <-ticker.C:
 				trackerMutex.Lock()
@@ -120,8 +141,12 @@ func main() {
 					continue
 				}
 
+				trackerMutex.Lock()
 				ks := latestKeyStats
 				latestKeyStats = tracker.KeystrokeStats{}
+				ms := latestMouseStats
+				latestMouseStats = tracker.MouseStats{}
+				trackerMutex.Unlock()
 
 				winRes, err := tracker.GetActiveWindowTitle()
 				windowTitle := ""
@@ -145,6 +170,7 @@ func main() {
 					TotalKeys:    ks.TotalKeys,
 					UniqueKeys:   ks.UniqueKeys,
 					EntropyScore: ks.EntropyScore,
+					TotalClicks:  ms.TotalClicks,
 				}
 
 				id, err := database.InsertLog(entry)
@@ -153,11 +179,11 @@ func main() {
 					continue
 				}
 
-				go func(logID int64, title string, score float64) {
+				go func(logID int64, title string, score float64, clicks int) {
 					ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 					defer cancel()
 
-					res, err := gemini.Analyze(ctx, title, score)
+					res, err := gemini.Analyze(ctx, title, score, clicks)
 					if err != nil {
 						log.Printf("[server] AI analysis error for #%d: %v — incrementing retry count", logID, err)
 						_ = database.IncrementAIRetryCount(logID)
@@ -165,7 +191,7 @@ func main() {
 						_ = database.UpdateLogAnalysis(logID, res.Category, res.AppName, res.AppCategory, res.WindowTitle, 0, "", res.Productive, res.ProductiveScore, res.Confidence, res.Reason)
 						log.Printf("[server] logged #%d — app=%s category=%s productive_score=%.0f%% reason=%s", logID, res.AppName, res.Category, res.ProductiveScore, res.Reason)
 					}
-				}(id, windowTitle, ks.EntropyScore)
+				}(id, windowTitle, ks.EntropyScore, ms.TotalClicks)
 			}
 		}
 	}()
@@ -209,11 +235,16 @@ func main() {
 	})
 
 	mux.HandleFunc("/api/tracker/toggle", func(w http.ResponseWriter, r *http.Request) {
+		if getSessionUser(r, database) == nil && !isLoopbackRequest(r) {
+			jsonError(w, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
 		trackerMutex.Lock()
 		if trackerActive {
 			accumulatedSec += int64(time.Since(trackerStartTime).Seconds())
 			trackerActive = false
 			latestKeyStats = tracker.KeystrokeStats{}
+			latestMouseStats = tracker.MouseStats{}
 		} else {
 			trackerStartTime = time.Now()
 			trackerActive = true
@@ -241,7 +272,10 @@ func main() {
 		}
 
 		if sessUser == nil {
-			// Unauthenticated fallback for desktop standalone app mode
+			if !isLoopbackRequest(r) {
+				return 0, 0, http.StatusUnauthorized, "Unauthorized"
+			}
+			// Unauthenticated fallback for desktop standalone app mode (loopback only)
 			if reqUserID > 0 {
 				return reqUserID, 1, http.StatusOK, ""
 			}
@@ -307,6 +341,9 @@ func main() {
 		if err != nil {
 			http.Error(w, err.Error(), 500)
 			return
+		}
+		if logs == nil {
+			logs = []db.LogEntry{}
 		}
 		jsonResp(w, logs)
 	})
@@ -377,16 +414,19 @@ func main() {
 			http.Error(w, "missing path", 400)
 			return
 		}
+		if getSessionUser(r, database) == nil && !isLoopbackRequest(r) {
+			http.Error(w, "unauthorized", 401)
+			return
+		}
 		cleanPath := filepath.Clean(imgPath)
 		if !filepath.IsAbs(cleanPath) {
 			http.Error(w, "invalid path", 400)
 			return
 		}
-		// Security check: ensure path is inside DataDir or user home
+		// Security check: only allow files contained in DataDir (screenshots/images)
 		dataDirClean := filepath.Clean(cfg.DataDir)
-		userHome, _ := os.UserHomeDir()
-		userHomeClean := filepath.Clean(userHome)
-		if !strings.HasPrefix(cleanPath, dataDirClean) && (userHomeClean == "" || !strings.HasPrefix(cleanPath, userHomeClean)) {
+		relPath, relErr := filepath.Rel(dataDirClean, cleanPath)
+		if relErr != nil || filepath.IsAbs(relPath) || relPath == ".." || strings.HasPrefix(relPath, ".."+string(os.PathSeparator)) {
 			http.Error(w, "forbidden path", 403)
 			return
 		}
@@ -403,6 +443,10 @@ func main() {
 	// GET or POST /api/config
 	mux.HandleFunc("/api/config", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodPost {
+			if getSessionUser(r, database) == nil && !isLoopbackRequest(r) {
+				jsonError(w, "Unauthorized", http.StatusUnauthorized)
+				return
+			}
 			var payload struct {
 				GeminiAPIKey              string  `json:"gemini_api_key"`
 				AIModel                   string  `json:"ai_model"`
@@ -450,6 +494,10 @@ func main() {
 			jsonError(w, "Method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
+		if getSessionUser(r, database) == nil && !isLoopbackRequest(r) {
+			jsonError(w, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
 
 		trackerMutex.Lock()
 		active := trackerActive
@@ -459,9 +507,10 @@ func main() {
 			return
 		}
 		var payload struct {
-			TotalKeys  int `json:"total_keys"`
-			UniqueKeys int `json:"unique_keys"`
-			KeyCode    int `json:"key_code"`
+			TotalKeys   int `json:"total_keys"`
+			UniqueKeys  int `json:"unique_keys"`
+			KeyCode     int `json:"key_code"`
+			TotalClicks int `json:"total_clicks"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
 			jsonError(w, "Invalid input JSON payload", http.StatusBadRequest)
@@ -473,6 +522,9 @@ func main() {
 		} else if payload.TotalKeys > 0 {
 			keyTracker.RecordKeystrokes(payload.TotalKeys, payload.UniqueKeys)
 		}
+		if payload.TotalClicks > 0 && mouseTracker != nil {
+			mouseTracker.RecordMouseActivity(payload.TotalClicks)
+		}
 
 		jsonResp(w, map[string]interface{}{"success": true})
 	})
@@ -481,6 +533,10 @@ func main() {
 	mux.HandleFunc("/api/screenshots", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			jsonError(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if getSessionUser(r, database) == nil && !isLoopbackRequest(r) {
+			jsonError(w, "Unauthorized", http.StatusUnauthorized)
 			return
 		}
 
@@ -497,6 +553,8 @@ func main() {
 			TotalKeys    int     `json:"total_keys"`
 			UniqueKeys   int     `json:"unique_keys"`
 			EntropyScore float64 `json:"entropy_score"`
+			TotalClicks  int     `json:"total_clicks"`
+			WindowTitle  string  `json:"window_title"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
 			jsonError(w, "Invalid screenshot payload", http.StatusBadRequest)
@@ -535,6 +593,8 @@ func main() {
 			TotalKeys:    payload.TotalKeys,
 			UniqueKeys:   payload.UniqueKeys,
 			EntropyScore: entropy,
+			TotalClicks:  payload.TotalClicks,
+			WindowTitle:  payload.WindowTitle,
 		}
 
 		logID, err := database.InsertLog(entry)
@@ -551,14 +611,24 @@ func main() {
 		var productive bool
 		var confidence float64
 
-		res, err := gemini.Analyze(ctx, payload.ImageBase64, entropy)
-		if err == nil {
+		batchResults, err := gemini.AnalyzeBatch(ctx, []ai.BatchAnalysisItem{{
+			LogID:        logID,
+			WindowTitle:  payload.WindowTitle,
+			EntropyScore: entropy,
+			ImagePath:    filePath,
+			TotalClicks:  payload.TotalClicks,
+		}})
+		if err == nil && len(batchResults) > 0 {
+			res := batchResults[0]
 			category = res.Category
 			productive = res.Productive
 			confidence = res.Confidence
 			reason = res.Reason
 			_ = database.UpdateLogAnalysis(logID, res.Category, res.AppName, res.AppCategory, res.WindowTitle, 0, "", res.Productive, res.ProductiveScore, res.Confidence, res.Reason)
 		} else {
+			if err == nil {
+				err = fmt.Errorf("no batch analysis result returned")
+			}
 			log.Printf("[server] API screenshot upload AI processing deferred for log #%d: %v", logID, err)
 		}
 
@@ -602,6 +672,7 @@ func main() {
 			TotalKeys    int     `json:"total_keys"`
 			UniqueKeys   int     `json:"unique_keys"`
 			EntropyScore float64 `json:"entropy_score"`
+			TotalClicks  int     `json:"total_clicks"`
 			AppName      string  `json:"app_name"`
 			WindowTitle  string  `json:"window_title"`
 		}
@@ -638,6 +709,7 @@ func main() {
 			TotalKeys:    payload.TotalKeys,
 			UniqueKeys:   payload.UniqueKeys,
 			EntropyScore: entropy,
+			TotalClicks:  payload.TotalClicks,
 			AppName:      payload.AppName,
 			WindowTitle:  payload.WindowTitle,
 		}
@@ -650,7 +722,7 @@ func main() {
 
 		// Resolve effective Gemini API Key based on Hierarchy:
 		// 1. Org Admin Key in DB -> 2. User Personal Key in DB -> 3. Global System Key
-		go func(id int64, imgPath, b64Data string, score float64, uID, oID int64) {
+		go func(id int64, imgPath, title string, score float64, clicks int, uID, oID int64) {
 			effKey, effModel, keySource, err := database.ResolveEffectiveGeminiKey(uID, oID, cfg.GeminiAPIKey, cfg.GeminiModel)
 			if err != nil || effKey == "" {
 				log.Printf("[server] telemetry AI processing skipped for log #%d (no valid key found, source=%s)", id, keySource)
@@ -661,15 +733,25 @@ func main() {
 			defer cancel()
 
 			tempGemini := ai.NewGeminiClient(effKey, effModel)
-			res, err := tempGemini.Analyze(ctx, b64Data, score)
-			if err == nil {
+			results, err := tempGemini.AnalyzeBatch(ctx, []ai.BatchAnalysisItem{{
+				LogID:        id,
+				WindowTitle:  title,
+				EntropyScore: score,
+				ImagePath:    imgPath,
+				TotalClicks:  clicks,
+			}})
+			if err == nil && len(results) > 0 {
+				res := results[0]
 				_ = database.UpdateLogAnalysis(id, res.Category, res.AppName, res.AppCategory, res.WindowTitle, 0, "", res.Productive, res.ProductiveScore, res.Confidence, res.Reason)
 				_ = database.RecordAPIUsage(oID, uID, keySource, res.Usage.PromptTokenCount, res.Usage.CandidatesTokenCount, res.Usage.TotalTokenCount, effModel)
 				log.Printf("[server] processed telemetry #%d via AI key source [%s] — category=%s productive=%v tokens=%d", id, keySource, res.Category, res.Productive, res.Usage.TotalTokenCount)
 			} else {
+				if err == nil {
+					err = fmt.Errorf("no batch analysis result returned")
+				}
 				log.Printf("[server] telemetry AI error for log #%d (source=%s): %v", id, keySource, err)
 			}
-		}(logID, filePath, payload.ImageBase64, entropy, userID, orgID)
+		}(logID, filePath, payload.WindowTitle, entropy, payload.TotalClicks, userID, orgID)
 
 		jsonResp(w, map[string]interface{}{
 			"success":   true,
@@ -709,7 +791,11 @@ func main() {
 	mux.HandleFunc("/api/org/usage", func(w http.ResponseWriter, r *http.Request) {
 		user := getSessionUser(r, database)
 		if user == nil {
-			// Guest / Standalone fallback: return local guest database usage summary
+			if !isLoopbackRequest(r) {
+				jsonError(w, "Unauthorized", http.StatusUnauthorized)
+				return
+			}
+			// Guest / Standalone fallback: return local guest database usage summary (loopback only)
 			summary, err := database.GetUserUsageSummary(0)
 			if err != nil {
 				jsonError(w, err.Error(), http.StatusInternalServerError)
@@ -758,6 +844,10 @@ func main() {
 	// GET /api/user/usage — Individual user token usage endpoint
 	mux.HandleFunc("/api/user/usage", func(w http.ResponseWriter, r *http.Request) {
 		user := getSessionUser(r, database)
+		if user == nil && !isLoopbackRequest(r) {
+			jsonError(w, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
 		var targetUserID int64
 		if user != nil {
 			targetUserID = user.ID
@@ -1089,7 +1179,7 @@ func main() {
 		redirectURI := resolveOAuthCallbackURL(r, "GOOGLE_REDIRECT_URI", "/api/auth/oauth/google/callback")
 
 		// If explicit mock query parameter ?mock=true or ?test=true is supplied, perform local test login bypass
-		if r.URL.Query().Get("mock") == "true" || r.URL.Query().Get("test") == "true" {
+		if os.Getenv("ALLOW_MOCK_OAUTH") == "true" && (r.URL.Query().Get("mock") == "true" || r.URL.Query().Get("test") == "true") {
 			emailParam := r.URL.Query().Get("email")
 			if emailParam == "" {
 				emailParam = "google.user@company.com"
@@ -1229,7 +1319,7 @@ func main() {
 		redirectURI := resolveOAuthCallbackURL(r, "AZURE_REDIRECT_URI", "/api/auth/oauth/azure/callback")
 
 		// If explicit mock query parameter ?mock=true or ?test=true is supplied, perform local test login bypass
-		if r.URL.Query().Get("mock") == "true" || r.URL.Query().Get("test") == "true" {
+		if os.Getenv("ALLOW_MOCK_OAUTH") == "true" && (r.URL.Query().Get("mock") == "true" || r.URL.Query().Get("test") == "true") {
 			emailParam := r.URL.Query().Get("email")
 			if emailParam == "" {
 				emailParam = "azure.user@company.com"
@@ -1374,7 +1464,11 @@ func main() {
 	mux.HandleFunc("/api/org/members", func(w http.ResponseWriter, r *http.Request) {
 		sessUser := getSessionUser(r, database)
 		if sessUser == nil {
-			// Unauthenticated fallback: allowed in standalone guest desktop mode for default org 1
+			if !isLoopbackRequest(r) {
+				jsonError(w, "Unauthorized", http.StatusUnauthorized)
+				return
+			}
+			// Unauthenticated fallback: allowed in standalone guest desktop mode for default org 1 (loopback only)
 			orgIDStr := r.URL.Query().Get("org_id")
 			orgID, _ := strconv.ParseInt(orgIDStr, 10, 64)
 			if orgID == 0 {
@@ -1424,6 +1518,10 @@ func main() {
 			return
 		}
 		sessUser := getSessionUser(r, database)
+		if sessUser == nil && !isLoopbackRequest(r) {
+			jsonError(w, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
 		if sessUser != nil && sessUser.Role == "member" {
 			jsonError(w, "Forbidden: Only organization admins can send invitations", http.StatusForbidden)
 			return
@@ -1471,10 +1569,14 @@ func main() {
 		}
 		inviteURL := fmt.Sprintf("%s://%s/#/accept-invite?token=%s", scheme, host, token)
 
-		_ = mailer.SendInviteEmail(req.Email, org.Name, req.Role, inviteURL)
+		emailErr := mailer.SendInviteEmail(req.Email, org.Name, req.Role, inviteURL)
+		if emailErr != nil {
+			log.Printf("[server] invite email delivery failed for %s: %v", req.Email, emailErr)
+		}
 
 		jsonResp(w, map[string]interface{}{
 			"success":    true,
+			"email_sent": emailErr == nil,
 			"invitation": inv,
 			"invite_url": inviteURL,
 		})
@@ -1682,17 +1784,30 @@ func jsonError(w http.ResponseWriter, msg string, status int) {
 	})
 }
 
+func isLoopbackRequest(r *http.Request) bool {
+	host := r.RemoteAddr
+	if i := strings.LastIndex(host, ":"); i >= 0 {
+		host = host[:i]
+	}
+	host = strings.Trim(host, "[]")
+	return host == "localhost" || host == "::1" || strings.HasPrefix(host, "127.")
+}
+
+func isLoopbackOrigin(origin string) bool {
+	return strings.Contains(origin, "://localhost") || strings.Contains(origin, "://127.") || strings.Contains(origin, "://[::1]")
+}
+
 func cors(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		origin := r.Header.Get("Origin")
-		if origin != "" {
+		if origin != "" && isLoopbackOrigin(origin) {
 			w.Header().Set("Access-Control-Allow-Origin", origin)
 			w.Header().Set("Access-Control-Allow-Credentials", "true")
 		} else {
 			w.Header().Set("Access-Control-Allow-Origin", "*")
 		}
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, Cookie, X-Session-User-ID")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
 		if r.Method == "OPTIONS" {
 			w.WriteHeader(http.StatusNoContent)
 			return
@@ -1702,6 +1817,9 @@ func cors(next http.Handler) http.Handler {
 }
 
 func processPendingLogs(database *db.DB, gemini *ai.GeminiClient) int {
+	processPendingMu.Lock()
+	defer processPendingMu.Unlock()
+
 	if database == nil || gemini == nil || !gemini.HasKey() {
 		return 0
 	}
@@ -1723,12 +1841,12 @@ func processPendingLogs(database *db.DB, gemini *ai.GeminiClient) int {
 
 		var batchItems []ai.BatchAnalysisItem
 		for _, entry := range chunk {
-			// Image processing removed since we use WindowTitle directly
 			batchItems = append(batchItems, ai.BatchAnalysisItem{
 				LogID:        entry.ID,
 				WindowTitle:  entry.WindowTitle,
 				EntropyScore: entry.EntropyScore,
 				ImagePath:    entry.ImagePath,
+				TotalClicks:  entry.TotalClicks,
 			})
 		}
 
@@ -1740,10 +1858,11 @@ func processPendingLogs(database *db.DB, gemini *ai.GeminiClient) int {
 			log.Printf("[server] batch AI analysis error for %d logs: %v (falling back to single item analysis)", len(batchItems), err)
 			for _, entry := range chunk {
 				sCtx, sCancel := context.WithTimeout(context.Background(), 45*time.Second)
-				res, sErr := gemini.Analyze(sCtx, entry.WindowTitle, entry.EntropyScore)
+				res, sErr := gemini.Analyze(sCtx, entry.WindowTitle, entry.EntropyScore, entry.TotalClicks)
 				sCancel()
 				if sErr == nil {
 					_ = database.UpdateLogAnalysis(entry.ID, res.Category, res.AppName, res.AppCategory, res.WindowTitle, 0, "", res.Productive, res.ProductiveScore, res.Confidence, res.Reason)
+					_ = database.RecordAPIUsage(0, 0, "global_system", res.Usage.PromptTokenCount, res.Usage.CandidatesTokenCount, res.Usage.TotalTokenCount, gemini.GetModel())
 					processed++
 				} else {
 					_ = database.IncrementAIRetryCount(entry.ID)
@@ -1756,6 +1875,9 @@ func processPendingLogs(database *db.DB, gemini *ai.GeminiClient) int {
 			if err := database.UpdateLogAnalysis(res.LogID, res.Category, res.AppName, res.AppCategory, res.WindowTitle, 0, "", res.Productive, res.ProductiveScore, res.Confidence, res.Reason); err == nil {
 				processed++
 			}
+			if res.Usage.TotalTokenCount > 0 {
+				_ = database.RecordAPIUsage(0, 0, "global_system", res.Usage.PromptTokenCount, res.Usage.CandidatesTokenCount, res.Usage.TotalTokenCount, gemini.GetModel())
+			}
 		}
 
 		time.Sleep(1 * time.Second)
@@ -1765,11 +1887,26 @@ func processPendingLogs(database *db.DB, gemini *ai.GeminiClient) int {
 	return processed
 }
 
+var processPendingMu sync.Mutex
+
 func encodingBase64(data []byte) string {
 	return base64.StdEncoding.EncodeToString(data)
 }
 
-var jwtSecret = []byte("mini-tracker-jwt-secret-key-corporate-2026")
+var jwtSecret = loadJWTSecret()
+
+// loadJWTSecret returns the JWT signing key: JWT_SECRET env var when set,
+// otherwise an unpredictable per-process key (sessions invalidate on restart).
+func loadJWTSecret() []byte {
+	if s := os.Getenv("JWT_SECRET"); s != "" {
+		return []byte(s)
+	}
+	host, _ := os.Hostname()
+	seed := fmt.Sprintf("get-hike-jwt-%s-%d", host, time.Now().UnixNano())
+	sum := sha256.Sum256([]byte(seed))
+	log.Printf("[server] WARNING: JWT_SECRET not set — using an ephemeral signing key; web sessions will expire on server restart")
+	return sum[:]
+}
 
 type JWTClaims struct {
 	UserID int64  `json:"user_id"`
@@ -1840,14 +1977,6 @@ func setJWTTokenCookie(w http.ResponseWriter, user *db.User) string {
 		SameSite: http.SameSiteLaxMode,
 		MaxAge:   7 * 24 * 3600,
 	})
-	http.SetCookie(w, &http.Cookie{
-		Name:     "mini_session_user_id",
-		Value:    fmt.Sprintf("%d", user.ID),
-		Path:     "/",
-		HttpOnly: true,
-		SameSite: http.SameSiteLaxMode,
-		MaxAge:   7 * 24 * 3600,
-	})
 	return jwtToken
 }
 
@@ -1876,22 +2005,6 @@ func getSessionUser(r *http.Request, database *db.DB) *db.User {
 		}
 	}
 
-	// Legacy cookie fallback
-	if cookie, err := r.Cookie("mini_session_user_id"); err == nil && cookie.Value != "" {
-		if uid, err := strconv.ParseInt(cookie.Value, 10, 64); err == nil && uid > 0 {
-			u, _ := database.GetUserByID(uid)
-			return u
-		}
-	}
-	if uidHeader := r.Header.Get("X-Session-User-ID"); uidHeader != "" {
-		if uid, err := strconv.ParseInt(uidHeader, 10, 64); err == nil && uid > 0 {
-			u, _ := database.GetUserByID(uid)
-			return u
-		}
-	}
-	if recentUser, _ := getRecentOAuth(); recentUser != nil {
-		return recentUser
-	}
 	return nil
 }
 

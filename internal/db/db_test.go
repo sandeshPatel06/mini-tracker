@@ -191,7 +191,7 @@ func TestLogEntryCRUD(t *testing.T) {
 	}
 
 	// Update AI Result
-	err = database.UpdateAIResult(id, "Coding", true, 95.0, "Active Golang development in IDE")
+	err = database.UpdateAIResult(id, "Coding", true, 95.0, 0.9, "Active Golang development in IDE")
 	if err != nil {
 		t.Fatalf("failed to update AI result: %v", err)
 	}

@@ -5,42 +5,40 @@ interface CategoryBadgeProps {
 }
 
 const CATEGORY_STYLES: Record<string, { varName: string }> = {
-  Coding: { varName: '--accent-green' },
-  Writing: { varName: '--accent-teal' },
-  Browsing: { varName: '--accent-cyan' },
+  Coding: { varName: '--badge-productive-text' },
+  Writing: { varName: '--teal-text' },
+  Browsing: { varName: '--cyan-text' },
   Communication: { varName: '--accent-indigo' },
   Design: { varName: '--accent-purple' },
-  'Social Media': { varName: '--accent-amber' },
-  'Video/Entertainment': { varName: '--accent-red' },
+  'Social Media': { varName: '--badge-amber-text' },
+  'Video/Entertainment': { varName: '--badge-unproductive-text' },
   Idle: { varName: '--text-muted' },
   Other: { varName: '--text-muted' },
 };
 
 export function CategoryBadge({ category }: CategoryBadgeProps) {
-  if (!category || category === 'Unknown' || category === 'Failed') {
-    const isFailed = category === 'Failed';
-    return (
-      <span style={{ 
-        color: isFailed ? 'var(--accent-red)' : 'var(--text-muted)', 
-        fontSize: 11, 
-        fontStyle: 'normal',
-        fontWeight: 500,
-        display: 'inline-flex',
-        alignItems: 'center',
-        gap: 6
-      }}>
-        {isFailed && <span style={{ width: 6, height: 6, borderRadius: '50%', backgroundColor: 'var(--accent-red)' }} />}
-        {isFailed ? 'Analysis Failed' : 'Pending AI analysis…'}
-      </span>
-    );
-  }
+  const isFailed = category === 'Failed';
+  const isPending = !category || category === 'Unknown' || category === 'Failed';
 
-  const styleConfig = CATEGORY_STYLES[category] || CATEGORY_STYLES.Other;
-  const colorVar = `var(${styleConfig.varName})`;
+  let colorVar: string;
+  let label: string;
+
+  if (isFailed) {
+    colorVar = 'var(--badge-unproductive-text)';
+    label = 'Analysis Failed';
+  } else if (isPending) {
+    colorVar = 'var(--text-muted)';
+    label = 'Pending AI analysis…';
+  } else {
+    const styleConfig = CATEGORY_STYLES[category] || CATEGORY_STYLES.Other;
+    colorVar = `var(${styleConfig.varName})`;
+    label = category;
+  }
 
   return (
     <span
       className="category-badge"
+      title={label}
       style={{
         display: 'inline-flex',
         alignItems: 'center',
@@ -56,12 +54,26 @@ export function CategoryBadge({ category }: CategoryBadgeProps) {
         boxShadow: `0 2px 8px color-mix(in srgb, ${colorVar} 10%, transparent)`,
       }}
     >
-      <span style={{ 
-        width: 6, height: 6, borderRadius: '50%', backgroundColor: colorVar,
-        boxShadow: `0 0 6px ${colorVar}`
-      }} />
-      <span>{category}</span>
+      <span
+        style={{
+          width: 6,
+          height: 6,
+          borderRadius: '50%',
+          backgroundColor: colorVar,
+          boxShadow: `0 0 6px ${colorVar}`,
+          flexShrink: 0,
+        }}
+      />
+      <span
+        style={{
+          maxWidth: 140,
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+          whiteSpace: 'nowrap',
+        }}
+      >
+        {label}
+      </span>
     </span>
   );
 }
-

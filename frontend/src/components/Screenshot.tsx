@@ -78,27 +78,32 @@ export function ScreenshotThumb({ imagePath, onClick, className }: ThumbProps) {
     return imagePath && imageMemoryCache.has(imagePath) ? imageMemoryCache.get(imagePath)! : null;
   });
   const [loading, setLoading] = useState(false);
+  const [failed, setFailed] = useState(false);
 
   useEffect(() => {
     if (!imagePath) {
       setSrc(null);
       setLoading(false);
+      setFailed(false);
       return;
     }
 
     if (imageMemoryCache.has(imagePath)) {
       setSrc(imageMemoryCache.get(imagePath)!);
       setLoading(false);
+      setFailed(false);
       return;
     }
 
     let isMounted = true;
     setLoading(true);
+    setFailed(false);
 
     fetchImageData(imagePath).then((data) => {
       if (isMounted) {
         setSrc(data);
         setLoading(false);
+        setFailed(!data);
       }
     });
 
@@ -115,21 +120,45 @@ export function ScreenshotThumb({ imagePath, onClick, className }: ThumbProps) {
 
   if (!src) {
     return (
-      <div className="timeline-thumb-placeholder">
+      <div
+        className="timeline-thumb-placeholder"
+        title={failed ? 'Failed to load screenshot' : 'No screenshot captured'}
+      >
         <Icon name="desktop" size={16} color="var(--text-muted)" />
       </div>
     );
   }
 
+  const thumbClassName = `${className ? `${className} ` : ''}timeline-thumb-img`;
+
   return (
-    <img
-      src={src}
-      alt="Desktop Screenshot"
-      className={className || "timeline-thumb-img"}
+    <button
+      type="button"
       onClick={onClick}
-      style={{ cursor: onClick ? 'pointer' : 'default' }}
-      onError={() => setSrc(null)}
-    />
+      className={thumbClassName}
+      style={{
+        padding: 0,
+        appearance: 'none',
+        cursor: onClick ? 'pointer' : 'default',
+      }}
+      aria-label="Open screenshot"
+    >
+      <img
+        src={src}
+        alt=""
+        style={{
+          display: 'block',
+          width: '100%',
+          height: '100%',
+          objectFit: 'cover',
+          borderRadius: 'inherit',
+        }}
+        onError={() => {
+          setSrc(null);
+          setFailed(true);
+        }}
+      />
+    </button>
   );
 }
 
@@ -174,46 +203,84 @@ export function ImageModal({ imagePath, onClose }: ImageModalProps) {
     return () => { isMounted = false; };
   }, [imagePath]);
 
-  const handleZoomIn = () => setZoomScale(prev => Math.min(3, parseFloat((prev + 0.25).toFixed(2))));
-  const handleZoomOut = () => setZoomScale(prev => Math.max(0.5, parseFloat((prev - 0.25).toFixed(2))));
-  const handleResetZoom = () => setZoomScale(1);
+  const handleZoomIn = useCallback(
+    () => setZoomScale(prev => Math.min(3, parseFloat((prev + 0.25).toFixed(2)))),
+    []
+  );
+  const handleZoomOut = useCallback(
+    () => setZoomScale(prev => Math.max(0.5, parseFloat((prev - 0.25).toFixed(2)))),
+    []
+  );
+  const handleResetZoom = useCallback(() => setZoomScale(1), []);
+
+  useEffect(() => {
+    if (!imagePath) return;
+
+    const handleZoomKeyDown = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (
+        target &&
+        (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)
+      ) {
+        return;
+      }
+
+      if (e.key === '+' || e.key === '=') {
+        e.preventDefault();
+        handleZoomIn();
+      } else if (e.key === '-' || e.key === '_') {
+        e.preventDefault();
+        handleZoomOut();
+      } else if (e.key === '0') {
+        e.preventDefault();
+        handleResetZoom();
+      }
+    };
+
+    window.addEventListener('keydown', handleZoomKeyDown);
+    return () => window.removeEventListener('keydown', handleZoomKeyDown);
+  }, [imagePath, handleZoomIn, handleZoomOut, handleResetZoom]);
 
   const titleNode = imagePath ? (
-    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', paddingRight: 16 }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-        <Icon name="desktop" size={18} color="var(--accent-primary)" />
-        <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-primary)' }}>Desktop Screenshot Inspection</span>
-      </div>
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+      <Icon name="desktop" size={18} color="var(--accent-primary)" />
+      <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-primary)' }}>
+        Desktop Screenshot Inspection
+      </span>
+    </span>
+  ) : null;
 
-      {/* Interactive Zoom Controls */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-        <button
-          onClick={handleZoomOut}
-          disabled={zoomScale <= 0.5}
-          className="btn btn-secondary btn-sm"
-          title="Zoom Out (-25%)"
-          style={{ height: 28, padding: '0 8px', fontSize: 12 }}
-        >
-          -
-        </button>
-        <button
-          onClick={handleResetZoom}
-          className="btn btn-secondary btn-sm"
-          title="Reset Zoom (100%)"
-          style={{ height: 28, padding: '0 8px', fontSize: 11, fontFamily: 'monospace' }}
-        >
-          {Math.round(zoomScale * 100)}%
-        </button>
-        <button
-          onClick={handleZoomIn}
-          disabled={zoomScale >= 3}
-          className="btn btn-secondary btn-sm"
-          title="Zoom In (+25%)"
-          style={{ height: 28, padding: '0 8px', fontSize: 12 }}
-        >
-          +
-        </button>
-      </div>
+  const zoomControls = imagePath ? (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+      <button
+        onClick={handleZoomOut}
+        disabled={zoomScale <= 0.5}
+        className="btn btn-secondary btn-sm"
+        title="Zoom Out (-)"
+        aria-label="Zoom out"
+        style={{ height: 28, padding: '0 8px', display: 'inline-flex', alignItems: 'center', opacity: zoomScale <= 0.5 ? 0.6 : undefined, cursor: zoomScale <= 0.5 ? 'not-allowed' : undefined }}
+      >
+        <Icon name="minus" size={14} />
+      </button>
+      <button
+        onClick={handleResetZoom}
+        className="btn btn-secondary btn-sm"
+        title="Reset Zoom (100%)"
+        aria-label="Reset zoom to 100%"
+        style={{ height: 28, padding: '0 8px', fontSize: 11, fontFamily: 'monospace' }}
+      >
+        {Math.round(zoomScale * 100)}%
+      </button>
+      <button
+        onClick={handleZoomIn}
+        disabled={zoomScale >= 3}
+        className="btn btn-secondary btn-sm"
+        title="Zoom In (+)"
+        aria-label="Zoom in"
+        style={{ height: 28, padding: '0 8px', display: 'inline-flex', alignItems: 'center', opacity: zoomScale >= 3 ? 0.6 : undefined, cursor: zoomScale >= 3 ? 'not-allowed' : undefined }}
+      >
+        <Icon name="plus" size={14} />
+      </button>
     </div>
   ) : null;
 
@@ -222,40 +289,41 @@ export function ImageModal({ imagePath, onClose }: ImageModalProps) {
       isOpen={Boolean(imagePath)}
       onClose={onClose}
       title={titleNode}
+      actions={zoomControls}
       maxWidth={1060}
     >
-      <div style={{ overflow: 'auto', maxHeight: '78vh', borderRadius: 'var(--radius-md)', background: 'var(--bg-base)', padding: 12, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+      <div style={{ overflow: 'auto', maxHeight: '78vh', borderRadius: 'var(--radius-md)', background: 'var(--bg-base)', padding: 12, display: 'flex', alignItems: 'center' }}>
         {loading ? (
-          <div style={{ padding: '60px 100px', color: 'var(--text-muted)', fontSize: 13, textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10 }}>
+          <div style={{ margin: 'auto', padding: '60px 100px', color: 'var(--text-muted)', fontSize: 13, textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10 }}>
             <Icon name="refresh" size={24} className="spin" color="var(--accent-primary)" />
             <span>Loading full-resolution screenshot...</span>
           </div>
         ) : src ? (
-          <div style={{ transition: 'transform 0.15s ease-out', transform: `scale(${zoomScale})`, transformOrigin: 'top center', display: 'inline-block' }}>
-            <img
-              src={src}
-              alt="Desktop Screenshot Inspection"
-              style={{
-                maxWidth: '100%',
-                maxHeight: '70vh',
-                borderRadius: 'var(--radius-sm)',
-                display: 'block',
-                objectFit: 'contain',
-                border: '1px solid var(--border-subtle)',
-                boxShadow: 'var(--shadow-card)',
-                imageRendering: '-webkit-optimize-contrast',
-              }}
-            />
-          </div>
+          <img
+            src={src}
+            alt="Desktop Screenshot Inspection"
+            style={{
+              margin: 'auto',
+              width: `${zoomScale * 100}%`,
+              maxWidth: 'none',
+              height: 'auto',
+              borderRadius: 'var(--radius-sm)',
+              display: 'block',
+              border: '1px solid var(--border-subtle)',
+              boxShadow: 'var(--shadow-card)',
+              imageRendering: '-webkit-optimize-contrast',
+              transition: 'width 0.15s ease-out',
+            }}
+          />
         ) : (
-          <div style={{ padding: '40px 60px', color: 'var(--text-muted)', fontSize: 13, textAlign: 'center' }}>
+          <div style={{ margin: 'auto', padding: '40px 60px', color: 'var(--text-muted)', fontSize: 13, textAlign: 'center' }}>
             Failed to load screenshot image
           </div>
         )}
       </div>
 
       {imagePath && (
-        <div style={{ marginTop: 10, fontSize: 11, fontFamily: 'monospace', color: 'var(--text-muted)', textAlign: 'center', wordBreak: 'break-all', opacity: 0.8 }}>
+        <div style={{ marginTop: 10, fontSize: 11, fontFamily: 'monospace', color: 'var(--text-muted)', textAlign: 'center', wordBreak: 'break-all' }}>
           {imagePath}
         </div>
       )}

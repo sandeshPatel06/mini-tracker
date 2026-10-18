@@ -3,6 +3,7 @@ package db
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -191,7 +192,7 @@ func TestLogEntryCRUD(t *testing.T) {
 	}
 
 	// Update AI Result
-	err = database.UpdateAIResult(id, "Coding", true, 95.0, "Active Golang development in IDE")
+	err = database.UpdateAIResult(id, "Coding", true, 95.0, 0.9, "Active Golang development in IDE")
 	if err != nil {
 		t.Fatalf("failed to update AI result: %v", err)
 	}
@@ -246,4 +247,32 @@ func TestKeyResolutionHierarchy(t *testing.T) {
 		t.Errorf("expected org_admin key priority, got key=%s source=%s err=%v", key, source, err)
 	}
 	_ = model
+}
+
+func TestResolveServerTimeZone(t *testing.T) {
+	t.Setenv("TZ", "Asia/Kolkata")
+	if got := resolveServerTimeZone(); got != "Asia/Kolkata" {
+		t.Fatalf("expected Asia/Kolkata, got %q", got)
+	}
+
+	// Invalid TZ falls back to the system zone or a numeric offset.
+	t.Setenv("TZ", "Not/AZone")
+	if got := resolveServerTimeZone(); got == "" {
+		t.Fatal("expected a non-empty fallback timezone")
+	}
+}
+
+func TestWithPostgresSessionTimeZone(t *testing.T) {
+	t.Setenv("TZ", "Asia/Kolkata")
+
+	got := withPostgresSessionTimeZone("postgres://u:p@localhost:5432/db?sslmode=disable")
+	if !strings.Contains(got, "timezone%3DAsia%2FKolkata") && !strings.Contains(got, "timezone=Asia/Kolkata") {
+		t.Fatalf("expected timezone option to be injected, got %q", got)
+	}
+
+	// Explicit options are respected untouched.
+	explicit := "postgres://u:p@localhost:5432/db?options=-c%20timezone%3DUTC"
+	if got := withPostgresSessionTimeZone(explicit); got != explicit {
+		t.Fatalf("expected explicit options to be preserved, got %q", got)
+	}
 }

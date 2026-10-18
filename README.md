@@ -1,13 +1,25 @@
-# 📍 get-Hike — Corporate Productivity & AI Platform
+# 📍 get-Hike — Open-Source Productivity Tracker with AI Analysis
 
-> A privacy-first Linux productivity tracking platform with automated Gemini AI activity analysis, stateful Work Session management, OAuth 2.0 authentication, and a multi-tenant corporate team organization engine.
+> A privacy-first, **open-source** productivity tracker for Linux with automated Gemini AI activity analysis, work-session tracking, and an **optional** multi-tenant team organization engine. Self-host it for personal tracking or roll it out across a team.
+
+---
+
+## 🆓 Open Source & Free for Personal Use
+
+get-Hike is free and open-source software released under the [MIT License](#-license). Anyone can use, modify, self-host and redistribute it — **personal use is explicitly welcome**.
+
+- **Free for everyone**: no license fee, subscription or trial — use it for personal tracking at no cost.
+- **Solo mode built in**: run it as a private, local tracker in Guest Mode — no account, no organization, no cloud required.
+- **Team features are optional**: OAuth 2.0, organizations, member invitations and team analytics are there only if you want them.
+- **Your data stays yours**: all data is stored locally in `~/.local/share/get-hike/` on your own machine.
+- **Hack on it**: MIT means you can fork it, change it, and share your version with others.
 
 ---
 
 ## 🌟 Key Features
 
 - ⏱️ **Work Session Tracking & Live Clock**: User-controlled session toggle with real-time timer directly embedded in the dashboard sidebar and standalone floating desktop widget.
-- 🤖 **Automated Gemini AI Batch Analysis**: Intelligent batch analysis powered by Google Gemini API (`gemma-4-31b-it`, `gemma-4-31b-it`) with automatic model failover, rate-limit resilience, and configurable periodic cron processing.
+- 🤖 **Automated Gemini AI Batch Analysis**: Intelligent batch analysis powered by Google Gemini API (e.g. `gemma-4-31b-it`, `gemini-2.5-flash`) with automatic model failover, rate-limit resilience, and configurable periodic cron processing.
 - 🔐 **OAuth 2.0 & Multi-Tenant Organization Engine**: Corporate team management supporting Google OAuth 2.0, Azure AD / Microsoft OAuth 2.0, Email/Password login, Role-Based Access Control (Owner, Admin, Member), and time-sensitive secure invitation token links.
 - 📊 **Multi-User Analytics & Date Range Filtering**: Inspect productivity timelines, category distributions, and AI ratings across team members with multi-user dropdown filters and date range selection (`start_date`, `end_date`, `user_id`).
 - 🪟 **Floating OS Desk Widget (`/wizard`)**: Launch a lightweight, floating desktop widget window for session control and quick activity metrics without needing a full browser tab open.
@@ -40,6 +52,8 @@ Mini Tracker / get-Hike Web Application (Port 8080)
 ---
 
 ## 🚀 Quickstart & Setup
+
+> **Personal / solo use:** no account and no organization needed — run the app locally in Guest Mode and everything stays on your machine. The team/org features below are completely optional.
 
 ### 1. One-Line Automatic Installation (Recommended)
 
@@ -96,7 +110,7 @@ export GEMINI_API_KEY="your-gemini-api-key"
 export GEMINI_MODEL="gemma-4-31b-it"
 
 # AI Analysis Interval (Frequency of background AI analysis batch)
-export AI_ANALYSIS_INTERVAL="3h"
+export AI_ANALYSIS_INTERVAL_SECONDS="3h"
 
 # Screenshot Capture Frequency
 export SCREENSHOT_INTERVAL_SECONDS="30"
@@ -111,6 +125,9 @@ export GOOGLE_CLIENT_SECRET="your-google-client-secret"
 export AZURE_CLIENT_ID="your-azure-client-id"
 export AZURE_CLIENT_SECRET="your-azure-client-secret"
 export AZURE_TENANT_ID="common"
+
+# Web Session Signing Key (server mode; sessions reset on restart when unset)
+export JWT_SECRET="a-long-random-secret"
 ```
 
 Configuration file `~/.config/get-hike/config.json` example:
@@ -172,5 +189,7 @@ Configuration file `~/.config/get-hike/config.json` example:
 
 ## 📜 License
 
-MIT License © REAK INFOTECH LLP
+This project is **open source** and released under the [MIT License](LICENSE) © 2026 REAK INFOTECH LLP.
+
+You are free to use get-Hike for **personal use** (and any other purpose): run it, modify it, self-host it and share it. See the [LICENSE](LICENSE) file for the full text.
 

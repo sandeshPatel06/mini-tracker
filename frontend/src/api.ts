@@ -32,8 +32,43 @@ export function buildApiUrl(path: string): string {
   return base ? `${base}${cleanPath}` : cleanPath;
 }
 
+// ---------------------------------------------------------------------------
+// Dev-only request monitor — records apiFetch timing into a capped ring buffer.
+// Enabled only when DevMenu sets window.__DEV_MONITOR__ = true.
+// ---------------------------------------------------------------------------
+
+export interface DevApiLogEntry {
+  time: string;
+  method: string;
+  path: string;
+  status: number;
+  ms: number;
+  ok: boolean;
+}
+
+const DEV_API_LOG_LIMIT = 100;
+let devApiLog: DevApiLogEntry[] = [];
+
+export function getDevApiLog(): DevApiLogEntry[] {
+  return devApiLog.slice();
+}
+
+export function clearDevApiLog(): void {
+  devApiLog = [];
+}
+
+function recordDevApiCall(entry: DevApiLogEntry): void {
+  if ((window as any).__DEV_MONITOR__ !== true) return;
+  devApiLog.push(entry);
+  if (devApiLog.length > DEV_API_LOG_LIMIT) {
+    devApiLog.splice(0, devApiLog.length - DEV_API_LOG_LIMIT);
+  }
+}
+
 export function apiFetch(path: string, options: RequestInit = {}): Promise<Response> {
   const url = buildApiUrl(path);
+  const method = (options.method || 'GET').toUpperCase();
+  const startedAt = Date.now();
   const headers = new Headers(options.headers || {});
 
   // Attach JWT or session token from localStorage for robust authentication
@@ -61,5 +96,30 @@ export function apiFetch(path: string, options: RequestInit = {}): Promise<Respo
     credentials: 'include',
     ...options,
     headers,
-  });
+  })
+    .then((response) => {
+      recordDevApiCall({
+        time: new Date().toISOString(),
+        method,
+        path,
+        status: response.status,
+        ms: Date.now() - startedAt,
+        ok: response.ok,
+      });
+      if (response.status === 401) {
+        window.dispatchEvent(new CustomEvent('mini-auth-expired'));
+      }
+      return response;
+    })
+    .catch((error) => {
+      recordDevApiCall({
+        time: new Date().toISOString(),
+        method,
+        path,
+        status: 0,
+        ms: Date.now() - startedAt,
+        ok: false,
+      });
+      throw error;
+    });
 }

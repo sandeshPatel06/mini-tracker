@@ -29,7 +29,9 @@ export type IconName =
   | 'logout'
   | 'chevron-down'
   | 'chevron-right'
+  | 'chevron-left'
   | 'plus'
+  | 'minus'
   | 'trash'
   | 'clock'
   | 'search'
@@ -45,6 +47,7 @@ interface IconProps {
   color?: string;
   strokeWidth?: number;
   style?: React.CSSProperties;
+  ariaLabel?: string;
 }
 
 export function Icon({
@@ -54,6 +57,7 @@ export function Icon({
   color,
   strokeWidth = 2,
   style = {},
+  ariaLabel,
 }: IconProps) {
   const customStyle: React.CSSProperties = {
     width: size,
@@ -63,15 +67,20 @@ export function Icon({
     ...style,
   };
 
-  const commonProps = {
+  const a11yProps: React.SVGProps<SVGSVGElement> = ariaLabel
+    ? { role: 'img', 'aria-label': ariaLabel }
+    : { 'aria-hidden': 'true', focusable: 'false' };
+
+  const commonProps: React.SVGProps<SVGSVGElement> = {
     viewBox: '0 0 24 24',
     fill: 'none',
     stroke: 'currentColor',
     strokeWidth,
-    strokeLinecap: 'round' as const,
-    strokeLinejoin: 'round' as const,
+    strokeLinecap: 'round',
+    strokeLinejoin: 'round',
     className,
     style: customStyle,
+    ...a11yProps,
   };
 
   switch (name) {
@@ -124,7 +133,7 @@ export function Icon({
 
     case 'inbox':
       return (
-        <svg {...commonProps} strokeWidth={1.5}>
+        <svg {...commonProps}>
           <polyline points="22 12 16 12 14 15 10 15 8 12 2 12" />
           <path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z" />
         </svg>
@@ -314,10 +323,24 @@ export function Icon({
         </svg>
       );
 
+    case 'chevron-left':
+      return (
+        <svg {...commonProps}>
+          <polyline points="15 18 9 12 15 6" />
+        </svg>
+      );
+
     case 'plus':
       return (
         <svg {...commonProps}>
           <line x1="12" y1="5" x2="12" y2="19" />
+          <line x1="5" y1="12" x2="19" y2="12" />
+        </svg>
+      );
+
+    case 'minus':
+      return (
+        <svg {...commonProps}>
           <line x1="5" y1="12" x2="19" y2="12" />
         </svg>
       );

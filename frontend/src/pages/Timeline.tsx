@@ -1,18 +1,21 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { LogEntry } from '../types';
 import { format } from 'date-fns';
 import { CategoryBadge } from '../components/CategoryBadge';
 import { ScreenshotThumb, ImageModal } from '../components/Screenshot';
 import { Icon } from '../components/Icon';
+import { localISODate, isPendingLog, FOCUS_OK } from '../utils';
 
 interface Props {
   logs: LogEntry[];
   loading: boolean;
   today: string;
   onDateChange: (date: string) => void;
+  loadError?: string | null;
+  onRetry?: () => void;
 }
 
-export default function Timeline({ logs, loading, today, onDateChange }: Props) {
+export default function Timeline({ logs, loading, today, onDateChange, loadError, onRetry }: Props) {
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedApp, setSelectedApp] = useState('ALL');
@@ -59,85 +62,90 @@ export default function Timeline({ logs, loading, today, onDateChange }: Props) 
 
   const totalPages = Math.ceil(filteredLogs.length / pageSize) || 1;
 
+  // Reset to page 1 when the selected day changes
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [today]);
+
+  // Never leave the paginator on a page that no longer exists
+  useEffect(() => {
+    if (currentPage > totalPages) {
+      setCurrentPage(totalPages);
+    }
+  }, [currentPage, totalPages]);
+
   const paginatedLogs = useMemo(() => {
     const start = (currentPage - 1) * pageSize;
     return filteredLogs.slice(start, start + pageSize);
   }, [filteredLogs, currentPage, pageSize]);
 
-  // Calculate day summary metrics
-  const avgDayScore = logs.length > 0
+  // Calculate day summary metrics from analyzed captures only
+  const analyzedLogs = useMemo(() => logs.filter((l) => !isPendingLog(l)), [logs]);
+
+  const avgDayScore = analyzedLogs.length > 0
     ? Math.round(
-        logs.reduce((acc, l) => acc + (typeof l.productive_score === 'number' ? l.productive_score : l.is_productive ? 100 : 0), 0) / logs.length
+        analyzedLogs.reduce((acc, l) => acc + (typeof l.productive_score === 'number' ? l.productive_score : l.is_productive ? 100 : 0), 0) / analyzedLogs.length
       )
     : 0;
 
+  const hasActiveFilters = Boolean(searchQuery.trim()) || selectedApp !== 'ALL' || selectedCategory !== 'ALL';
+
   return (
-    <div>
+    <div aria-busy={loading} className="fade-in-up">
       <ImageModal imagePath={selectedImage} onClose={() => setSelectedImage(null)} />
 
       {/* Header Bar */}
       <div className="page-header" style={{ marginBottom: 16 }}>
         <div>
-          <h1 className="page-title" style={{ fontSize: 24, fontWeight: 700, letterSpacing: '-0.4px', color: 'var(--text-primary)' }}>
-            Activity Timeline
-          </h1>
-          <div className="page-subtitle" style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: 4 }}>
-            Detailed minute-by-minute activity captures & AI focus ratings
-          </div>
+          <h1 className="page-title">Activity Timeline</h1>
+          <p className="page-subtitle">Detailed minute-by-minute activity captures &amp; AI focus ratings.</p>
         </div>
       </div>
 
-      {/* Top Filter Controls & Summary Strip */}
-      <div className="card" style={{ marginBottom: 20, padding: '14px 18px' }}>
-        <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 14 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', flex: 1 }}>
-            {/* Date Picker */}
+      {/* Compact filter toolbar */}
+      <div className="card" style={{ marginBottom: 16 }}>
+        <div className="card-body" style={{ padding: '12px 16px' }}>
+          <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 10 }}>
+            <label htmlFor="timeline-date-picker" style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.6px', color: 'var(--text-secondary)' }}>
+              Date
+            </label>
             <input
               id="timeline-date-picker"
               type="date"
               className="date-input"
               value={today}
-              max={new Date().toISOString().slice(0, 10)}
+              max={localISODate()}
               onChange={(e) => onDateChange(e.target.value)}
-              style={{
-                height: 36,
-                padding: '0 12px',
-                fontSize: 13,
-              }}
+              style={{ height: 34, padding: '0 10px', fontSize: 13 }}
             />
 
-            {/* Search Input */}
-            <div style={{ position: 'relative', minWidth: 200, flex: 1 }}>
+            <div style={{ position: 'relative', flex: '1 1 200px', minWidth: 170 }}>
               <input
                 type="text"
                 placeholder="Search apps, windows, reason..."
                 className="form-input"
+                aria-label="Search captures"
                 value={searchQuery}
                 onChange={(e) => {
                   setSearchQuery(e.target.value);
                   setCurrentPage(1);
                 }}
-                style={{
-                  height: 36,
-                  paddingLeft: 32,
-                  fontSize: 13,
-                  width: '100%',
-                }}
+                style={{ height: 34, paddingLeft: 32, fontSize: 13, width: '100%' }}
               />
               <div style={{ position: 'absolute', left: 10, top: 10, color: 'var(--text-muted)' }}>
                 <Icon name="search" size={14} />
               </div>
             </div>
 
-            {/* App Filter */}
             <select
               className="form-select"
+              aria-label="Filter by application"
               value={selectedApp}
               onChange={(e) => {
                 setSelectedApp(e.target.value);
                 setCurrentPage(1);
               }}
-              style={{ height: 36, fontSize: 13, minWidth: 140 }}
+              style={{ width: 'auto', height: 34, fontSize: 13, minWidth: 150 }}
             >
               <option value="ALL">All Applications ({uniqueApps.length})</option>
               {uniqueApps.map((app) => (
@@ -145,15 +153,15 @@ export default function Timeline({ logs, loading, today, onDateChange }: Props) 
               ))}
             </select>
 
-            {/* Category Filter */}
             <select
               className="form-select"
+              aria-label="Filter by category"
               value={selectedCategory}
               onChange={(e) => {
                 setSelectedCategory(e.target.value);
                 setCurrentPage(1);
               }}
-              style={{ height: 36, fontSize: 13, minWidth: 130 }}
+              style={{ width: 'auto', height: 34, fontSize: 13, minWidth: 130 }}
             >
               <option value="ALL">All Categories</option>
               {uniqueCategories.map((cat) => (
@@ -162,11 +170,13 @@ export default function Timeline({ logs, loading, today, onDateChange }: Props) 
             </select>
           </div>
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: 14, fontSize: 13, color: 'var(--text-muted)' }}>
-            <span>Showing <strong style={{ color: 'var(--text-primary)' }}>{paginatedLogs.length}</strong> of {filteredLogs.length}</span>
-            <span>•</span>
-            <span style={{ fontWeight: 600, color: avgDayScore >= 60 ? 'var(--accent-green)' : 'var(--accent-primary)' }}>
-              Avg Day Focus: {avgDayScore}%
+          <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 10, marginTop: 10, fontSize: 12, color: 'var(--text-muted)', fontVariantNumeric: 'tabular-nums' }}>
+            <span>
+              Showing <strong style={{ color: 'var(--text-primary)' }}>{paginatedLogs.length}</strong> of {filteredLogs.length}
+            </span>
+            <span style={{ color: 'var(--border-medium)' }}>•</span>
+            <span style={{ fontWeight: 600, color: avgDayScore >= FOCUS_OK ? 'var(--badge-productive-text)' : 'var(--accent-primary-text)' }}>
+              Avg Day Focus: {analyzedLogs.length === 0 ? '—' : `${avgDayScore}%`}
             </span>
           </div>
         </div>
@@ -174,20 +184,23 @@ export default function Timeline({ logs, loading, today, onDateChange }: Props) 
 
       {/* Main Activity Timeline List */}
       <div className="card">
-        <div className="card-header" style={{ padding: '16px 20px', borderBottom: '1px solid var(--border-subtle)' }}>
-          <span className="card-title" style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-primary)', textTransform: 'none' }}>
-            {today === new Date().toISOString().slice(0, 10) ? 'Today\'s Log Feed' : format(new Date(today + 'T00:00:00'), 'MMMM d, yyyy')}
-          </span>
-          <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-            Page {currentPage} of {totalPages}
+        <div className="card-header">
+          <span className="card-title" style={{ textTransform: 'none', fontSize: 14, color: 'var(--text-primary)' }}>
+            📅 {today === localISODate() ? 'Today\'s Log Feed' : format(new Date(today + 'T00:00:00'), 'MMMM d, yyyy')}
           </span>
         </div>
 
         <div className="card-body" style={{ padding: '12px 16px' }}>
-          {loading ? (
+          {loadError && logs.length > 0 && (
+            <div className="alert alert-error" role="alert" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 12 }}>
+              <span>{loadError}</span>
+              {onRetry && <button className="btn btn-secondary btn-sm" onClick={onRetry}>Retry</button>}
+            </div>
+          )}
+          {loading && logs.length === 0 ? (
             <div className="timeline-list">
               {[1, 2, 3, 4, 5].map((i) => (
-                <div key={i} className="timeline-item">
+                <div key={i} className="timeline-item" style={{ padding: '8px 12px', gap: 10 }}>
                   <div className="skeleton" style={{ width: 40, height: 16 }} />
                   <div className="skeleton timeline-thumb-placeholder" style={{ border: 'none' }} />
                   <div style={{ flex: 1 }}>
@@ -198,14 +211,35 @@ export default function Timeline({ logs, loading, today, onDateChange }: Props) 
                 </div>
               ))}
             </div>
+          ) : loadError && logs.length === 0 ? (
+            <div className="alert alert-error" role="alert" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+              <span>{loadError}</span>
+              {onRetry && <button className="btn btn-secondary btn-sm" onClick={onRetry}>Retry</button>}
+            </div>
           ) : paginatedLogs.length === 0 ? (
             <div className="empty-state">
               <div className="empty-state-icon" style={{ display: 'flex', justifyContent: 'center', color: 'var(--text-muted)', marginBottom: 12 }}>
                 <Icon name="inbox" size={32} />
               </div>
-              <div className="empty-state-title">No matching captures found</div>
+              <div className="empty-state-title">
+                {hasActiveFilters ? 'No matching captures found' : 'No captures on this date'}
+              </div>
               <div className="empty-state-desc">
-                Try clearing your search query or selecting a different date/app filter.
+                {hasActiveFilters
+                  ? 'Try adjusting or clearing your filters.'
+                  : 'The tracker may not have been running, or the backend is unreachable.'}
+              </div>
+              <div style={{ marginTop: 12 }}>
+                {hasActiveFilters ? (
+                  <button
+                    className="btn btn-secondary btn-sm"
+                    onClick={() => { setSearchQuery(''); setSelectedApp('ALL'); setSelectedCategory('ALL'); setCurrentPage(1); }}
+                  >
+                    Clear filters
+                  </button>
+                ) : today !== localISODate() ? (
+                  <button className="btn btn-secondary btn-sm" onClick={() => onDateChange(localISODate())}>Go to today</button>
+                ) : null}
               </div>
             </div>
           ) : (
@@ -216,8 +250,8 @@ export default function Timeline({ logs, loading, today, onDateChange }: Props) 
                   : log.is_productive ? 100 : 0;
 
                 return (
-                  <div key={log.id} className="timeline-item">
-                    <span className="timeline-time">
+                  <div key={log.id} className="timeline-item" style={{ padding: '8px 12px', gap: 10 }}>
+                    <span className="timeline-time" style={{ fontVariantNumeric: 'tabular-nums' }}>
                       {format(new Date(log.timestamp), 'HH:mm:ss')}
                     </span>
 
@@ -227,25 +261,33 @@ export default function Timeline({ logs, loading, today, onDateChange }: Props) 
                     />
 
                     <div className="timeline-info">
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
                         <CategoryBadge category={log.ai_category} />
                         {log.app_name && (
                           <span
+                            title={log.app_name}
                             style={{
                               fontSize: 11,
                               fontWeight: 600,
-                              padding: '2px 8px',
+                              padding: '1px 7px',
                               borderRadius: 4,
                               background: 'var(--bg-elevated)',
                               color: 'var(--text-secondary)',
                               border: '1px solid var(--border-subtle)',
+                              maxWidth: 180,
+                              overflow: 'hidden',
+                              textOverflow: 'ellipsis',
+                              whiteSpace: 'nowrap',
                             }}
                           >
                             💻 {log.app_name}
                           </span>
                         )}
                         {log.app_category && (
-                          <span style={{ fontSize: 11, color: 'var(--text-muted)', fontStyle: 'italic' }}>
+                          <span
+                            title={log.app_category}
+                            style={{ fontSize: 11, color: 'var(--text-muted)', fontStyle: 'italic', maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                          >
                             ({log.app_category})
                           </span>
                         )}
@@ -258,7 +300,6 @@ export default function Timeline({ logs, loading, today, onDateChange }: Props) 
                             fontSize: 12,
                             fontWeight: 600,
                             color: 'var(--text-primary)',
-                            marginTop: 4,
                             whiteSpace: 'nowrap',
                             overflow: 'hidden',
                             textOverflow: 'ellipsis',
@@ -268,28 +309,28 @@ export default function Timeline({ logs, loading, today, onDateChange }: Props) 
                         </div>
                       )}
 
-                      <div className="timeline-reason" style={{ marginTop: 2 }}>
+                      <div className="timeline-reason" title={log.ai_reason || undefined}>
                         {log.ai_reason || '—'}
                       </div>
 
-                      <div style={{ marginTop: 4, display: 'flex', gap: 12, alignItems: 'center', fontSize: 11, color: 'var(--text-muted)' }}>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center', fontSize: 11, color: 'var(--text-muted)', fontVariantNumeric: 'tabular-nums' }}>
                         <span>⌨️ {log.total_keys} keys · {log.unique_keys} unique</span>
-                        <span>•</span>
+                        <span style={{ color: 'var(--border-medium)' }}>•</span>
                         <span>Entropy: {log.entropy_score.toFixed(1)}</span>
                       </div>
                     </div>
 
-                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
-                      {!log.ai_category || log.ai_reason.includes('No Gemini API key') ? (
-                        <span className="badge badge-pending">Pending AI</span>
+                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 3, flexShrink: 0 }}>
+                      {isPendingLog(log) ? (
+                        <span className="badge badge-pending" style={{ fontVariantNumeric: 'tabular-nums' }}>Pending AI</span>
                       ) : (
-                        <span className={`badge ${scoreVal >= 50 ? 'badge-productive' : 'badge-unproductive'}`}>
+                        <span className={`badge ${scoreVal >= 50 ? 'badge-productive' : 'badge-unproductive'}`} style={{ fontVariantNumeric: 'tabular-nums' }}>
                           <Icon name={scoreVal >= 50 ? 'check' : 'x'} size={13} />
                           {scoreVal}% Focus
                         </span>
                       )}
                       {log.ai_confidence > 0 && (
-                        <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>
+                        <span style={{ fontSize: 10, color: 'var(--text-muted)', fontVariantNumeric: 'tabular-nums' }}>
                           {(log.ai_confidence * 100).toFixed(0)}% AI confidence
                         </span>
                       )}
@@ -303,17 +344,19 @@ export default function Timeline({ logs, loading, today, onDateChange }: Props) 
 
         {/* Pagination Footer */}
         {filteredLogs.length > 0 && (
-          <div style={{ padding: '12px 20px', borderTop: '1px solid var(--border-subtle)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-              <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>Per Page:</span>
+          <div style={{ padding: '10px 16px', borderTop: '1px solid var(--border-subtle)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <label htmlFor="timeline-page-size" style={{ fontSize: 12, color: 'var(--text-muted)' }}>Per page</label>
               <select
+                id="timeline-page-size"
+                aria-label="Rows per page"
                 value={pageSize}
                 onChange={(e) => {
                   setPageSize(Number(e.target.value));
                   setCurrentPage(1);
                 }}
                 className="form-select"
-                style={{ height: 30, fontSize: 12, padding: '2px 8px' }}
+                style={{ width: 'auto', height: 30, fontSize: 12, padding: '2px 30px 2px 10px' }}
               >
                 <option value={15}>15</option>
                 <option value={25}>25</option>
@@ -322,25 +365,23 @@ export default function Timeline({ logs, loading, today, onDateChange }: Props) 
               </select>
             </div>
 
-            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
               <button
                 disabled={currentPage <= 1}
                 onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
-                className="btn btn-secondary"
-                style={{ height: 30, padding: '0 12px', fontSize: 12 }}
+                className="btn btn-secondary btn-sm"
               >
-                Previous
+                ← Previous
               </button>
-              <span style={{ fontSize: 12, color: 'var(--text-primary)', fontWeight: 600 }}>
+              <span style={{ fontSize: 12, color: 'var(--text-primary)', fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>
                 {currentPage} / {totalPages}
               </span>
               <button
                 disabled={currentPage >= totalPages}
                 onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
-                className="btn btn-secondary"
-                style={{ height: 30, padding: '0 12px', fontSize: 12 }}
+                className="btn btn-secondary btn-sm"
               >
-                Next
+                Next →
               </button>
             </div>
           </div>
@@ -349,4 +390,3 @@ export default function Timeline({ logs, loading, today, onDateChange }: Props) 
     </div>
   );
 }
-

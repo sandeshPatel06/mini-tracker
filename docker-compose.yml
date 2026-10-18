@@ -12,3 +12,5 @@ services:
       - GEMINI_API_KEY=${GEMINI_API_KEY}
       - DATA_DIR=/data
       - PORT=8080
+      # Analytics day-bucketing timezone (IANA name); containers default to UTC
+      - TZ=${TZ:-UTC}

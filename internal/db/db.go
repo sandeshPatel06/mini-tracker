@@ -3,8 +3,10 @@ package db
 import (
 	"crypto/sha256"
 	"database/sql"
+	"errors"
 	"fmt"
 	"log"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -162,7 +164,7 @@ func Open(dataDir string, dbURLs ...string) (*DB, error) {
 
 	if dbURI != "" {
 		drvDialect = dialect.Postgres
-		rawDB, err = sql.Open("postgres", dbURI)
+		rawDB, err = sql.Open("postgres", withPostgresSessionTimeZone(dbURI))
 		if err != nil {
 			return nil, fmt.Errorf("open postgres ent: %w", err)
 		}
@@ -195,6 +197,44 @@ func Open(dataDir string, dbURLs ...string) (*DB, error) {
 		log.Printf("[db] migration note (%s): %v", drvDialect, err)
 	}
 	return db, nil
+}
+
+// resolveServerTimeZone returns the timezone used to bucket analytics by day.
+// Prefers a valid IANA name from the TZ env var or the system zone; falls back
+// to the current numeric UTC offset.
+func resolveServerTimeZone() string {
+	if tz := strings.TrimSpace(os.Getenv("TZ")); tz != "" {
+		if _, err := time.LoadLocation(tz); err == nil {
+			return tz
+		}
+	}
+	name, offset := time.Now().Zone()
+	if strings.Contains(name, "/") {
+		return name
+	}
+	sign := "+"
+	if offset < 0 {
+		sign = "-"
+		offset = -offset
+	}
+	return fmt.Sprintf("%s%02d:%02d", sign, offset/3600, (offset%3600)/60)
+}
+
+// withPostgresSessionTimeZone appends a session timezone option so day-bucketing
+// predicates (timestamp::date) match the server's local calendar instead of UTC.
+// Existing timezone/options parameters are left untouched.
+func withPostgresSessionTimeZone(dbURI string) string {
+	if strings.Contains(dbURI, "timezone=") || strings.Contains(dbURI, "options=") {
+		return dbURI
+	}
+	parsed, err := url.Parse(dbURI)
+	if err != nil {
+		return dbURI
+	}
+	q := parsed.Query()
+	q.Set("options", "-c timezone="+resolveServerTimeZone())
+	parsed.RawQuery = q.Encode()
+	return parsed.String()
 }
 
 func (db *DB) migrate() error {
@@ -685,8 +725,8 @@ func (db *DB) GetPendingInvitations(orgID int64) ([]Invitation, error) {
 // InsertLog stores a new log entry using Ent SQL Builder.
 func (db *DB) InsertLog(e *LogEntry) (int64, error) {
 	builder := entsql.Dialect(db.dialect).Insert("logs").
-		Columns("timestamp", "image_path", "total_keys", "unique_keys", "entropy_score", "total_clicks", "mouse_distance").
-		Values(e.Timestamp.UTC().Format(time.RFC3339), e.ImagePath, e.TotalKeys, e.UniqueKeys, e.EntropyScore, e.TotalClicks, e.MouseDistance)
+		Columns("org_id", "user_id", "timestamp", "image_path", "total_keys", "unique_keys", "entropy_score", "total_clicks", "mouse_distance", "app_name", "window_title").
+		Values(e.OrgID, e.UserID, e.Timestamp.UTC().Format(time.RFC3339), e.ImagePath, e.TotalKeys, e.UniqueKeys, e.EntropyScore, e.TotalClicks, e.MouseDistance, e.AppName, e.WindowTitle)
 	if db.dialect == dialect.Postgres {
 		builder.Returning("id")
 		query, args := builder.Query()
@@ -703,13 +743,31 @@ func (db *DB) InsertLog(e *LogEntry) (int64, error) {
 	return res.LastInsertId()
 }
 
-// UpdateAIResult patches AI fields for a given log ID.
-func (db *DB) UpdateAIResult(id int64, category string, productive bool, confidence float64, reason string) error {
-	score := 0.0
-	if productive {
-		score = 100.0
+// UpdateAIResult patches AI fields for a given log ID using the real model score.
+func (db *DB) UpdateAIResult(id int64, category string, productive bool, productiveScore float64, confidence float64, reason string) error {
+	return db.UpdateLogAnalysis(id, category, "", "", "", 0, "", productive, productiveScore, confidence, reason)
+}
+
+// UpdateAIResultByRemoteID patches AI fields on the local log that was synced
+// to the given remote/server log ID.
+func (db *DB) UpdateAIResultByRemoteID(remoteID int64, category string, productive bool, productiveScore float64, confidence float64, reason string) error {
+	if remoteID <= 0 {
+		return nil
 	}
-	return db.UpdateLogAnalysis(id, category, "", "", "", 0, "", productive, score, confidence, reason)
+	productiveInt := 0
+	if productive || productiveScore >= 50 {
+		productiveInt = 1
+	}
+	builder := entsql.Dialect(db.dialect).Update("logs").
+		Set("ai_category", category).
+		Set("is_productive", productiveInt).
+		Set("productive_score", productiveScore).
+		Set("ai_confidence", confidence).
+		Set("ai_reason", reason).
+		Where(entsql.EQ("remote_id", remoteID))
+	query, args := builder.Query()
+	_, err := db.rawDB.Exec(query, args...)
+	return err
 }
 
 // UpdateLogAnalysis patches AI fields using Ent SQL Builder.
@@ -717,9 +775,6 @@ func (db *DB) UpdateLogAnalysis(id int64, category, appName, appCategory, window
 	productiveInt := 0
 	if productive || productiveScore >= 50 {
 		productiveInt = 1
-	}
-	if productiveScore == 0 && productive {
-		productiveScore = 100.0
 	}
 
 	builder := entsql.Dialect(db.dialect).Update("logs").
@@ -955,6 +1010,32 @@ func (db *DB) GetLogsForDate(date string) ([]LogEntry, error) {
 func (db *DB) GetTodayLogs() ([]LogEntry, error) {
 	today := time.Now().Format("2006-01-02")
 	return db.GetLogsForDate(today)
+}
+
+// GetLogByID fetches a single log entry by its primary key.
+func (db *DB) GetLogByID(id int64) (*LogEntry, error) {
+	if id <= 0 {
+		return nil, fmt.Errorf("invalid log id %d", id)
+	}
+	placeholder := "$1"
+	if db.dialect == dialect.SQLite {
+		placeholder = "?"
+	}
+	query := fmt.Sprintf(`SELECT id, org_id, user_id, timestamp, image_path, total_keys, unique_keys, entropy_score,
+		total_clicks, app_name, app_category, window_title, ai_category, is_productive, productive_score,
+		ai_confidence, ai_reason, ai_retry_count FROM logs WHERE id = %s`, placeholder)
+
+	var e LogEntry
+	var ts interface{}
+	var productive int
+	if err := db.rawDB.QueryRow(query, id).Scan(&e.ID, &e.OrgID, &e.UserID, &ts, &e.ImagePath, &e.TotalKeys, &e.UniqueKeys,
+		&e.EntropyScore, &e.TotalClicks, &e.AppName, &e.AppCategory, &e.WindowTitle, &e.AICategory, &productive,
+		&e.ProductiveScore, &e.AIConfidence, &e.AIReason, &e.AIRetryCount); err != nil {
+		return nil, err
+	}
+	e.Timestamp = parseFlexibleTime(ts)
+	e.IsProductive = productive == 1 || e.ProductiveScore >= 50
+	return &e, nil
 }
 
 // SaveWorkSessions batch inserts work session summaries using Ent SQL Builder.
@@ -1297,6 +1378,26 @@ func (db *DB) GetUnanalyzedLogs() ([]LogEntry, error) {
 	return entries, rows.Err()
 }
 
+// CountUnanalyzedLogs returns the number of logs pending AI analysis.
+func (db *DB) CountUnanalyzedLogs() (int, error) {
+	builder := entsql.Dialect(db.dialect).Select(entsql.Count("*")).From(entsql.Table("logs")).Where(
+		entsql.And(
+			entsql.Or(
+				entsql.EQ("ai_category", ""),
+				entsql.EQ("ai_category", "Unknown"),
+				entsql.Like("ai_reason", "%No Gemini API key%"),
+			),
+			entsql.LT("ai_retry_count", 10),
+		),
+	)
+	query, args := builder.Query()
+	var count int
+	if err := db.rawDB.QueryRow(query, args...).Scan(&count); err != nil {
+		return 0, err
+	}
+	return count, nil
+}
+
 // IncrementAIRetryCount increments the AI retry counter for a log entry.
 // If retry count reaches 10, marks the log entry as Failed so it won't be retried indefinitely.
 func (db *DB) IncrementAIRetryCount(id int64) error {
@@ -1534,7 +1635,7 @@ func (db *DB) GetOrgUsageSummary(orgID int64) (*APIUsageSummary, error) {
 	rows, err := db.rawDB.Query(`
 		SELECT key_source, COUNT(*), COALESCE(SUM(prompt_tokens), 0), COALESCE(SUM(candidate_tokens), 0), COALESCE(SUM(total_tokens), 0)
 		FROM api_usage_logs
-		WHERE org_id = `+placeholder+` OR key_source = 'org_admin'
+		WHERE org_id = `+placeholder+`
 		GROUP BY key_source
 	`, orgID)
 	if err == nil {
@@ -1589,24 +1690,13 @@ func (db *DB) GetUserUsageSummary(userID int64) (*APIUsageSummary, error) {
 		ByKeySource: make(map[string]int64),
 	}
 
-	var query string
-	var args []interface{}
-
-	if userID > 0 {
-		query = `
+	query := `
 			SELECT key_source, COUNT(*), COALESCE(SUM(prompt_tokens), 0), COALESCE(SUM(candidate_tokens), 0), COALESCE(SUM(total_tokens), 0)
 			FROM api_usage_logs
 			WHERE user_id = $1
 			GROUP BY key_source
 		`
-		args = append(args, userID)
-	} else {
-		query = `
-			SELECT key_source, COUNT(*), COALESCE(SUM(prompt_tokens), 0), COALESCE(SUM(candidate_tokens), 0), COALESCE(SUM(total_tokens), 0)
-			FROM api_usage_logs
-			GROUP BY key_source
-		`
-	}
+	args := []interface{}{userID}
 
 	rows, err := db.rawDB.Query(query, args...)
 	if err != nil {
@@ -1636,4 +1726,110 @@ func (db *DB) Close() error {
 		return db.entDriver.Close()
 	}
 	return db.rawDB.Close()
+}
+
+// TableCounts returns row counts for the core local tables, skipping missing ones.
+func (db *DB) TableCounts() (map[string]int, error) {
+	tables := []string{"logs", "users", "organizations", "invitations", "work_sessions"}
+	counts := make(map[string]int, len(tables))
+	for _, table := range tables {
+		var count int
+		if err := db.rawDB.QueryRow("SELECT COUNT(*) FROM " + table).Scan(&count); err != nil {
+			log.Printf("[db] TableCounts: skipping %s: %v", table, err)
+			counts[table] = 0
+			continue
+		}
+		counts[table] = count
+	}
+	return counts, nil
+}
+
+// CountLogsBySyncStatus returns the number of logs with the given sync_status.
+func (db *DB) CountLogsBySyncStatus(status string) (int, error) {
+	builder := entsql.Dialect(db.dialect).Select(entsql.Count("*")).From(entsql.Table("logs")).Where(entsql.EQ("sync_status", status))
+	query, args := builder.Query()
+	var count int
+	if err := db.rawDB.QueryRow(query, args...).Scan(&count); err != nil {
+		return 0, err
+	}
+	return count, nil
+}
+
+// CountLogsByAppName returns the number of logs recorded for the given app name.
+func (db *DB) CountLogsByAppName(appName string) (int, error) {
+	builder := entsql.Dialect(db.dialect).Select(entsql.Count("*")).From(entsql.Table("logs")).Where(entsql.EQ("app_name", appName))
+	query, args := builder.Query()
+	var count int
+	if err := db.rawDB.QueryRow(query, args...).Scan(&count); err != nil {
+		return 0, err
+	}
+	return count, nil
+}
+
+// DeleteLogsByAppName removes all logs for an app and returns the deleted row count.
+func (db *DB) DeleteLogsByAppName(appName string) (int, error) {
+	builder := entsql.Dialect(db.dialect).Delete("logs").Where(entsql.EQ("app_name", appName))
+	query, args := builder.Query()
+	res, err := db.rawDB.Exec(query, args...)
+	if err != nil {
+		return 0, err
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return 0, err
+	}
+	return int(affected), nil
+}
+
+// GetLatestUnanalyzedLog returns the newest log awaiting AI analysis, or nil if none.
+func (db *DB) GetLatestUnanalyzedLog() (*LogEntry, error) {
+	builder := entsql.Dialect(db.dialect).Select(
+		"id", "org_id", "user_id", "timestamp", "image_path", "total_keys", "unique_keys", "entropy_score",
+		"total_clicks", "mouse_distance",
+		"app_name", "app_category", "window_title", "session_id", "session_title",
+		"ai_category", "is_productive", "productive_score", "ai_confidence", "ai_reason", "ai_retry_count",
+	).From(entsql.Table("logs")).Where(
+		entsql.And(
+			entsql.Or(
+				entsql.EQ("ai_category", ""),
+				entsql.EQ("ai_category", "Unknown"),
+				entsql.Like("ai_reason", "%No Gemini API key%"),
+			),
+			entsql.LT("ai_retry_count", 10),
+		),
+	).OrderBy(entsql.Desc("id")).Limit(1)
+
+	query, args := builder.Query()
+	var e LogEntry
+	var ts interface{}
+	var productive int
+	err := db.rawDB.QueryRow(query, args...).Scan(
+		&e.ID, &e.OrgID, &e.UserID, &ts, &e.ImagePath, &e.TotalKeys, &e.UniqueKeys, &e.EntropyScore,
+		&e.TotalClicks, &e.MouseDistance,
+		&e.AppName, &e.AppCategory, &e.WindowTitle, &e.SessionID, &e.SessionTitle,
+		&e.AICategory, &productive, &e.ProductiveScore, &e.AIConfidence, &e.AIReason, &e.AIRetryCount,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	e.Timestamp = parseFlexibleTime(ts)
+	e.IsProductive = productive == 1 || e.ProductiveScore >= 50
+	return &e, nil
+}
+
+// BackupTo writes a consistent copy of the SQLite database to path using VACUUM INTO.
+func (db *DB) BackupTo(path string) error {
+	if db.rawDB == nil {
+		return fmt.Errorf("database not open")
+	}
+	if db.dialect != dialect.SQLite {
+		return fmt.Errorf("database backup is only supported for SQLite")
+	}
+	if _, err := db.rawDB.Exec("VACUUM INTO ?", path); err != nil {
+		return fmt.Errorf("vacuum into %s: %w", path, err)
+	}
+	return nil
 }

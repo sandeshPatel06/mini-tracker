@@ -1,9 +1,33 @@
 import React, { useState, useEffect } from 'react';
 import { apiFetch } from '../api';
+import { User, Organization } from '../types';
+
+const parseJsonSafe = async (res: Response): Promise<any> => {
+  const text = await res.text();
+  try {
+    return JSON.parse(text);
+  } catch {
+    return { error: text };
+  }
+};
+
+const friendlyError = (msg: string): string => {
+  const m = (msg || '').toLowerCase();
+  if (m.includes('expired')) return 'This invitation has expired — ask an admin to resend it.';
+  if (m.includes('used') || m.includes('accepted')) return 'This invitation has already been used.';
+  if (m.includes('not found') || m.includes('invalid')) return 'Invalid invitation link.';
+  return msg;
+};
+
+export interface AcceptInviteResult {
+  user?: User | null;
+  org?: Organization | null;
+  token?: string;
+}
 
 interface AcceptInviteProps {
   token: string;
-  onSuccess: () => void;
+  onSuccess: (result: AcceptInviteResult) => void;
 }
 
 export const AcceptInvitePage: React.FC<AcceptInviteProps> = ({ token, onSuccess }) => {
@@ -19,13 +43,13 @@ export const AcceptInvitePage: React.FC<AcceptInviteProps> = ({ token, onSuccess
       setLoading(true);
       try {
         const res = await apiFetch(`/api/org/invite-info?token=${token}`);
-        const data = await res.json();
+        const data = await parseJsonSafe(res);
         if (!res.ok || data.valid === false) {
           throw new Error(data.error || data.message || 'Invalid or expired invitation token');
         }
         setInvitation(data);
       } catch (err: any) {
-        setError(err.message || 'Invitation verification failed');
+        setError(friendlyError(err.message || 'Invitation verification failed'));
       } finally {
         setLoading(false);
       }
@@ -56,14 +80,14 @@ export const AcceptInvitePage: React.FC<AcceptInviteProps> = ({ token, onSuccess
         })
       });
 
-      const data = await res.json();
+      const data = await parseJsonSafe(res);
       if (!res.ok) {
         throw new Error(data.message || data.error || 'Failed to accept invitation');
       }
 
-      onSuccess();
+      onSuccess({ user: data.user, org: data.org, token: data.token });
     } catch (err: any) {
-      setError(err.message || 'Error creating user account');
+      setError(friendlyError(err.message || 'Error creating user account'));
     } finally {
       setSubmitting(false);
     }
@@ -80,36 +104,45 @@ export const AcceptInvitePage: React.FC<AcceptInviteProps> = ({ token, onSuccess
 
   if (error && !invitation) {
     return (
-      <div className="card fade-in-up" style={{ maxWidth: 440, margin: '48px auto', textAlign: 'center' }}>
-        <div className="card-body" style={{ padding: 32 }}>
-          <div style={{ fontSize: 36, marginBottom: 12 }}>⚠️</div>
-          <h2 style={{ fontSize: 18, fontWeight: 700, color: 'var(--text-primary)', marginBottom: 8 }}>Invalid Invitation</h2>
-          <p style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 20 }}>{error}</p>
-          <button
-            onClick={() => window.location.hash = ''}
-            className="btn btn-secondary"
-          >
-            Return to Dashboard
-          </button>
+      <div className="fade-in-up" style={{ maxWidth: 400, margin: '48px auto' }}>
+        <div className="card">
+          <div className="card-header">
+            <span className="card-title">⚠️ Invalid Invitation</span>
+          </div>
+          <div className="card-body">
+            <div className="alert alert-error">{error}</div>
+            <button
+              onClick={() => window.location.hash = ''}
+              className="btn btn-secondary w-full"
+            >
+              Return to Dashboard
+            </button>
+          </div>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="fade-in-up" style={{ maxWidth: 440, margin: '32px auto' }}>
+    <div className="fade-in-up" style={{ maxWidth: 400, margin: '48px auto' }}>
       <div className="card">
-        <div className="card-body" style={{ padding: 28 }}>
-          <div style={{ textAlign: 'center', marginBottom: 20 }}>
-            <span className="badge badge-productive" style={{ marginBottom: 10 }}>
-              Team Onboarding
-            </span>
-            <h1 style={{ fontSize: 20, fontWeight: 700, color: 'var(--text-primary)', marginTop: 8 }}>
+        <div className="card-header">
+          <span className="card-title">✉️ Team Invitation</span>
+        </div>
+        <div className="card-body">
+          <div style={{ textAlign: 'center', marginBottom: 14 }}>
+            <div
+              style={{ fontSize: 16, fontWeight: 700, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+              title={invitation?.org_name}
+            >
               Join {invitation?.org_name}
-            </h1>
-            <p style={{ fontSize: 13, color: 'var(--text-secondary)', marginTop: 4 }}>
-              You've been invited to test get-Hike as a <span style={{ fontWeight: 600, color: 'var(--accent-purple)' }}>{invitation?.role}</span>.
-            </p>
+            </div>
+            <div
+              style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+              title={`You've been invited as a ${invitation?.role}.`}
+            >
+              You've been invited as a <span style={{ fontWeight: 600, color: 'var(--accent-purple)' }}>{invitation?.role}</span>.
+            </div>
           </div>
 
           {error && (
@@ -126,7 +159,8 @@ export const AcceptInvitePage: React.FC<AcceptInviteProps> = ({ token, onSuccess
                 disabled
                 value={invitation?.email || ''}
                 className="form-input"
-                style={{ opacity: 0.7, cursor: 'not-allowed' }}
+                title={invitation?.email || ''}
+                style={{ opacity: 0.7, cursor: 'not-allowed', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
               />
             </div>
 
@@ -159,9 +193,9 @@ export const AcceptInvitePage: React.FC<AcceptInviteProps> = ({ token, onSuccess
               type="submit"
               disabled={submitting}
               className="btn btn-primary w-full"
-              style={{ marginTop: 12, padding: '10px 16px' }}
+              style={{ padding: '10px 16px', fontWeight: 700, opacity: submitting ? 0.6 : undefined, cursor: submitting ? 'not-allowed' : undefined }}
             >
-              {submitting ? 'Creating Account...' : 'Complete Onboarding & Join Team'}
+              {submitting ? 'Creating Account...' : 'Create Account & Join Team'}
             </button>
           </form>
         </div>

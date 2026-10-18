@@ -6,9 +6,14 @@ import Timeline from './pages/Timeline';
 import Analytics from './pages/Analytics';
 import { OrganizationPage } from './pages/Organization';
 import { AcceptInvitePage } from './pages/AcceptInvite';
+import type { AcceptInviteResult } from './pages/AcceptInvite';
 import { AuthPage } from './pages/Auth';
 import { SettingsPage } from './pages/Settings';
 import { Icon, IconName } from './components/Icon';
+import { Modal } from './components/Modal';
+import { DevMenu } from './components/DevMenu';
+import { useDevMode } from './hooks/useDevMode';
+import { localISODate, isPendingLog } from './utils';
 import logoAsset from './assets/logo.png';
 import './style.css';
 
@@ -27,8 +32,9 @@ declare const window: Window & {
         SetActiveTask: (task: string) => Promise<string>;
         GetActiveTask: () => Promise<string>;
         RecordInputActivity: (totalKeys: number, uniqueKeys: number) => Promise<void>;
-        RecordMouseActivity: (clicks: number, distancePx: number) => Promise<void>;
+        RecordMouseActivity: (clicks: number) => Promise<void>;
         ClearAllLocalData: () => Promise<boolean>;
+        GetImageBase64: (imagePath: string) => Promise<string>;
         UpdateGeminiAPIKey: (apiKey: string) => Promise<boolean>;
         UpdateAIModel: (modelName: string) => Promise<boolean>;
         UpdateScreenshotInterval: (seconds: number) => Promise<boolean>;
@@ -46,14 +52,270 @@ function callGo<T>(fn: () => Promise<T>): Promise<T | null> {
   }
 }
 
+const AUTH_STORAGE_KEYS = ['mini_auth_user', 'mini_guest_mode', 'mini_jwt_token', 'mini_auth_org'];
+
+function clearStoredAuth() {
+  AUTH_STORAGE_KEYS.forEach((key) => localStorage.removeItem(key));
+}
+
+function syncBackendAuthSession(token: string, isGuest: boolean) {
+  if (window.go?.main?.App?.SetAuthSession) {
+    callGo(() => window.go!.main.App.SetAuthSession(token, isGuest));
+  }
+}
+
+// Robust parsing of AI responses (handles markdown fences & truncated JSON strings)
+function parseAIJSONResponse(raw: string): any[] | null {
+  if (!raw) return null;
+  let clean = raw.trim();
+  if (clean.startsWith('```')) {
+    clean = clean.replace(/^```[a-z]*\n?/i, '').replace(/\n?```$/i, '').trim();
+  }
+  try {
+    const res = JSON.parse(clean);
+    if (Array.isArray(res)) return res;
+  } catch {
+    // Attempt auto-repair for truncated JSON array
+    const startIdx = clean.indexOf('[');
+    if (startIdx !== -1) {
+      let arrayStr = clean.substring(startIdx);
+      if (!arrayStr.endsWith(']')) {
+        // Remove trailing unclosed object/comma and close array
+        const lastObjEnd = arrayStr.lastIndexOf('}');
+        if (lastObjEnd !== -1) {
+          arrayStr = arrayStr.substring(0, lastObjEnd + 1) + ']';
+          try {
+            const res = JSON.parse(arrayStr);
+            if (Array.isArray(res)) return res;
+          } catch {}
+        }
+      }
+    }
+  }
+  return null;
+}
+
+// Loads the screenshot at imagePath as a data URL. Wails uses GetImageBase64;
+// web mode fetches /api/image and converts the blob via FileReader.
+async function loadImageAsDataUrl(imagePath: string): Promise<string | null> {
+  if (!imagePath) return null;
+  if (window.go?.main?.App?.GetImageBase64) {
+    const dataUrl = await callGo(() => window.go!.main.App.GetImageBase64(imagePath));
+    return dataUrl && dataUrl.startsWith('data:image/') ? dataUrl : null;
+  }
+  try {
+    const res = await apiFetch(`/api/image?path=${encodeURIComponent(imagePath)}`);
+    if (!res.ok) return null;
+    const blob = await res.blob();
+    return await new Promise<string | null>((resolve) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const result = typeof reader.result === 'string' ? reader.result : '';
+        resolve(result.startsWith('data:image/') ? result : null);
+      };
+      reader.onerror = () => resolve(null);
+      reader.readAsDataURL(blob);
+    });
+  } catch {
+    return null;
+  }
+}
+
+interface VisionAnalysisOptions {
+  candidateLogs: LogEntry[];
+  apiKey: string;
+  model: string;
+  intervalSec: number;
+  userTask: string;
+  submittedIds: Set<number>;
+  resultCache: Map<number, Partial<LogEntry>>;
+  setLogs: (updater: (prev: LogEntry[]) => LogEntry[]) => void;
+}
+
+// Sends a real multimodal bundle of pending captures to Gemini. Only values the
+// model actually returned are applied; items whose image cannot be loaded are
+// skipped and left pending instead of being fabricated.
+async function runClientVisionAnalysis(options: VisionAnalysisOptions): Promise<void> {
+  const { candidateLogs, apiKey, model, intervalSec, userTask, submittedIds, resultCache, setLogs } = options;
+
+  const targetRequestFrequencySec = Math.max(60, Math.ceil(60 / (model.includes('gemini-2.5-pro') || model.includes('gemini-1.5-pro') ? 2 : 15)));
+  const targetBundleSize = Math.max(3, Math.floor(targetRequestFrequencySec / Math.max(5, intervalSec)));
+  const bundle = candidateLogs.slice(0, Math.min(Math.max(3, targetBundleSize), 6));
+
+  const loadedItems: { item: LogEntry; text: string; inlineData: { mimeType: string; data: string } }[] = [];
+  for (const item of bundle) {
+    if (!item.image_path) continue;
+    const dataUrl = await loadImageAsDataUrl(item.image_path);
+    if (!dataUrl || !dataUrl.includes(',')) continue;
+    const mimeType = dataUrl.substring(dataUrl.indexOf(':') + 1, dataUrl.indexOf(';')) || 'image/jpeg';
+    loadedItems.push({
+      item,
+      text: `[Item ${loadedItems.length + 1} | Timestamp: ${item.timestamp} | Window Title: ${item.window_title || 'unknown'} | App Name: ${item.app_name || 'unknown'} | App Category: ${item.app_category || 'unknown'} | Total Keys: ${item.total_keys || 0} | Unique Keys: ${item.unique_keys || 0} | Keystroke Entropy: ${(item.entropy_score || 0).toFixed(1)} | Mouse Clicks: ${item.total_clicks || 0}]`,
+      inlineData: { mimeType, data: dataUrl.split(',')[1] },
+    });
+  }
+
+  // Require real images for the batch — never fabricate missing ones.
+  if (loadedItems.length < 3) return;
+
+  const taskGoal = userTask.trim()
+    ? `CURRENT TARGET USER TASK (GOAL): "${userTask.trim()}"\nEVALUATION RULE: Analyze how relevant the visible desktop content and user input (typing/mouse) are to achieving THIS SPECIFIC TASK. High scores require direct alignment with this task context.`
+    : 'CURRENT TARGET USER TASK: General software development and workstation tasks.';
+
+  const promptText = `You are an expert, objective developer productivity analyst inspecting a sequence of ${loadedItems.length} desktop screenshots captured from a Linux workstation in chronological order.
+
+${taskGoal}
+
+CRITICAL INSTRUCTIONS FOR EACH SCREENSHOT ITEM:
+1. Multi-Monitor Grid Inspection: Each image may be a composite grid of multiple monitors. Inspect ALL screens visible in the grid.
+2. Application & Context Extraction: Identify the primary active application (app_name: e.g., VS Code, Terminal, Chrome, Slack, Spotify), open file paths/code snippet text, documentation title, or window title (window_title) from the image AND the provided per-item metadata.
+3. Telemetry & Task Alignment Scoring — use ALL provided signals dynamically:
+   - Direct work on stated task: +40 to +60 pts
+   - Related docs / technical research: +30 to +45 pts
+   - Unrelated browsing / messaging: +10 to +30 pts
+   - Leisure / social media / idle: 0 to 15 pts
+   - Keystroke Entropy > 20: Active typing/writing (+25 pts)
+   - Keystroke Entropy 8-20: Moderate typing (+15 pts)
+   - Keystroke Entropy < 8: Reading/idle mode — lowers score unless offset by heavy mouse-click activity
+   - Mouse Clicks > 20: Interactive session (+5 pts)
+   - Combined low entropy + few clicks + off-task screen = score 0-20 (NEVER default to 100).
+
+Return ONLY a valid JSON array of ${loadedItems.length} objects in exact input order. Each object must contain exactly these fields:
+- "item_index": number — 1-based index matching the input item order.
+- "app_name": string — the primary active application actually visible, or an empty string if unreadable.
+- "app_category": string — application class (e.g., "IDE / Code Editor"), or an empty string.
+- "window_title": string — the visible window title or document name, or an empty string.
+- "category": string — productivity category (e.g., "Coding", "Browsing", "Communication"), or an empty string.
+- "productivity_score": number — 0-100 computed from the screenshot, telemetry, and task alignment.
+- "is_productive": boolean.
+- "confidence": number — 0-1.
+- "reason": string — concise evidence-based justification.
+Base every field strictly on the provided screenshot and metadata. Do NOT invent applications, window titles, or values you cannot verify.`;
+
+  const parts: any[] = [{ text: promptText }];
+  loadedItems.forEach(({ text, inlineData }) => {
+    parts.push({ text });
+    parts.push({ inlineData });
+  });
+
+  loadedItems.forEach(({ item }) => submittedIds.add(item.id));
+
+  const applyResults = (parsedResults: any[]): number => {
+    const patches = new Map<number, Partial<LogEntry>>();
+    parsedResults.forEach((resItem: any, index: number) => {
+      if (!resItem || typeof resItem.productivity_score !== 'number') return;
+      const declaredIndex = typeof resItem.item_index === 'number' ? resItem.item_index - 1 : index;
+      const target = loadedItems[declaredIndex] || loadedItems[index];
+      if (!target) return;
+      const score = resItem.productivity_score;
+      const patch: Partial<LogEntry> = {
+        productive_score: score,
+        is_productive: typeof resItem.is_productive === 'boolean' ? resItem.is_productive : score >= 50,
+      };
+      if (resItem.app_name) patch.app_name = resItem.app_name;
+      if (resItem.app_category) patch.app_category = resItem.app_category;
+      if (resItem.window_title) patch.window_title = resItem.window_title;
+      if (resItem.category) patch.ai_category = resItem.category;
+      if (typeof resItem.confidence === 'number') patch.ai_confidence = resItem.confidence;
+      if (resItem.reason) patch.ai_reason = resItem.reason;
+      patches.set(target.item.id, patch);
+    });
+    if (patches.size === 0) return 0;
+    // Keep patches in a session cache so later DB refreshes don't lose them
+    patches.forEach((patch, id) => resultCache.set(id, patch));
+    setLogs((prev) => prev.map((log) => {
+      const patch = patches.get(log.id);
+      return patch ? { ...log, ...patch } : log;
+    }));
+
+    // Persist to the backend DB in web mode so a refresh or a new tab does not
+    // re-analyze the same captures (desktop persists via the Go-side pipeline).
+    if (!window.go?.main?.App) {
+      patches.forEach((patch, id) => {
+        if (!patch.ai_category) return;
+        void apiFetch('/api/ai/log-result', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            id,
+            category: patch.ai_category,
+            app_name: patch.app_name || '',
+            app_category: patch.app_category || '',
+            window_title: patch.window_title || '',
+            is_productive: !!patch.is_productive,
+            productive_score: patch.productive_score ?? 0,
+            ai_confidence: patch.ai_confidence ?? 0,
+            ai_reason: patch.ai_reason || '',
+          }),
+        }).catch(() => null);
+      });
+    }
+    return patches.size;
+  };
+
+  const bumpUsage = () => {
+    const currentUsage = parseInt(localStorage.getItem('mini_ai_usage_count') || '0', 10);
+    const newUsage = currentUsage + 1;
+    localStorage.setItem('mini_ai_usage_count', newUsage.toString());
+    window.dispatchEvent(new CustomEvent('ai_usage_updated', { detail: newUsage }));
+  };
+
+  const requestModel = async (modelName: string): Promise<number> => {
+    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/${modelName}:generateContent?key=${apiKey}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [{ parts }],
+        generationConfig: {
+          responseMimeType: 'application/json',
+          temperature: 0.1,
+        }
+      })
+    });
+    if (!res.ok) return 0;
+    const json = await res.json();
+    const parsedResults = parseAIJSONResponse(json?.candidates?.[0]?.content?.parts?.[0]?.text);
+    if (!parsedResults) return 0;
+    const applied = applyResults(parsedResults);
+    if (applied > 0) bumpUsage();
+    return applied;
+  };
+
+  let appliedCount = 0;
+  try {
+    appliedCount = await requestModel(model);
+  } catch {
+    appliedCount = 0;
+  }
+  if (appliedCount === 0) {
+    const fallbackModel = 'models/gemini-2.0-flash';
+    if (fallbackModel !== model) {
+      try {
+        appliedCount = await requestModel(fallbackModel);
+      } catch {
+        appliedCount = 0;
+      }
+    }
+  }
+  // Allow a later refresh to retry only when nothing was applied at all.
+  if (appliedCount === 0) {
+    loadedItems.forEach(({ item }) => submittedIds.delete(item.id));
+  }
+}
+
+
 export default function App() {
   const [page, setPage] = useState<Page>('dashboard');
   const [inviteToken, setInviteToken] = useState<string>('');
-  const [today, setToday] = useState(() => new Date().toISOString().slice(0, 10));
+  const [today, setToday] = useState(() => localISODate());
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [stats, setStats] = useState<ProductivityStats | null>(null);
   const [config, setConfig] = useState<AppConfig | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [hasLoaded, setHasLoaded] = useState(false);
+  const [aiKeyPresent, setAiKeyPresent] = useState(() => !!localStorage.getItem('mini_gemini_api_key'));
+  const [trackerError, setTrackerError] = useState<string | null>(null);
 
   // User Auth & Session state
   const [currentUser, setCurrentUser] = useState<User | null>(() => {
@@ -68,6 +330,7 @@ export default function App() {
   const [isGuestMode, setIsGuestMode] = useState<boolean>(() => {
     return localStorage.getItem('mini_guest_mode') === 'true';
   });
+  const [authNotice, setAuthNotice] = useState<string | null>(null);
 
   // Theme Management (Dark, Light, Auto System Preference)
   const [theme, setTheme] = useState<'dark' | 'light' | 'auto'>(() => {
@@ -78,6 +341,20 @@ export default function App() {
     document.documentElement.setAttribute('data-theme', theme);
     localStorage.setItem('mini_theme', theme);
   }, [theme]);
+
+  // Developer menu (unlocked by 7 quick taps on a logo, session-only)
+  const dev = useDevMode();
+  const [devToastVisible, setDevToastVisible] = useState(false);
+
+  useEffect(() => {
+    if (dev.tapProgress < 4 || dev.tapProgress >= 7) {
+      setDevToastVisible(false);
+      return;
+    }
+    setDevToastVisible(true);
+    const timer = window.setTimeout(() => setDevToastVisible(false), 1600);
+    return () => window.clearTimeout(timer);
+  }, [dev.tapProgress]);
 
   // Tracker Work Clock State
   const [isTrackingActive, setIsTrackingActive] = useState<boolean>(true);
@@ -124,8 +401,13 @@ export default function App() {
         if (data && data.authenticated && data.user) {
           setCurrentUser(data.user);
           localStorage.setItem('mini_auth_user', JSON.stringify(data.user));
-        } else if (localStorage.getItem('mini_guest_mode') === 'true') {
-          setIsGuestMode(true);
+        } else {
+          // Stale cached user: clear it so the auth page renders instead of the app shell
+          localStorage.removeItem('mini_auth_user');
+          setCurrentUser(null);
+          if (localStorage.getItem('mini_guest_mode') === 'true') {
+            setIsGuestMode(true);
+          }
         }
       })
       .catch(() => {
@@ -138,25 +420,46 @@ export default function App() {
       });
   }, []);
 
-  // Keep Wails backend session mode (isGuest) in sync with frontend state
+  // Keep the Wails backend session in sync with the real auth state (JWT + guest flag)
   useEffect(() => {
-    if (window.go?.main?.App?.SetAuthSession) {
-      callGo(() => window.go!.main.App.SetAuthSession('', isGuestMode));
+    const token = localStorage.getItem('mini_jwt_token') || '';
+    if (isGuestMode) {
+      syncBackendAuthSession('', true);
+    } else if (token) {
+      syncBackendAuthSession(token, false);
     }
-  }, [isGuestMode]);
+  }, [currentUser, isGuestMode]);
+
+  // Clear local auth state when the API layer reports an expired/invalid session
+  useEffect(() => {
+    const handleAuthExpired = () => {
+      const hadSession = Boolean(localStorage.getItem('mini_jwt_token') || localStorage.getItem('mini_auth_user'));
+      if (!hadSession) return;
+      clearStoredAuth();
+      syncBackendAuthSession('', true);
+      setCurrentUser(null);
+      setIsGuestMode(false);
+      setAuthNotice('Your session expired. Please sign in again.');
+    };
+    window.addEventListener('mini-auth-expired', handleAuthExpired);
+    return () => window.removeEventListener('mini-auth-expired', handleAuthExpired);
+  }, []);
 
   const handleLogout = async () => {
     try {
       await apiFetch('/api/auth/logout', { method: 'POST' });
     } catch {}
-    localStorage.removeItem('mini_auth_user');
-    localStorage.removeItem('mini_guest_mode');
+    // Always clear locally, even if the server-confirmed logout failed
+    clearStoredAuth();
+    syncBackendAuthSession('', true);
     setCurrentUser(null);
     setIsGuestMode(false);
     setPage('dashboard');
   };
 
-  // Fetch initial tracker status & restore accumulated today's duration
+  // Fetch initial tracker status & restore accumulated today's duration.
+  // Prefer the Wails backend status when running as a desktop app; only use the
+  // HTTP endpoint in web mode so the two sources cannot race each other.
   useEffect(() => {
     const app = (window as any).go?.main?.App;
     if (app?.GetTrackingStatus) {
@@ -170,14 +473,7 @@ export default function App() {
           }
         })
         .catch(() => {});
-    } else {
-      callGo(() => window.go!.main.App.GetTodayTrackedSeconds())
-        .then((sec: any) => {
-          if (typeof sec === 'number' && sec > 0) {
-            setElapsedSeconds(sec);
-          }
-        })
-        .catch(() => {});
+      return;
     }
 
     apiFetch('/api/tracker/status')
@@ -203,6 +499,25 @@ export default function App() {
   }, [isTrackingActive]);
 
   const handleToggleTracking = async () => {
+    const refreshStatus = async () => {
+      try {
+        const app = (window as any).go?.main?.App;
+        if (app?.GetTrackingStatus) {
+          const status: any = await callGo(() => app.GetTrackingStatus());
+          if (status) {
+            setIsTrackingActive(!!status.active);
+            setElapsedSeconds(status.elapsed_seconds || 0);
+            return;
+          }
+        }
+        const res = await apiFetch('/api/tracker/status');
+        if (res.ok) {
+          const data = await res.json();
+          setIsTrackingActive(!!data.active);
+          setElapsedSeconds(data.elapsed_seconds || 0);
+        }
+      } catch {}
+    };
     try {
       const app = (window as any).go?.main?.App;
       if (app?.ToggleTracking) {
@@ -210,6 +525,7 @@ export default function App() {
         if (res) {
           setIsTrackingActive(!!res.active);
           setElapsedSeconds(res.elapsed_seconds || 0);
+          setTrackerError(null);
           return;
         }
       }
@@ -218,11 +534,14 @@ export default function App() {
         const data = await res.json();
         setIsTrackingActive(!!data.active);
         setElapsedSeconds(data.elapsed_seconds || 0);
+        setTrackerError(null);
       } else {
-        setIsTrackingActive(!isTrackingActive);
+        setTrackerError('Failed to update tracker status.');
+        await refreshStatus();
       }
     } catch {
-      setIsTrackingActive(!isTrackingActive);
+      setTrackerError('Failed to update tracker status.');
+      await refreshStatus();
     }
   };
 
@@ -234,25 +553,24 @@ export default function App() {
     return `${pad(hrs)}:${pad(mins)}:${pad(secs)}`;
   };
 
-  // Hash-based routing handler for invitations & organization link
+  // Hash-based routing handler for invitations & page routes
   const checkHashRoute = useCallback(() => {
     const hash = window.location.hash;
-    if (hash.includes('/accept-invite')) {
+    if (hash.includes('accept-invite')) {
       const match = hash.match(/token=([^&]+)/);
       if (match && match[1]) {
         setInviteToken(match[1]);
         setPage('accept-invite');
       }
-    } else if (hash === '#organization') {
-      const isAdmin = currentUser?.role === 'admin' || currentUser?.role === 'owner' || isGuestMode;
-      if (isAdmin) {
-        setPage('organization');
-      } else {
-        window.location.hash = '';
-        setPage('dashboard');
-      }
+      return;
     }
-  }, [currentUser, isGuestMode]);
+    const route = hash.replace(/^#\/?/, '');
+    if (route === 'dashboard' || route === 'timeline' || route === 'analytics' || route === 'settings' || route === 'organization') {
+      setPage(route);
+    } else if (route === '') {
+      setPage('dashboard');
+    }
+  }, []);
 
   useEffect(() => {
     checkHashRoute();
@@ -265,8 +583,19 @@ export default function App() {
   const [endDate, setEndDate] = useState<string>(today);
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
   const [syncMessage, setSyncMessage] = useState<string>('');
+  const syncMessageTimerRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (syncMessageTimerRef.current) clearTimeout(syncMessageTimerRef.current);
+    };
+  }, []);
 
   const handleSyncNow = async () => {
+    if (syncMessageTimerRef.current) {
+      clearTimeout(syncMessageTimerRef.current);
+      syncMessageTimerRef.current = null;
+    }
     setIsSyncing(true);
     setSyncMessage('Syncing...');
     try {
@@ -276,35 +605,83 @@ export default function App() {
       } else {
         await apiFetch('/api/telemetry/pull');
       }
-      await loadData(today);
+      await loadData();
       setSyncMessage('Synced just now');
     } catch (err) {
       setSyncMessage('Sync failed');
     } finally {
       setIsSyncing(false);
-      setTimeout(() => setSyncMessage(''), 4000);
+      syncMessageTimerRef.current = window.setTimeout(() => setSyncMessage(''), 4000);
     }
   };
 
-  const loadData = useCallback(async (date: string, filterUserId?: number | null, sDate?: string, eDate?: string) => {
-    setLoading(true);
+  const stateRef = useRef({} as any);
+  stateRef.current = { selectedUserId, startDate, endDate, userTask, today, page };
+
+  const requestIdRef = useRef(0);
+  const aiAnalysisInFlightRef = useRef(false);
+  const aiSubmittedLogIdsRef = useRef<Set<number>>(new Set());
+  const aiResultCacheRef = useRef<Map<number, Partial<LogEntry>>>(new Map());
+
+  const loadData = useCallback(async (date?: string, filterUserId?: number | null, sDate?: string, eDate?: string, opts?: { background?: boolean }) => {
+    const requestId = ++requestIdRef.current;
+    if (!opts?.background) {
+      setLoading(true);
+    }
     let logsData: LogEntry[] | null = null;
     let statsData: ProductivityStats | null = null;
     let configData: AppConfig | null = null;
 
-    const targetUser = filterUserId !== undefined ? filterUserId : selectedUserId;
-    const start = sDate || startDate || date;
-    const end = eDate || endDate || date;
+    const targetUser = filterUserId !== undefined ? filterUserId : stateRef.current.selectedUserId;
+
+    // Precedence: explicit range > explicit single date > current state defaults
+    let start: string;
+    let end: string;
+    if (sDate || eDate) {
+      start = sDate || eDate!;
+      end = eDate || sDate!;
+    } else if (date) {
+      start = date;
+      end = date;
+    } else if (stateRef.current.page === 'analytics') {
+      start = stateRef.current.startDate || stateRef.current.today || localISODate();
+      end = stateRef.current.endDate || stateRef.current.today || localISODate();
+    } else {
+      start = stateRef.current.today || localISODate();
+      end = start;
+    }
 
     const userParam = targetUser ? `&user_id=${targetUser}` : '';
     const dateParam = `start_date=${start}&end_date=${end}`;
 
     if (window.go?.main?.App) {
-      [logsData, statsData, configData] = await Promise.all([
-        callGo(() => window.go!.main.App.GetLogsByDate(date)),
-        callGo(() => window.go!.main.App.GetStats(date)),
+      const dates: string[] = [];
+      if (start !== end) {
+        const rangeStart = new Date(`${start}T00:00:00`);
+        const rangeEnd = new Date(`${end}T00:00:00`);
+        for (let d = new Date(rangeStart); d <= rangeEnd && dates.length < 31; d.setDate(d.getDate() + 1)) {
+          dates.push(localISODate(d));
+        }
+      }
+      if (dates.length === 0) dates.push(start);
+
+      const statsDate = start !== end ? end : (date || end);
+      const [logsLists, statsResult, configResult] = await Promise.all([
+        Promise.all(dates.map(d => callGo(() => window.go!.main.App.GetLogsByDate(d)))),
+        callGo(() => window.go!.main.App.GetStats(statsDate)),
         callGo(() => window.go!.main.App.GetConfig()),
       ]);
+      const fetchedLists = logsLists.filter((list): list is LogEntry[] => Array.isArray(list));
+      if (fetchedLists.length === 0) {
+        logsData = null;
+      } else {
+        // Canonical ascending order in every mode; consumers derive their own display order
+        logsData = fetchedLists
+          .flat()
+          .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+      }
+      statsData = statsResult;
+      configData = configResult;
     } else {
       try {
         const [resLogs, resStats, resConfig] = await Promise.all([
@@ -320,18 +697,13 @@ export default function App() {
       }
     }
 
-    // Fallback local storage state if server is completely offline / standalone desktop guest mode
-    if (!logsData && isGuestMode) {
-      try {
-        const cachedLogs = localStorage.getItem(`mini_logs_${date}`);
-        if (cachedLogs) logsData = JSON.parse(cachedLogs);
-      } catch {}
-    }
-    if (!statsData && isGuestMode) {
-      try {
-        const cachedStats = localStorage.getItem(`mini_stats_${date}`);
-        if (cachedStats) statsData = JSON.parse(cachedStats);
-      } catch {}
+    // A newer load was requested while this one was in flight — ignore stale results
+    if (requestId !== requestIdRef.current) return;
+
+    if (logsData === null) {
+      setLoadError("Couldn't reach the tracker backend.");
+    } else {
+      setLoadError(null);
     }
 
     if (configData?.backend_endpoint) {
@@ -339,252 +711,71 @@ export default function App() {
     }
 
     const localApiKey = localStorage.getItem('mini_gemini_api_key');
+    setAiKeyPresent(!!localApiKey);
     const rawModel = localStorage.getItem('mini_ai_model') || 'models/gemma-4-31b-it';
     const localModel = rawModel.startsWith('models/') ? rawModel : `models/${rawModel}`;
     const intervalSec = configData?.screenshot_interval_seconds || 30;
 
     if (localApiKey && logsData && logsData.length > 0) {
-      const pendingLogs = logsData.filter(log => 
-        !log.ai_category || 
-        log.ai_category === 'Unknown' || 
-        log.ai_reason.includes('No Gemini API key') ||
-        log.ai_reason.includes('Offline Mode')
-      );
+      const candidateLogs = logsData
+        .filter(isPendingLog)
+        .filter((log) => !aiSubmittedLogIdsRef.current.has(log.id));
 
-      // Wait until at least 3 pending logs are accumulated before sending batch AI analytics request
-      if (pendingLogs.length >= 3) {
-        // Calculate optimal bundle size (minimum 3 items per request)
-        const targetRequestFrequencySec = Math.max(60, Math.ceil(60 / (localModel.includes('gemini-1.5-pro') ? 2 : 15)));
-        const targetBundleSize = Math.max(3, Math.floor(targetRequestFrequencySec / intervalSec));
-
-        // Group pending items into bundles (at least 3 items, up to 6)
-        const bundle = pendingLogs.slice(0, Math.min(Math.max(3, targetBundleSize), 6));
-
-        // Prepare enhanced multimodal contents array for Google Gemini REST API v1beta
-        const taskGoal = userTask.trim() ? `CURRENT TARGET USER TASK (GOAL): "${userTask.trim()}"\nEVALUATION RULE: Analyze how relevant the visible desktop content and user input (typing/mouse) are to achieving THIS SPECIFIC TASK. High scores require direct alignment with this task context.` : "CURRENT TARGET USER TASK: General software development and workstation tasks.";
-
-        const promptText = `You are an expert, objective developer productivity analyst inspecting a sequence of ${bundle.length} desktop screenshots captured from a Linux workstation in chronological order.
-
-${taskGoal}
-
-CRITICAL INSTRUCTIONS FOR EACH SCREENSHOT ITEM:
-1. Multi-Monitor Grid Inspection: Each image may be a composite grid of multiple monitors. Inspect ALL screens visible in the grid.
-2. Application & Context Extraction: Identify the primary active application (app_name: e.g., VS Code, Terminal, Chrome, Slack, Spotify), open file paths/code snippet text, documentation title, or window title (window_title).
-3. Telemetry & Task Alignment Scoring — use ALL provided signals dynamically:
-   - Direct work on stated task: +40 to +60 pts
-   - Related docs / technical research: +30 to +45 pts
-   - Unrelated browsing / messaging: +10 to +30 pts
-   - Leisure / social media / idle: 0 to 15 pts
-   - Keystroke Entropy > 20: Active typing/writing (+25 pts)
-   - Keystroke Entropy 8-20: Moderate typing (+15 pts)
-   - Keystroke Entropy < 8: Reading/idle mode — lowers score unless offset by heavy mouse activity
-   - Mouse Distance > 5000px: Active navigation (+10 pts)
-   - Mouse Clicks > 20: Interactive session (+5 pts)
-   - Combined low entropy + low mouse + off-task screen = score 0-20 (NEVER default to 100).
-
-Return ONLY a valid JSON array of ${bundle.length} objects in exact input order:
-[
-  {
-    "item_index": 1,
-    "app_name": "VS Code",
-    "app_category": "IDE / Code Editor",
-    "window_title": "app.go - mini-tracker",
-    "category": "Coding",
-    "productivity_score": 92,
-    "is_productive": true,
-    "confidence": 0.95,
-    "reason": "Editing Go backend database logic matching active task goal"
-  }
-]`;
-
-        const parts: any[] = [{ text: promptText }];
-
-        // Attach image parts with detailed telemetry metadata per item
-        bundle.forEach((item, idx) => {
-          if (item.image_path) {
-            parts.push({
-              text: `[Item ${idx + 1} | Timestamp: ${item.timestamp} | Total Keys: ${item.total_keys || 0} | Unique Keys: ${item.unique_keys || 0} | Keystroke Entropy: ${(item.entropy_score || 0).toFixed(1)} | Mouse Clicks: ${item.total_clicks || 0} | Mouse Distance: ${Math.round(item.mouse_distance || 0)}px]`
-            });
-            // If image_path contains data URI or raw base64
-            if (item.image_path.startsWith('data:image/')) {
-              const base64Data = item.image_path.split(',')[1];
-              const mimeType = item.image_path.split(';')[0].split(':')[1];
-              parts.push({
-                inlineData: {
-                  mimeType: mimeType || 'image/webp',
-                  data: base64Data
-                }
-              });
-            }
-          }
-        });
-
-        // Helper for robust parsing of AI responses (handles markdown fences & truncated JSON strings)
-        const parseAIJSONResponse = (raw: string): any[] | null => {
-          if (!raw) return null;
-          let clean = raw.trim();
-          if (clean.startsWith('```')) {
-            clean = clean.replace(/^```[a-z]*\n?/i, '').replace(/\n?```$/i, '').trim();
-          }
-          try {
-            const res = JSON.parse(clean);
-            if (Array.isArray(res)) return res;
-          } catch {
-            // Attempt auto-repair for truncated JSON array
-            const startIdx = clean.indexOf('[');
-            if (startIdx !== -1) {
-              let arrayStr = clean.substring(startIdx);
-              if (!arrayStr.endsWith(']')) {
-                // Remove trailing unclosed object/comma and close array
-                const lastObjEnd = arrayStr.lastIndexOf('}');
-                if (lastObjEnd !== -1) {
-                  arrayStr = arrayStr.substring(0, lastObjEnd + 1) + ']';
-                  try {
-                    const res = JSON.parse(arrayStr);
-                    if (Array.isArray(res)) return res;
-                  } catch {}
-                }
-              }
-            }
-          }
-          return null;
-        };
-
-        // Trigger asynchronous direct Gemini REST API request without blocking UI render
-        fetch(`https://generativelanguage.googleapis.com/v1beta/${localModel}:generateContent?key=${localApiKey}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            contents: [{ parts }],
-            generationConfig: {
-              responseMimeType: 'application/json',
-              temperature: 0.1,
-            }
-          })
-        })
-        .then(async res => {
-          if (!res.ok) throw new Error(`HTTP ${res.status}`);
-          const json = await res.json();
-          const responseText = json?.candidates?.[0]?.content?.parts?.[0]?.text;
-          const parsedResults = parseAIJSONResponse(responseText);
-
-          if (parsedResults && Array.isArray(parsedResults)) {
-            // Increment local AI usage count and notify UI components
-            const currentUsage = parseInt(localStorage.getItem('mini_ai_usage_count') || '0', 10);
-            const newUsage = currentUsage + 1;
-            localStorage.setItem('mini_ai_usage_count', newUsage.toString());
-            window.dispatchEvent(new CustomEvent('ai_usage_updated', { detail: newUsage }));
-
-            // Map bundled results back to log entries
-            const resultMap = new Map<number, any>();
-            parsedResults.forEach((resItem: any, index: number) => {
-              const targetLog = bundle[index];
-              if (targetLog) {
-                resultMap.set(targetLog.id, resItem);
-              }
-            });
-
-            setLogs(prev => prev.map(log => {
-              const resItem = resultMap.get(log.id);
-              if (resItem) {
-                return {
-                  ...log,
-                  app_name: resItem.app_name || log.app_name,
-                  app_category: resItem.app_category || log.app_category,
-                  window_title: resItem.window_title || log.window_title,
-                  ai_category: resItem.category || 'Browsing',
-                  is_productive: Boolean(resItem.is_productive),
-                  productive_score: typeof resItem.productivity_score === 'number' ? resItem.productivity_score : (resItem.is_productive ? 90 : 20),
-                  ai_confidence: typeof resItem.confidence === 'number' ? resItem.confidence : 0.95,
-                  ai_reason: resItem.reason || `Analyzed via ${localModel} bundle`
-                };
-              }
-              return log;
-            }));
-          }
-        })
-        .catch(async err => {
-          console.warn(`Primary model (${localModel}) request failed, attempting Gemma fallback:`, err);
-          const fallbackModel = 'models/gemma-2-27b-it';
-          try {
-            const fallbackRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/${fallbackModel}:generateContent?key=${localApiKey}`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                contents: [{ parts }],
-                generationConfig: {
-                  responseMimeType: 'application/json',
-                  temperature: 0.1,
-                }
-              })
-            });
-            if (fallbackRes.ok) {
-              const fallbackJson = await fallbackRes.json();
-              const responseText = fallbackJson?.candidates?.[0]?.content?.parts?.[0]?.text;
-              const parsedResults = parseAIJSONResponse(responseText);
-
-              if (parsedResults && Array.isArray(parsedResults)) {
-                const currentUsage = parseInt(localStorage.getItem('mini_ai_usage_count') || '0', 10);
-                const newUsage = currentUsage + 1;
-                localStorage.setItem('mini_ai_usage_count', newUsage.toString());
-                window.dispatchEvent(new CustomEvent('ai_usage_updated', { detail: newUsage }));
-
-                const resultMap = new Map<number, any>();
-                parsedResults.forEach((resItem: any, index: number) => {
-                  const targetLog = bundle[index];
-                  if (targetLog) resultMap.set(targetLog.id, resItem);
-                });
-
-                setLogs(prev => prev.map(log => {
-                  const resItem = resultMap.get(log.id);
-                  if (resItem) {
-                    return {
-                      ...log,
-                      app_name: resItem.app_name || log.app_name,
-                      app_category: resItem.app_category || log.app_category,
-                      window_title: resItem.window_title || log.window_title,
-                      ai_category: resItem.category || 'Browsing',
-                      is_productive: Boolean(resItem.is_productive),
-                      productive_score: typeof resItem.productivity_score === 'number' ? resItem.productivity_score : (resItem.is_productive ? 90 : 20),
-                      ai_confidence: typeof resItem.confidence === 'number' ? resItem.confidence : 0.95,
-                      ai_reason: resItem.reason || `Analyzed via Gemma Fallback`
-                    };
-                  }
-                  return log;
-                }));
-              }
-            }
-          } catch (fallbackErr) {
-            console.warn('Gemma fallback request failed:', fallbackErr);
-          }
+      // Wait until at least 3 pending logs are accumulated before sending a batch request
+      if (candidateLogs.length >= 3 && !aiAnalysisInFlightRef.current) {
+        aiAnalysisInFlightRef.current = true;
+        void runClientVisionAnalysis({
+          candidateLogs,
+          apiKey: localApiKey,
+          model: localModel,
+          intervalSec,
+          userTask: stateRef.current.userTask as string,
+          submittedIds: aiSubmittedLogIdsRef.current,
+          resultCache: aiResultCacheRef.current,
+          setLogs,
+        }).finally(() => {
+          aiAnalysisInFlightRef.current = false;
         });
       }
     }
 
-    setLogs(logsData ?? []);
+    // Re-apply client-side AI patches for logs the backend still reports as pending
+    const mergedLogs = (logsData ?? []).map((log) => {
+      if (!isPendingLog(log)) return log;
+      const patch = aiResultCacheRef.current.get(log.id);
+      return patch ? { ...log, ...patch } : log;
+    });
+
+    setLogs(mergedLogs);
     setStats(statsData ?? null);
     setConfig(configData ?? null);
     setLoading(false);
-  }, [isGuestMode]);
+  }, []);
+
+  const loadDataRef = useRef(loadData);
+  loadDataRef.current = loadData;
+
+  const retryLoad = () => {
+    if (page === 'analytics') {
+      loadData(today, selectedUserId, startDate, endDate);
+    } else {
+      loadData(today);
+    }
+  };
 
   // Initial load
   useEffect(() => {
     loadData(today);
   }, [today, loadData]);
 
-  // Keypress & mouse tracking — zero-sudo mode (frontend-reported input activity)
+  // Keypress & mouse click tracking — zero-sudo mode (frontend-reported input activity)
   useEffect(() => {
     if (!isTrackingActive) return;
 
     let totalCount = 0;
     const uniqueKeys = new Set<string>();
 
-    // Mouse telemetry — accumulate squared distance; sqrt only at flush (same as Go backend).
     let mouseClicks = 0;
-    let mouseDistSqAcc = 0;
-    let lastMouseX = -1;
-    let lastMouseY = -1;
-    let rafPending = false; // rAF throttle flag for mousemove
 
     const handleKeyDown = (e: KeyboardEvent) => {
       totalCount++;
@@ -595,30 +786,8 @@ Return ONLY a valid JSON array of ${bundle.length} objects in exact input order:
       mouseClicks++;
     };
 
-    // Throttled via requestAnimationFrame: processes at most ~60fps regardless of
-    // how fast the OS delivers mousemove events (can be 1000+/s on some hardware).
-    let pendingX = -1, pendingY = -1;
-    const handleMouseMove = (e: MouseEvent) => {
-      pendingX = e.screenX;
-      pendingY = e.screenY;
-      if (!rafPending) {
-        rafPending = true;
-        requestAnimationFrame(() => {
-          rafPending = false;
-          if (lastMouseX >= 0 && lastMouseY >= 0) {
-            const dx = pendingX - lastMouseX;
-            const dy = pendingY - lastMouseY;
-            mouseDistSqAcc += dx * dx + dy * dy; // defer sqrt to flush
-          }
-          lastMouseX = pendingX;
-          lastMouseY = pendingY;
-        });
-      }
-    };
-
     window.addEventListener('keydown', handleKeyDown, { passive: true });
     window.addEventListener('mousedown', handleMouseDown, { passive: true });
-    window.addEventListener('mousemove', handleMouseMove, { passive: true });
 
     // Sync keyboard + mouse activity to backend every 30 seconds
     const inputFlushInterval = setInterval(() => {
@@ -639,20 +808,18 @@ Return ONLY a valid JSON array of ${bundle.length} objects in exact input order:
         }
       }
 
-      // Flush mouse — take sqrt only here (once per 30s, not per event)
+      // Flush mouse clicks to the active backend (Wails desktop or web API)
       const clicksSnapshot = mouseClicks;
-      const distSnapshot = Math.round(Math.sqrt(mouseDistSqAcc));
       mouseClicks = 0;
-      mouseDistSqAcc = 0;
 
-      if (clicksSnapshot > 0 || distSnapshot > 0) {
+      if (clicksSnapshot > 0) {
         if (window.go?.main?.App) {
-          callGo(() => window.go!.main.App.RecordMouseActivity(clicksSnapshot, distSnapshot));
+          callGo(() => window.go!.main.App.RecordMouseActivity(clicksSnapshot));
         } else {
-          apiFetch('/api/tracker/mouse', {
+          apiFetch('/api/tracker/input', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ clicks: clicksSnapshot, distance_px: distSnapshot }),
+            body: JSON.stringify({ total_clicks: clicksSnapshot }),
           }).catch(() => {});
         }
       }
@@ -660,14 +827,14 @@ Return ONLY a valid JSON array of ${bundle.length} objects in exact input order:
 
     // Auto-refresh timeline, stats, and AI analytics every 30 seconds
     const syncInterval = setInterval(() => {
-      const todayStr = new Date().toISOString().slice(0, 10);
-      loadData(todayStr);
+      // No explicit date/range: reuse the currently selected view (stateRef)
+      loadDataRef.current(undefined, undefined, undefined, undefined, { background: true });
 
       // Clean up client-side stored cached logs & usage entries older than 7 days
       try {
         const retentionCutoff = new Date();
         retentionCutoff.setDate(retentionCutoff.getDate() - 7);
-        const cutoffStr = retentionCutoff.toISOString().slice(0, 10);
+        const cutoffStr = localISODate(retentionCutoff);
         
         Object.keys(localStorage).forEach(key => {
           if (key.startsWith('mini_logs_') || key.startsWith('mini_stats_')) {
@@ -683,7 +850,6 @@ Return ONLY a valid JSON array of ${bundle.length} objects in exact input order:
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('mousedown', handleMouseDown);
-      window.removeEventListener('mousemove', handleMouseMove);
       clearInterval(inputFlushInterval);
       clearInterval(syncInterval);
     };
@@ -692,9 +858,20 @@ Return ONLY a valid JSON array of ${bundle.length} objects in exact input order:
   // Mobile navbar collapse state
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState<boolean>(false);
 
+  useEffect(() => {
+    if (!isMobileMenuOpen) return;
+    const handleEscape = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setIsMobileMenuOpen(false);
+    };
+    window.addEventListener('keydown', handleEscape);
+    return () => window.removeEventListener('keydown', handleEscape);
+  }, [isMobileMenuOpen]);
+
   // Close mobile menu on page transition
   const navigateTo = (targetPage: Page) => {
-    window.location.hash = targetPage === 'organization' ? 'organization' : '';
+    if (targetPage !== 'accept-invite') {
+      window.location.hash = `#${targetPage}`;
+    }
     setPage(targetPage);
     setIsMobileMenuOpen(false);
   };
@@ -710,48 +887,119 @@ Return ONLY a valid JSON array of ${bundle.length} objects in exact input order:
   ];
 
   const isTracking = isTrackingActive;
-  const isAIReady = config?.ai_configured ?? false;
+
+  const mainRef = useRef<HTMLElement | null>(null);
+
+  useEffect(() => {
+    const titles: Record<Page, string> = {
+      dashboard: 'Dashboard',
+      timeline: 'Timeline',
+      analytics: 'Analytics',
+      organization: 'Team / Org',
+      settings: 'Settings',
+      'accept-invite': 'Accept Invitation',
+      auth: 'Sign In',
+    };
+    document.title = `${titles[page]} — get-Hike`;
+    const main = mainRef.current;
+    if (main) {
+      main.scrollTop = 0;
+      main.focus();
+    }
+  }, [page]);
+
+  // Signs the user in automatically after accepting an email invitation: the
+  // server mints a JWT session with the accept response, so no manual login is needed.
+  const completeInviteSignIn = (result: AcceptInviteResult) => {
+    if (result.user) {
+      localStorage.setItem('mini_auth_user', JSON.stringify(result.user));
+    }
+    if (result.org) {
+      localStorage.setItem('mini_auth_org', JSON.stringify(result.org));
+    }
+    if (result.token) {
+      localStorage.setItem('mini_jwt_token', result.token);
+      syncBackendAuthSession(result.token, false);
+    }
+    localStorage.removeItem('mini_guest_mode');
+    setIsGuestMode(false);
+    setCurrentUser(result.user || null);
+    setAuthNotice(null);
+    navigateTo('dashboard');
+  };
 
   // Show Auth Page if user is not authenticated and has not chosen guest mode
   if (authChecked && !currentUser && !isGuestMode) {
+    if (window.location.hash.includes('accept-invite')) {
+      return (
+        <main className="main-content" id="main-content" tabIndex={-1}>
+          <div className="page-container">
+            <AcceptInvitePage
+              token={inviteToken}
+              onSuccess={completeInviteSignIn}
+            />
+          </div>
+        </main>
+      );
+    }
     return (
-      <AuthPage
-        onAuthSuccess={(user, org, token) => {
-          if (user) {
-            localStorage.setItem('mini_auth_user', JSON.stringify(user));
-          }
-          if (org) {
-            localStorage.setItem('mini_auth_org', JSON.stringify(org));
-          }
-          if (token) {
-            localStorage.setItem('mini_jwt_token', token);
-          }
-          setCurrentUser(user);
-        }}
-        onSkip={() => {
-          localStorage.setItem('mini_guest_mode', 'true');
-          setIsGuestMode(true);
-        }}
-      />
+      <>
+        {authNotice && (
+          <div
+            className="alert alert-error"
+            role="alert"
+            style={{ position: 'fixed', top: 16, left: '50%', transform: 'translateX(-50%)', zIndex: 2000, maxWidth: 440, boxShadow: 'var(--shadow-md)' }}
+          >
+            {authNotice}
+          </div>
+        )}
+        <AuthPage
+          onAuthSuccess={(user, org, token) => {
+            if (user) {
+              localStorage.setItem('mini_auth_user', JSON.stringify(user));
+            }
+            if (org) {
+              localStorage.setItem('mini_auth_org', JSON.stringify(org));
+            }
+            if (token) {
+              localStorage.setItem('mini_jwt_token', token);
+              syncBackendAuthSession(token, false);
+            }
+            setAuthNotice(null);
+            setCurrentUser(user);
+          }}
+          onSkip={() => {
+            localStorage.setItem('mini_guest_mode', 'true');
+            syncBackendAuthSession('', true);
+            setAuthNotice(null);
+            setIsGuestMode(true);
+          }}
+        />
+      </>
     );
   }
 
   return (
     <div className={`app-shell ${isMobileMenuOpen ? 'mobile-nav-active' : ''}`}>
+      <a href="#main-content" className="skip-link" style={{ position: 'absolute' }}>
+        Skip to content
+      </a>
       {/* Mobile Header Bar */}
       <header className="mobile-header">
-        <div className="mobile-header-brand">
+        <div className="mobile-header-brand" onClick={() => dev.registerTap()} style={{ cursor: 'default' }}>
           <img src={logoAsset} alt="get-Hike Logo" className="app-brand-logo-img" style={{ width: 34, height: 34 }} />
           <span className="sidebar-logo-text" style={{ fontSize: 14 }}>get-Hike</span>
         </div>
         <div className="mobile-header-actions">
-          <div style={{ fontFamily: 'monospace', fontSize: 13, fontWeight: 700, color: 'var(--accent-teal)' }}>
+          <div style={{ fontFamily: 'monospace', fontSize: 13, fontWeight: 700, color: 'var(--teal-text)', fontVariantNumeric: 'tabular-nums' }}>
             {formatTimer(elapsedSeconds)}
           </div>
           <button
             className="mobile-menu-toggle"
             onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
             aria-label="Toggle Navigation Menu"
+            aria-expanded={isMobileMenuOpen}
+            aria-controls="sidebar"
           >
             {isMobileMenuOpen ? '✕' : '☰'}
           </button>
@@ -764,8 +1012,8 @@ Return ONLY a valid JSON array of ${bundle.length} objects in exact input order:
       )}
 
       {/* Sidebar */}
-      <aside className={`sidebar ${isMobileMenuOpen ? 'open' : ''}`}>
-        <div className="sidebar-logo">
+      <aside className={`sidebar ${isMobileMenuOpen ? 'open' : ''}`} id="sidebar">
+        <div className="sidebar-logo" onClick={() => dev.registerTap()} style={{ cursor: 'default' }}>
           <img src={logoAsset} alt="get-Hike Logo" className="app-brand-logo-img" style={{ width: 32, height: 32 }} />
           <div>
             <div className="sidebar-logo-text">get-Hike</div>
@@ -779,20 +1027,20 @@ Return ONLY a valid JSON array of ${bundle.length} objects in exact input order:
             <span className="sidebar-widget-label">Work Session</span>
             <span
               style={{
-                fontSize: 10,
+                fontSize: 11,
                 padding: '2px 6px',
                 borderRadius: 4,
                 fontWeight: 600,
-                background: isGuestMode ? 'rgba(139, 92, 246, 0.15)' : 'rgba(16, 185, 129, 0.15)',
-                color: isGuestMode ? 'var(--accent-purple)' : 'var(--accent-green)',
-                border: isGuestMode ? '1px solid rgba(139, 92, 246, 0.3)' : '1px solid rgba(16, 185, 129, 0.3)',
+                background: isGuestMode ? 'color-mix(in srgb, var(--accent-purple) 15%, transparent)' : 'color-mix(in srgb, var(--accent-green) 15%, transparent)',
+                color: isGuestMode ? 'var(--accent-purple)' : 'var(--accent-primary-text)',
+                border: isGuestMode ? '1px solid color-mix(in srgb, var(--accent-purple) 30%, transparent)' : '1px solid color-mix(in srgb, var(--accent-green) 30%, transparent)',
                 whiteSpace: 'nowrap',
               }}
             >
               {isGuestMode ? 'Offline Guest' : 'Synced'}
             </span>
           </div>
-          <div className="sidebar-widget-timer">
+          <div className="sidebar-widget-timer" style={{ fontVariantNumeric: 'tabular-nums' }}>
             {formatTimer(elapsedSeconds)}
           </div>
           <button
@@ -803,6 +1051,11 @@ Return ONLY a valid JSON array of ${bundle.length} objects in exact input order:
             <Icon name={isTrackingActive ? 'pause' : 'play'} size={14} />
             <span>{isTrackingActive ? 'Pause Tracker' : 'Start Tracker'}</span>
           </button>
+          {trackerError && (
+            <div role="alert" style={{ fontSize: 11, color: 'var(--danger-text)', marginBottom: 8 }}>
+              {trackerError}
+            </div>
+          )}
           <button
             onClick={() => {
               setTaskInput(userTask);
@@ -812,7 +1065,7 @@ Return ONLY a valid JSON array of ${bundle.length} objects in exact input order:
             title={userTask || 'Set target task goal (max 20 words)'}
           >
             <Icon name="target" size={12} />
-            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
               {userTask ? `Task: ${userTask}` : 'Set Target Task Goal'}
             </span>
           </button>
@@ -829,24 +1082,42 @@ Return ONLY a valid JSON array of ${bundle.length} objects in exact input order:
         </div>
 
         <div className="sidebar-section-label">Navigation</div>
-        {navItems.map((item) => (
-          <div
-            key={item.id}
-            id={`nav-${item.id}`}
-            className={`nav-item ${page === item.id ? 'active' : ''}`}
-            onClick={() => navigateTo(item.id)}
-          >
-            <Icon name={item.iconName} size={16} className="nav-icon" />
-            <span className="nav-text">{item.label}</span>
-          </div>
-        ))}
+        {navItems.map((item) => {
+          const active = page === item.id;
+          return (
+            <button
+              key={item.id}
+              id={`nav-${item.id}`}
+              type="button"
+              className={`nav-item ${active ? 'active' : ''}`}
+              onClick={() => navigateTo(item.id)}
+              aria-current={active ? 'page' : undefined}
+              style={{
+                background: active ? 'color-mix(in srgb, var(--accent-primary) 9%, transparent)' : 'none',
+                border: 'none',
+                borderLeft: active ? '3px solid var(--accent-primary)' : '3px solid transparent',
+                textAlign: 'left',
+                fontFamily: 'inherit',
+                cursor: 'pointer',
+              }}
+            >
+              <Icon name={item.iconName} size={16} className="nav-icon" />
+              <span className="nav-text">{item.label}</span>
+            </button>
+          );
+        })}
 
         <div className="sidebar-footer">
           {currentUser ? (
             <div style={{ marginBottom: 12, paddingBottom: 10, borderBottom: '1px solid var(--border-subtle)' }}>
-              <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', display: 'flex', alignItems: 'center', gap: 6 }}>
+              <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: 6 }}>
                 <Icon name="user" size={14} color="var(--text-secondary)" />
-                <span>{currentUser.full_name || currentUser.email}</span>
+                <span
+                  style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                  title={currentUser.full_name || currentUser.email}
+                >
+                  {currentUser.full_name || currentUser.email}
+                </span>
               </div>
               <div style={{ fontSize: 11, color: 'var(--text-muted)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 6 }}>
                 <span style={{ textTransform: 'capitalize' }}>Role: {currentUser.role}</span>
@@ -855,7 +1126,7 @@ Return ONLY a valid JSON array of ${bundle.length} objects in exact input order:
                   style={{
                     background: 'transparent',
                     border: 'none',
-                    color: 'var(--accent-red)',
+                    color: 'var(--danger-text)',
                     fontSize: 11,
                     fontWeight: 600,
                     cursor: 'pointer',
@@ -889,10 +1160,20 @@ Return ONLY a valid JSON array of ${bundle.length} objects in exact input order:
             </div>
           )}
 
+          {dev.enabled && (
+            <button
+              type="button"
+              className="dev-badge dev-badge-btn"
+              onClick={() => dev.setOpen(true)}
+              title="Open Developer Menu (Ctrl+Shift+D)"
+            >
+              DEV
+            </button>
+          )}
+
           <div className="status-badge">
             {(() => {
-              const localKey = localStorage.getItem('mini_gemini_api_key');
-              const isAIReady = Boolean(localKey && localKey.trim().length > 0) || Boolean(config?.ai_configured) || Boolean(currentUser?.role === 'member');
+              const isAIReady = aiKeyPresent || Boolean(config?.ai_configured) || Boolean(currentUser?.role === 'member');
               return (
                 <>
                   <div className={`status-dot ${isAIReady ? '' : 'inactive'}`} style={{ background: isAIReady ? 'var(--accent-teal)' : undefined, boxShadow: isAIReady ? '0 0 8px var(--accent-teal)' : undefined }} />
@@ -907,8 +1188,16 @@ Return ONLY a valid JSON array of ${bundle.length} objects in exact input order:
       </aside>
 
       {/* Main content area */}
-      <main className="main-content">
+      <main className="main-content" id="main-content" tabIndex={-1} ref={mainRef}>
         <div className="page-container">
+          {loadError && (
+            <div className="alert alert-error" role="alert">
+              <span>{loadError}</span>
+              <button type="button" className="btn btn-secondary btn-sm" onClick={retryLoad}>
+                Retry
+              </button>
+            </div>
+          )}
           {page === 'dashboard' && (
             <Dashboard
               logs={logs}
@@ -917,6 +1206,8 @@ Return ONLY a valid JSON array of ${bundle.length} objects in exact input order:
               loading={loading}
               today={today}
               onRefresh={() => loadData(today)}
+              loadError={loadError}
+              onRetry={retryLoad}
             />
           )}
           {page === 'timeline' && (
@@ -924,13 +1215,22 @@ Return ONLY a valid JSON array of ${bundle.length} objects in exact input order:
               logs={logs}
               loading={loading}
               today={today}
-              onDateChange={(d) => { setToday(d); loadData(d); }}
+              onDateChange={(d) => {
+                setToday(d);
+                // Timeline always shows a single day — reset any Analytics range so it can't leak
+                setStartDate(d);
+                setEndDate(d);
+                loadData(d);
+              }}
+              loadError={loadError}
+              onRetry={retryLoad}
             />
           )}
           {page === 'analytics' && (
             <Analytics
               logs={logs}
               stats={stats}
+              config={config}
               loading={loading}
               today={today}
               onDateChange={(d) => { setToday(d); loadData(d, selectedUserId, d, d); }}
@@ -947,162 +1247,123 @@ Return ONLY a valid JSON array of ${bundle.length} objects in exact input order:
                 setEndDate(e);
                 loadData(today, selectedUserId, s, e);
               }}
+              loadError={loadError}
+              onRetry={retryLoad}
             />
           )}
           {page === 'organization' && (currentUser?.role === 'admin' || currentUser?.role === 'owner' || isGuestMode) ? (
             <OrganizationPage />
           ) : page === 'organization' ? (
-            <Dashboard
-              logs={logs}
-              stats={stats}
-              config={config}
-              loading={loading}
-              today={today}
-              onRefresh={() => loadData(today)}
-            />
+            <div className="empty-state">
+              <div className="empty-state-title">You don't have access</div>
+              <div className="empty-state-desc">
+                Your account doesn't have permission to view this page. Contact your organization admin if you believe this is a mistake.
+              </div>
+              <button type="button" className="btn btn-primary btn-sm" style={{ marginTop: 12 }} onClick={() => navigateTo('dashboard')}>
+                Back to Dashboard
+              </button>
+            </div>
           ) : null}
           {page === 'settings' && (currentUser?.role === 'admin' || currentUser?.role === 'owner' || isGuestMode) ? (
             <SettingsPage
               theme={theme}
               onThemeChange={(newTheme) => setTheme(newTheme)}
+              syncIntervalSeconds={config?.screenshot_interval_seconds}
             />
           ) : page === 'settings' ? (
-            <Dashboard
-              logs={logs}
-              stats={stats}
-              config={config}
-              loading={loading}
-              today={today}
-              onRefresh={() => loadData(today)}
-            />
+            <div className="empty-state">
+              <div className="empty-state-title">You don't have access</div>
+              <div className="empty-state-desc">
+                Your account doesn't have permission to view this page. Contact your organization admin if you believe this is a mistake.
+              </div>
+              <button type="button" className="btn btn-primary btn-sm" style={{ marginTop: 12 }} onClick={() => navigateTo('dashboard')}>
+                Back to Dashboard
+              </button>
+            </div>
           ) : null}
           {page === 'accept-invite' && (
             <AcceptInvitePage
               token={inviteToken}
-              onSuccess={() => {
-                window.location.hash = 'organization';
-                setPage('organization');
-              }}
+              onSuccess={completeInviteSignIn}
             />
           )}
         </div>
       </main>
 
-      {/* Upwork-style floating tracker pill — opens as real separate OS window */}
-      <button
-        onClick={openWizardWindow}
-        style={{
-          position: 'fixed',
-          bottom: 20,
-          right: 20,
-          zIndex: 9998,
-          background: '#1c1c1e',
-          color: '#f5f5f7',
-          border: '1px solid rgba(255,255,255,0.12)',
-          borderRadius: 12,
-          padding: '8px 14px',
-          fontWeight: 600,
-          fontSize: 13,
-          cursor: 'pointer',
-          boxShadow: '0 4px 20px rgba(0,0,0,0.5)',
-          display: 'none', // hidden per user request
-          alignItems: 'center',
-          gap: 10,
-          fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
-          transition: 'box-shadow 0.2s',
-        }}
-        title="Open Time Tracker (separate window)"
-      >
-        {/* Status dot */}
-        <span style={{
-          width: 8,
-          height: 8,
-          borderRadius: '50%',
-          background: isTrackingActive ? '#30d158' : '#636366',
-          boxShadow: isTrackingActive ? '0 0 6px #30d158' : 'none',
-          flexShrink: 0,
-          transition: 'background 0.3s',
-        }} />
-        {/* Timer */}
-        <span style={{
-          fontFamily: '"SF Mono", "Courier New", monospace',
-          fontVariantNumeric: 'tabular-nums',
-          letterSpacing: '0.02em',
-          color: isTrackingActive ? '#f5f5f7' : '#8e8e93',
-        }}>
-          {formatTimer(elapsedSeconds)}
-        </span>
-        {/* Open icon */}
-        <span style={{ color: '#636366', fontSize: 11 }}>↗</span>
-      </button>
-
       {/* Target Task Goal Modal Dialog */}
-      {showTaskModal && (
-        <div className="modal-backdrop">
-          <div className="modal-card" style={{ maxWidth: 460 }}>
-            <div className="modal-header">
-              <div className="flex items-center gap-8">
-                <Icon name="target" size={18} style={{ color: 'var(--accent-primary)' }} />
-                <h3 className="modal-title">Set Target Work Task</h3>
-              </div>
-              <button
-                className="modal-close"
-                onClick={() => setShowTaskModal(false)}
-                aria-label="Close dialog"
-              >×</button>
-            </div>
+      <Modal
+        isOpen={showTaskModal}
+        onClose={() => setShowTaskModal(false)}
+        title="Set Target Work Task"
+        maxWidth={460}
+        footer={
+          <>
+            <button
+              onClick={() => setShowTaskModal(false)}
+              className="btn btn-secondary btn-sm"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={() => saveTask(taskInput)}
+              className="btn btn-primary btn-sm"
+            >
+              Save & Align AI Analytics
+            </button>
+          </>
+        }
+      >
+        <p style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 14, lineHeight: 1.5 }}>
+          Describe what you are currently working on. AI analytics will evaluate your screenshots, keypresses, and mouse activity specifically against this goal.
+        </p>
 
-            <div className="modal-body">
-              <p style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 14, lineHeight: 1.5 }}>
-                Describe what you are currently working on. AI analytics will evaluate your screenshots, keypresses, and mouse activity specifically against this goal.
-              </p>
+        <textarea
+          autoFocus
+          rows={3}
+          className="form-input"
+          value={taskInput}
+          onChange={e => setTaskInput(e.target.value)}
+          placeholder="e.g. Fixing database migration bug and optimizing mouse event loop performance..."
+          style={{
+            resize: 'none',
+            marginBottom: 8,
+          }}
+        />
 
-              <textarea
-                rows={3}
-                className="form-input"
-                value={taskInput}
-                onChange={e => setTaskInput(e.target.value)}
-                placeholder="e.g. Fixing database migration bug and optimizing mouse event loop performance..."
-                style={{
-                  resize: 'none',
-                  marginBottom: 8,
-                }}
-              />
-
-              <div className="flex items-center justify-between mt-4" style={{ marginBottom: 4 }}>
-                <span style={{
-                  fontSize: 11,
-                  color: taskInput.trim().split(/\s+/).filter(Boolean).length > 20 ? 'var(--accent-red)' : 'var(--text-muted)'
-                }}>
-                  Word count: {taskInput.trim().split(/\s+/).filter(Boolean).length} / 20 words max
-                </span>
-                {userTask && (
-                  <button
-                    onClick={() => saveTask('')}
-                    style={{ background: 'none', border: 'none', color: 'var(--accent-red)', fontSize: 11, fontWeight: 600, cursor: 'pointer' }}
-                  >
-                    Clear Task
-                  </button>
-                )}
-              </div>
-            </div>
-
-            <div className="modal-footer">
-              <button
-                onClick={() => setShowTaskModal(false)}
-                className="btn btn-secondary btn-sm"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={() => saveTask(taskInput)}
-                className="btn btn-primary btn-sm"
-              >
-                Save & Align AI Analytics
-              </button>
-            </div>
-          </div>
+        <div className="flex items-center justify-between mt-4" style={{ marginBottom: 4 }}>
+          <span style={{
+            fontSize: 11,
+            color: taskInput.trim().split(/\s+/).filter(Boolean).length > 20 ? 'var(--danger-text)' : 'var(--text-muted)'
+          }}>
+            Word count: {taskInput.trim().split(/\s+/).filter(Boolean).length} / 20 words max
+          </span>
+          {userTask && (
+            <button
+              onClick={() => saveTask('')}
+              style={{ background: 'none', border: 'none', color: 'var(--danger-text)', fontSize: 11, fontWeight: 600, cursor: 'pointer' }}
+            >
+              Clear Task
+            </button>
+          )}
         </div>
+      </Modal>
+
+      {/* Dev mode tap-progress toast */}
+      {devToastVisible && dev.tapProgress >= 4 && dev.tapProgress < 7 && (
+        <div className="dev-toast" role="status" aria-live="polite">
+          Dev mode: {dev.tapProgress}/7
+        </div>
+      )}
+
+      {/* Developer Menu (desktop-only, session unlocked) */}
+      {dev.enabled && (
+        <DevMenu
+          isOpen={dev.open}
+          onClose={() => dev.setOpen(false)}
+          theme={theme}
+          onThemeChange={setTheme}
+          onDisable={dev.disable}
+        />
       )}
     </div>
   );

@@ -12,9 +12,10 @@ interface AIModel {
 interface SettingsPageProps {
   theme?: 'dark' | 'light' | 'auto';
   onThemeChange?: (theme: 'dark' | 'light' | 'auto') => void;
+  syncIntervalSeconds?: number;
 }
 
-export function SettingsPage({ theme = 'auto', onThemeChange }: SettingsPageProps) {
+export function SettingsPage({ theme = 'auto', onThemeChange, syncIntervalSeconds = 30 }: SettingsPageProps) {
   const [apiKey, setApiKey] = useState(() => localStorage.getItem('mini_gemini_api_key') || '');
   const [model, setModel] = useState(() => localStorage.getItem('mini_ai_model') || 'models/gemma-4-31b-it');
   const [availableModels, setAvailableModels] = useState<AIModel[]>([]);
@@ -23,8 +24,9 @@ export function SettingsPage({ theme = 'auto', onThemeChange }: SettingsPageProp
   const [usageCount, setUsageCount] = useState<number>(() => {
     return parseInt(localStorage.getItem('mini_ai_usage_count') || '0', 10);
   });
+  const [saving, setSaving] = useState(false);
+  const [testing, setTesting] = useState(false);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
-  const [nextSyncSeconds, setNextSyncSeconds] = useState<number>(30);
 
   const fetchUsageSummary = useCallback(async () => {
     try {
@@ -36,9 +38,8 @@ export function SettingsPage({ theme = 'auto', onThemeChange }: SettingsPageProp
     } catch {}
   }, []);
 
-  // 1-second countdown timer for next AI sync interval & usage count sync
+  // Periodic usage refresh + cross-tab/local event sync
   useEffect(() => {
-    fetchUsageSummary();
     const syncUsage = () => {
       const stored = parseInt(localStorage.getItem('mini_ai_usage_count') || '0', 10);
       setUsageCount(stored);
@@ -57,14 +58,10 @@ export function SettingsPage({ theme = 'auto', onThemeChange }: SettingsPageProp
 
     window.addEventListener('ai_usage_updated', handleCustomUsageEvent);
     window.addEventListener('storage', syncUsage);
-
-    const timer = setInterval(() => {
-      setNextSyncSeconds(prev => (prev <= 1 ? 30 : prev - 1));
-      syncUsage();
-    }, 1000);
+    const usageTimer = setInterval(syncUsage, 20000);
 
     return () => {
-      clearInterval(timer);
+      clearInterval(usageTimer);
       window.removeEventListener('ai_usage_updated', handleCustomUsageEvent);
       window.removeEventListener('storage', syncUsage);
     };
@@ -100,9 +97,9 @@ export function SettingsPage({ theme = 'auto', onThemeChange }: SettingsPageProp
   }, []);
 
   useEffect(() => {
-    if (apiKey.trim()) {
-      fetchAvailableModels(apiKey);
-    }
+    if (!apiKey.trim()) return;
+    const t = setTimeout(() => fetchAvailableModels(apiKey), 500);
+    return () => clearTimeout(t);
   }, [apiKey, fetchAvailableModels]);
 
   const [screenshotInterval, setScreenshotInterval] = useState<number>(() => {
@@ -110,13 +107,11 @@ export function SettingsPage({ theme = 'auto', onThemeChange }: SettingsPageProp
   });
 
   const handleSave = async () => {
-    localStorage.setItem('mini_gemini_api_key', apiKey.trim());
-    localStorage.setItem('mini_ai_model', model);
-    localStorage.setItem('mini_screenshot_interval', screenshotInterval.toString());
-
+    setSaving(true);
+    let backendError: string | null = null;
     const cleanModel = model.replace('models/', '');
-    if ((window as any).go?.main?.App) {
-      try {
+    try {
+      if ((window as any).go?.main?.App) {
         if ((window as any).go.main.App.UpdateGeminiAPIKey) {
           await (window as any).go.main.App.UpdateGeminiAPIKey(apiKey.trim());
         }
@@ -126,10 +121,8 @@ export function SettingsPage({ theme = 'auto', onThemeChange }: SettingsPageProp
         if ((window as any).go.main.App.UpdateScreenshotInterval) {
           await (window as any).go.main.App.UpdateScreenshotInterval(screenshotInterval);
         }
-      } catch { }
-    } else {
-      try {
-        await apiFetch('/api/config', {
+      } else {
+        const res = await apiFetch('/api/config', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -138,11 +131,25 @@ export function SettingsPage({ theme = 'auto', onThemeChange }: SettingsPageProp
             screenshot_interval_seconds: screenshotInterval
           }),
         });
-      } catch { }
+        if (!res.ok) {
+          throw new Error(`Server returned ${res.status}`);
+        }
+      }
+    } catch (err: any) {
+      backendError = err?.message || 'unknown error';
     }
 
-    setStatusMessage('✓ Settings & Selected Model saved successfully!');
-    setTimeout(() => setStatusMessage(null), 3000);
+    localStorage.setItem('mini_gemini_api_key', apiKey.trim());
+    localStorage.setItem('mini_ai_model', model);
+    localStorage.setItem('mini_screenshot_interval', screenshotInterval.toString());
+
+    if (backendError) {
+      setStatusMessage(`✕ Saved locally, but backend update failed: ${backendError}`);
+    } else {
+      setStatusMessage('✓ Settings & Selected Model saved successfully!');
+    }
+    setTimeout(() => setStatusMessage(null), 4000);
+    setSaving(false);
   };
 
   const handleTestAPI = async () => {
@@ -150,6 +157,8 @@ export function SettingsPage({ theme = 'auto', onThemeChange }: SettingsPageProp
       setStatusMessage('Please enter an API Key first.');
       return;
     }
+    if (testing) return;
+    setTesting(true);
     setStatusMessage('Testing connection and fetching models…');
     await fetchAvailableModels(apiKey);
     try {
@@ -162,7 +171,10 @@ export function SettingsPage({ theme = 'auto', onThemeChange }: SettingsPageProp
         })
       });
       if (res.ok) {
-        setUsageCount(prev => prev + 1);
+        const newUsage = parseInt(localStorage.getItem('mini_ai_usage_count') || '0', 10) + 1;
+        localStorage.setItem('mini_ai_usage_count', newUsage.toString());
+        setUsageCount(newUsage);
+        window.dispatchEvent(new CustomEvent('ai_usage_updated', { detail: newUsage }));
         setStatusMessage(`✓ Connected successfully to ${cleanModel}!`);
       } else {
         const err = await res.json();
@@ -170,18 +182,21 @@ export function SettingsPage({ theme = 'auto', onThemeChange }: SettingsPageProp
       }
     } catch {
       setStatusMessage('✕ Connection failed. Check network or API key.');
+    } finally {
+      setTesting(false);
     }
   };
 
   const handleClearData = async () => {
+    if (!(window as any).go?.main?.App) {
+      setStatusMessage('✕ Clearing stored data is only available in the desktop app.');
+      return;
+    }
     if (!window.confirm('Are you sure you want to delete all stored screenshots, logs, and activity records? This action cannot be undone.')) {
       return;
     }
     try {
-      if ((window as any).go?.main?.App) {
-        await (window as any).go.main.App.ClearAllLocalData();
-      }
-      localStorage.removeItem('mini_guest_logs');
+      await (window as any).go.main.App.ClearAllLocalData();
       localStorage.setItem('mini_ai_usage_count', '0');
       setUsageCount(0);
       setStatusMessage('✓ Successfully deleted all local screenshots and reset database!');
@@ -192,106 +207,58 @@ export function SettingsPage({ theme = 'auto', onThemeChange }: SettingsPageProp
   };
 
   const selectedModelInfo = availableModels.find(m => m.name === model || m.name === `models/${model}`);
+  const modelFamily = (() => {
+    const lower = model.toLowerCase();
+    if (lower.includes('gemma')) return 'Gemma family';
+    if (lower.includes('pro')) return 'Gemini Pro family';
+    return 'Gemini Flash family';
+  })();
+  const fmtTokens = (n: number) => (n ? n.toLocaleString() : 'N/A');
 
   return (
     <div className="fade-in-up">
       <form onSubmit={(e) => { e.preventDefault(); handleSave(); }}>
-        <div className="page-header" style={{ marginBottom: 24, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 16 }}>
+        <div className="page-header" style={{ marginBottom: 20, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
           <div>
             <h1 className="page-title">AI Engine & Model Settings</h1>
-            <p className="page-subtitle">
-              Fetch models, rate limits, configure API keys, and track direct client-side usage.
-            </p>
+            <p className="page-subtitle">API key, model, capture preferences, and live usage.</p>
           </div>
-          <button type="submit" className="btn btn-primary" style={{ padding: '10px 24px', fontSize: 14, fontWeight: 700 }}>
-            💾 Save Settings & Selected Model
-          </button>
+          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+            <button
+              type="button"
+              onClick={handleTestAPI}
+              disabled={testing}
+              className="btn btn-secondary"
+              style={{ padding: '10px 18px', fontSize: 14, fontWeight: 600, opacity: testing ? 0.6 : undefined, cursor: testing ? 'not-allowed' : undefined }}
+            >
+              {testing ? 'Testing…' : '⚡ Test'}
+            </button>
+            <button
+              type="submit"
+              disabled={saving}
+              className="btn btn-primary"
+              style={{ padding: '10px 22px', fontSize: 14, fontWeight: 700, opacity: saving ? 0.6 : undefined, cursor: saving ? 'not-allowed' : undefined }}
+            >
+              {saving ? 'Saving…' : '💾 Save Settings'}
+            </button>
+          </div>
         </div>
 
         {statusMessage && (
-          <div className={`alert ${statusMessage.startsWith('✓') ? 'alert-success' : statusMessage.startsWith('✕') ? 'alert-error' : 'alert-info'}`} style={{ marginBottom: 20 }}>
+          <div className={`alert ${statusMessage.startsWith('✓') ? 'alert-success' : statusMessage.startsWith('✕') ? 'alert-error' : 'alert-info'}`} style={{ marginBottom: 16 }}>
             {statusMessage}
           </div>
         )}
 
-        {/* Appearance & Color Theme System Options */}
-        <div className="card" style={{ marginBottom: 24 }}>
+        {/* API Key & Model — primary configuration card */}
+        <div className="card" style={{ marginBottom: 16 }}>
           <div className="card-header">
-            <span className="card-title">🎨 Appearance & Theme System</span>
-          </div>
-          <div className="card-body">
-            <p style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 16 }}>
-              Choose your interface color system: Dark Mode, Light Mode, or Auto System Preference matching your operating system.
-            </p>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 12 }}>
-              {[
-                { id: 'dark', title: '🌙 Dark Mode', desc: 'Deep dark contrast optimized for low light' },
-                { id: 'light', title: '☀️ Light Mode', desc: 'Clean bright palette for daytime clarity' },
-                { id: 'auto', title: '💻 Auto System', desc: 'Sync automatically with OS preferences' }
-              ].map(t => (
-                <div
-                  key={t.id}
-                  onClick={() => onThemeChange?.(t.id as any)}
-                  style={{
-                    padding: 14,
-                    borderRadius: 'var(--radius-md)',
-                    border: '1.5px solid',
-                    borderColor: theme === t.id ? 'var(--accent-primary)' : 'var(--border-subtle)',
-                    background: theme === t.id ? 'var(--bg-elevated)' : 'var(--bg-surface)',
-                    cursor: 'pointer',
-                    transition: 'var(--transition)',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: 4
-                  }}
-                >
-                  <div style={{ fontWeight: 700, fontSize: 13, color: theme === t.id ? 'var(--accent-primary)' : 'var(--text-primary)' }}>
-                    {t.title}
-                  </div>
-                  <div style={{ fontSize: 11, color: 'var(--text-secondary)' }}>
-                    {t.desc}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-
-        {/* Screenshot Capture Frequency Settings Card */}
-        <div className="card" style={{ marginBottom: 24 }}>
-          <div className="card-header">
-            <span className="card-title">📷 Screenshot Capture Frequency</span>
-          </div>
-          <div className="card-body">
-            <div className="form-group">
-              <label className="form-label">Automatic Capture Interval</label>
-              <select
-                value={screenshotInterval}
-                onChange={(e) => setScreenshotInterval(parseInt(e.target.value, 10))}
-                className="form-select"
-              >
-                <option value={15}>Every 15 Seconds (High Frequency Testing)</option>
-                <option value={30}>Every 30 Seconds (Active Tracking)</option>
-                <option value={60}>Every 1 Minute (Standard Balanced Default)</option>
-                <option value={120}>Every 2 Minutes (Low Resource Saver)</option>
-                <option value={300}>Every 5 Minutes (Minimal Sync Mode)</option>
-              </select>
-            </div>
-            <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-              ⏱️ Controls how often the background activity tracker captures desktop screenshots and keyboard entropy for AI analysis.
-            </div>
-          </div>
-        </div>
-
-        {/* Model Selection & API Key Card */}
-        <div className="card" style={{ marginBottom: 24 }}>
-          <div className="card-header">
-            <span className="card-title">API Key & Dynamic Model Selection</span>
+            <span className="card-title">🔑 API Key & Model</span>
           </div>
           <div className="card-body">
             <div className="form-group">
               <label className="form-label">Google Gemini API Key</label>
-              <div style={{ display: 'flex', gap: 10 }}>
+              <div style={{ display: 'flex', gap: 8 }}>
                 <input
                   type="password"
                   placeholder="AIzaSy..."
@@ -305,16 +272,22 @@ export function SettingsPage({ theme = 'auto', onThemeChange }: SettingsPageProp
                   onClick={() => fetchAvailableModels(apiKey)}
                   disabled={fetchingModels || !apiKey.trim()}
                   className="btn btn-secondary"
-                  style={{ whiteSpace: 'nowrap' }}
+                  title="Refresh model list from Google"
+                  style={{
+                    padding: '8px 12px',
+                    minWidth: 42,
+                    opacity: fetchingModels || !apiKey.trim() ? 0.6 : undefined,
+                    cursor: fetchingModels || !apiKey.trim() ? 'not-allowed' : undefined,
+                  }}
                 >
-                  {fetchingModels ? 'Fetching Models...' : '🔄 Fetch Models'}
+                  {fetchingModels ? '…' : '↻'}
                 </button>
               </div>
             </div>
 
-            <div className="form-group">
+            <div className="form-group" style={{ marginBottom: selectedModelInfo ? 8 : undefined }}>
               <label className="form-label">
-                Selected AI Model {availableModels.length > 0 && `(${availableModels.length} models fetched)`}
+                Model {availableModels.length > 0 && `(${availableModels.length} fetched)`}
               </label>
               <select
                 value={model}
@@ -329,159 +302,144 @@ export function SettingsPage({ theme = 'auto', onThemeChange }: SettingsPageProp
                   ))
                 ) : (
                   <>
-                    <option value="models/gemma-4-31b-it">Gemini 2.5 Flash (Fast & Recommended)</option>
+                    <option value="models/gemma-4-31b-it">Gemma 4 31B IT (Fast & Recommended)</option>
                     <option value="models/gemini-2.5-pro">Gemini 2.5 Pro (Deep Reasoning)</option>
-                    <option value="models/Gemma 4 31B IT">Gemini 2.0 Flash</option>
-                    <option value="models/gemma-2-27b-it">Gemma 2 27B IT (Open Multimodal Fallback)</option>
+                    <option value="models/gemini-2.0-flash">Gemini 2.0 Flash (Open Multimodal Fallback)</option>
+                    <option value="models/gemini-2.5-flash">Gemini 2.5 Flash (Balanced)</option>
                   </>
                 )}
               </select>
             </div>
 
             {selectedModelInfo && (
-              <div style={{ padding: 12, background: 'var(--bg-elevated)', borderRadius: 'var(--radius-md)', marginBottom: 16, border: '1px solid var(--border-subtle)' }}>
-                <div style={{ fontWeight: 600, fontSize: 13, color: 'var(--accent-teal)', marginBottom: 4 }}>
-                  {selectedModelInfo.displayName} Limits & Specifications:
-                </div>
-                <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
-                  • <strong>Input Context Limit:</strong> {selectedModelInfo.inputTokenLimit ? selectedModelInfo.inputTokenLimit.toLocaleString() : 'N/A'} tokens<br />
-                  • <strong>Output Token Limit:</strong> {selectedModelInfo.outputTokenLimit ? selectedModelInfo.outputTokenLimit.toLocaleString() : 'N/A'} tokens<br />
-                  • <strong>Description:</strong> {selectedModelInfo.description || 'Google Gemini AI Generative Model.'}
-                </div>
+              <div
+                title={selectedModelInfo.description}
+                style={{ fontSize: 12, color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+              >
+                Context {fmtTokens(selectedModelInfo.inputTokenLimit)} · Output {fmtTokens(selectedModelInfo.outputTokenLimit)}
+                {selectedModelInfo.description ? ` · ${selectedModelInfo.description}` : ''}
               </div>
             )}
+          </div>
+        </div>
 
-            <div style={{ display: 'flex', gap: 12, marginTop: 20 }}>
-              <button type="submit" className="btn btn-primary" style={{ padding: '10px 24px', fontSize: 14, fontWeight: 700 }}>
-                💾 Save Configuration & Selected Model
-              </button>
-              <button type="button" onClick={handleTestAPI} className="btn btn-secondary">
-                ⚡ Test API & Selected Model
-              </button>
+        {/* Capture & Appearance — compact two-column card */}
+        <div className="card" style={{ marginBottom: 16 }}>
+          <div className="card-header">
+            <span className="card-title">🎨 Capture & Appearance</span>
+          </div>
+          <div className="card-body">
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 16 }}>
+              <div className="form-group" style={{ marginBottom: 0 }}>
+                <label className="form-label">Theme</label>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  {[
+                    { id: 'dark', label: '🌙 Dark', desc: 'Dark contrast for low light' },
+                    { id: 'light', label: '☀️ Light', desc: 'Bright palette for daytime' },
+                    { id: 'auto', label: '💻 Auto', desc: 'Match OS system preference' }
+                  ].map(t => (
+                    <button
+                      key={t.id}
+                      type="button"
+                      title={t.desc}
+                      onClick={() => onThemeChange?.(t.id as any)}
+                      className={theme === t.id ? 'btn btn-primary' : 'btn btn-secondary'}
+                      style={{ flex: 1, padding: '8px 10px', fontSize: 13, fontWeight: theme === t.id ? 700 : 500 }}
+                    >
+                      {t.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="form-group" style={{ marginBottom: 0 }}>
+                <label className="form-label">Capture Interval</label>
+                <select
+                  value={screenshotInterval}
+                  onChange={(e) => setScreenshotInterval(parseInt(e.target.value, 10))}
+                  className="form-select"
+                >
+                  <option value={15}>15s — High frequency</option>
+                  <option value={30}>30s — Active tracking</option>
+                  <option value={60}>60s — Standard (default)</option>
+                  <option value={120}>2m — Low resource</option>
+                  <option value={300}>5m — Minimal</option>
+                </select>
+              </div>
+            </div>
+            <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 12 }}>
+              Captures every {screenshotInterval}s (backend: {syncIntervalSeconds}s). Pending logs are batched (up to 10 per request) to keep AI usage low.
             </div>
           </div>
         </div>
       </form>
 
-      {/* Active Model Quota & Remaining Capacity Monitor */}
-      {(() => {
-        const isPro = model.includes('gemini-1.5-pro');
-        const isFlash2 = model.includes('Gemma 4 31B IT');
-
-        const rpmLimit = isPro ? 2 : isFlash2 ? 10 : 15;
-        const rpdLimit = isPro ? 50 : 1500;
-        const tpmLimit = isPro ? '32,000' : isFlash2 ? '4,000,000' : '1,000,000';
-        const contextLimit = selectedModelInfo?.inputTokenLimit
-          ? selectedModelInfo.inputTokenLimit.toLocaleString()
-          : isPro ? '2,097,152' : '1,048,576';
-
-        const remainingRpd = Math.max(0, rpdLimit - usageCount);
-        const usedPercent = Math.min(100, Math.round((usageCount / rpdLimit) * 100));
-
-        return (
-          <div className="card">
-            <div className="card-header">
-              <span className="card-title">📊 Active Model Quota & Remaining Capacity</span>
-            </div>
-            <div className="card-body">
-              {/* Active Model Header Banner */}
-              <div style={{ padding: 14, background: 'var(--bg-elevated)', borderRadius: 'var(--radius-md)', marginBottom: 20, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                <div>
-                  <div style={{ fontSize: 11, textTransform: 'uppercase', color: 'var(--text-muted)', fontWeight: 700, letterSpacing: 0.5 }}>Currently Active Model</div>
-                  <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--accent-teal)', marginTop: 2 }}>
-                    {selectedModelInfo?.displayName || model.replace('models/', '')}
-                  </div>
-                </div>
-                <div className="badge badge-productive" style={{ fontSize: 12 }}>
-                  {rpdLimit.toLocaleString()} RPD Quota
-                </div>
-              </div>
-
-              {/* Progress & Remaining Stat Cards */}
-              <div className="stats-grid" style={{ marginBottom: 20 }}>
-                <div className="stat-card" style={{ border: '1px solid var(--accent-purple)', background: 'var(--bg-elevated)' }}>
-                  <span className="stat-label" style={{ color: 'var(--accent-teal)', fontWeight: 700 }}>⏳ Next AI Sync In</span>
-                  <div className="stat-value text-purple" style={{ fontSize: 24, fontWeight: 800 }}>
-                    {nextSyncSeconds}s
-                  </div>
-                  <div className="stat-sub">Auto screenshot analysis sync</div>
-                </div>
-                <div className="stat-card">
-                  <span className="stat-label">Total AI Requests</span>
-                  <div className="stat-value text-purple" style={{ fontSize: 24 }}>{usageSummary?.total_requests ?? usageCount}</div>
-                  <div className="stat-sub">Tracked API requests</div>
-                </div>
-                <div className="stat-card">
-                  <span className="stat-label">Prompt Tokens</span>
-                  <div className="stat-value text-cyan" style={{ fontSize: 24 }}>{(usageSummary?.prompt_tokens ?? 0).toLocaleString()}</div>
-                  <div className="stat-sub">Input prompt tokens</div>
-                </div>
-                <div className="stat-card">
-                  <span className="stat-label">Candidate Tokens</span>
-                  <div className="stat-value text-amber" style={{ fontSize: 24 }}>{(usageSummary?.candidate_tokens ?? 0).toLocaleString()}</div>
-                  <div className="stat-sub">AI output tokens</div>
-                </div>
-                <div className="stat-card">
-                  <span className="stat-label">Total Tokens Tracked</span>
-                  <div className="stat-value text-green" style={{ fontSize: 24 }}>{(usageSummary?.total_tokens ?? 0).toLocaleString()}</div>
-                  <div className="stat-sub">Combined API tokens</div>
-                </div>
-              </div>
-
-              {/* Visual Usage Progress Bar */}
-              <div style={{ marginBottom: 16 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginBottom: 6, fontWeight: 600 }}>
-                  <span style={{ color: 'var(--text-secondary)' }}>Daily Quota Consumption</span>
-                  <span style={{ color: 'var(--accent-teal)' }}>{usedPercent}% Used</span>
-                </div>
-                <div className="entropy-bar-track" style={{ height: 8 }}>
-                  <div
-                    className="entropy-bar-fill"
-                    style={{
-                      width: `${usedPercent}%`,
-                      background: usedPercent > 80 ? 'var(--accent-red)' : 'var(--accent-purple)'
-                    }}
-                  />
-                </div>
-              </div>
-
-              {/* Dynamic Screenshot Bundling & Rate Guard Information */}
-              <div style={{ padding: 14, background: 'var(--bg-elevated)', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-subtle)', fontSize: 12, color: 'var(--text-secondary)' }}>
-                <div style={{ fontWeight: 600, color: 'var(--accent-teal)', marginBottom: 4, display: 'flex', alignItems: 'center', gap: 6 }}>
-                  📦 Multi-Screenshot Adaptive Bundling & Rate Guard Enabled
-                </div>
-                <div>
-                  • <strong>Dynamic Batching:</strong> Automatically bundles captures based on interval ({screenshotInterval}s) to preserve your <code>{rpmLimit} RPM</code> rate limit.<br />
-                  • <strong>Request Optimization:</strong> Enforces max 1 batch request per minute with structured JSON payload responses.<br />
-                  • <strong>Quota Protection:</strong> Saves up to 75% of your API quota while analyzing activity with high precision.
-                </div>
-              </div>
-            </div>
-          </div>
-        );
-      })()}
-
-      {/* Danger Zone: Separate & Hidden from Primary Action Bar */}
-      <div className="card" style={{ marginTop: 24, border: '1px solid rgba(239, 68, 68, 0.3)' }}>
-        <div className="card-header" style={{ borderBottom: '1px solid rgba(239, 68, 68, 0.2)' }}>
-          <span className="card-title" style={{ color: 'var(--accent-red)' }}>⚠️ Danger Zone - Data Purge</span>
+      {/* Live usage */}
+      <div className="card">
+        <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+          <span className="card-title">📊 AI Usage</span>
+          <span style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0, fontSize: 12, color: 'var(--text-secondary)' }}>
+            <span
+              style={{ fontWeight: 700, color: 'var(--teal-text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 220 }}
+              title={selectedModelInfo?.displayName || model.replace('models/', '')}
+            >
+              {selectedModelInfo?.displayName || model.replace('models/', '')}
+            </span>
+            <span className="badge badge-productive" style={{ flexShrink: 0 }}>{modelFamily}</span>
+          </span>
         </div>
         <div className="card-body">
-          <p style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 16 }}>
-            Permanently purge local screenshot caches and reset the activity database. All settings and API keys are preserved.
+          <div className="stats-grid" style={{ marginBottom: 14 }}>
+            <div className="stat-card">
+              <span className="stat-label">Total AI Requests</span>
+              <div className="stat-value text-purple" style={{ fontSize: 24 }}>{usageSummary?.total_requests ?? usageCount}</div>
+              <div className="stat-sub">Tracked API requests</div>
+            </div>
+            <div className="stat-card">
+              <span className="stat-label">Prompt Tokens</span>
+              <div className="stat-value text-cyan" style={{ fontSize: 24 }}>{(usageSummary?.prompt_tokens ?? 0).toLocaleString()}</div>
+              <div className="stat-sub">Input prompt tokens</div>
+            </div>
+            <div className="stat-card">
+              <span className="stat-label">Output Tokens</span>
+              <div className="stat-value text-amber" style={{ fontSize: 24 }}>{(usageSummary?.candidate_tokens ?? 0).toLocaleString()}</div>
+              <div className="stat-sub">AI output tokens</div>
+            </div>
+            <div className="stat-card">
+              <span className="stat-label">Total Tokens</span>
+              <div className="stat-value text-green" style={{ fontSize: 24 }}>{(usageSummary?.total_tokens ?? 0).toLocaleString()}</div>
+              <div className="stat-sub">Combined API tokens</div>
+            </div>
+          </div>
+
+          <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
+            Free-tier RPM/RPD/TPM limits are enforced by Google per model (check <strong>Google AI Studio → Rate limits</strong>); the numbers above are live app usage. Analysis is batched (up to 10 logs/request) with automatic retry and model fallback, and screenshots are downscaled before upload.
+          </div>
+        </div>
+      </div>
+
+      {/* Danger zone */}
+      <div className="card" style={{ marginTop: 16, border: '1px solid color-mix(in srgb, var(--accent-red) 30%, transparent)' }}>
+        <div className="card-header" style={{ borderBottom: '1px solid color-mix(in srgb, var(--accent-red) 20%, transparent)' }}>
+          <span className="card-title" style={{ color: 'var(--danger-text)' }}>⚠️ Danger Zone</span>
+        </div>
+        <div className="card-body" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
+          <p style={{ fontSize: 13, color: 'var(--text-secondary)', margin: 0, flex: 1, minWidth: 220 }}>
+            Permanently purge local screenshot caches and reset the activity database. Settings and API keys are preserved.
           </p>
           <button
             onClick={handleClearData}
             className="btn"
             style={{
-              background: 'rgba(239, 68, 68, 0.15)',
+              background: 'color-mix(in srgb, var(--accent-red) 15%, transparent)',
               border: '1px solid var(--accent-red)',
-              color: 'var(--accent-red)',
+              color: 'var(--danger-text)',
               fontWeight: 600,
-              cursor: 'pointer'
+              cursor: 'pointer',
+              whiteSpace: 'nowrap'
             }}
           >
-            🗑️ Clear All Stored Data & Reset Database
+            🗑️ Clear All Data & Reset
           </button>
         </div>
       </div>

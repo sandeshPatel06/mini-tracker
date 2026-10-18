@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -73,6 +74,17 @@ func InitDesktopLogger(dataDir string) error {
 		}
 	}()
 
+	return nil
+}
+
+// SetLevel applies a runtime log level (debug|info|warn|warning|error) to the
+// global Logrus logger. The level is not persisted.
+func SetLevel(level string) error {
+	parsed, err := logrus.ParseLevel(strings.TrimSpace(level))
+	if err != nil {
+		return fmt.Errorf("invalid log level %q: %w", level, err)
+	}
+	Log.SetLevel(parsed)
 	return nil
 }
 

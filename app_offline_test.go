@@ -7,6 +7,8 @@ import (
 	"net"
 	"syscall"
 	"testing"
+
+	syncp "github.com/reak/get-hike/internal/sync"
 )
 
 type timeoutNetErr struct{}
@@ -51,5 +53,29 @@ func TestAIAttemptThrottle(t *testing.T) {
 	a.markAIAttempt()
 	if a.aiAttemptAllowed() {
 		t.Fatal("expected attempt to be throttled right after marking")
+	}
+}
+
+func TestSyncActiveGating(t *testing.T) {
+	a := NewApp()
+	if a.syncActive() {
+		t.Fatal("expected sync to be inactive without a sync engine")
+	}
+
+	a.syncEngine = syncp.NewSyncEngine(nil, "http://localhost:8080")
+	a.syncEngine.SetAuthToken("token")
+	a.isGuest = true
+	if a.syncActive() {
+		t.Fatal("expected guest mode to disable sync")
+	}
+
+	a.isGuest = false
+	if !a.syncActive() {
+		t.Fatal("expected sync to be active with token and non-guest mode")
+	}
+
+	a.syncEngine.SetAuthToken("")
+	if a.syncActive() {
+		t.Fatal("expected sync to be inactive without a token")
 	}
 }

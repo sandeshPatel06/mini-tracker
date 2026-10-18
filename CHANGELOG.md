@@ -141,6 +141,12 @@ Accessibility & UI/UX audit (earlier in this release cycle):
 
 Offline resilience (desktop):
 
+- Authenticated mode: queued telemetry (`pending_upload`) is now retried every
+  5 minutes (previously only on the next capture or the 3-hour pull cycle), so
+  reconnecting after an outage syncs promptly even when tracking is stopped.
+- Immediate per-capture sync now requires a real session token — the background
+  daemon and guest mode no longer fire unauthorized push requests (with base64
+  screenshots attached) against the backend every 30 seconds.
 - AI analysis no longer burns the per-log retry budget while the device is offline.
   Connectivity failures (DNS, dial, timeouts, connection resets), context cancellation
   and temporary 429/5xx responses are classified as transient: entries stay pending

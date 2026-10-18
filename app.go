@@ -171,6 +171,33 @@ func (a *App) startup(ctx context.Context) {
 	// Start 3-hour background pull cron if connected to backend
 	a.syncEngine.StartBackgroundPullCron(a.ctx, 3*time.Hour)
 
+	// Fast pending-upload retry cron: after an outage, queued telemetry is pushed
+	// as soon as connectivity and a session are back (at most ~5 minutes wait)
+	// instead of waiting for the 3-hour pull cycle.
+	go func() {
+		ticker := time.NewTicker(5 * time.Minute)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-a.ctx.Done():
+				return
+			case <-ticker.C:
+				if !a.syncActive() || a.database == nil {
+					continue
+				}
+				pending, err := a.database.CountLogsBySyncStatus("pending_upload")
+				if err != nil || pending == 0 {
+					continue
+				}
+				ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+				if err := a.syncEngine.TriggerSyncNow(ctx); err != nil {
+					log.Printf("[app] pending upload retry failed (%d queued): %v", pending, err)
+				}
+				cancel()
+			}
+		}
+	}()
+
 	// Auto-process any pending/unanalyzed logs if Gemini key is set (Guest mode)
 	if a.gemini.HasKey() {
 		go func() {
@@ -313,14 +340,22 @@ func (a *App) collect() {
 	if a.isGuest {
 		// Guest Mode: queue for throttled batch analysis instead of one API call per log.
 		go a.notifyPendingAI()
-	} else {
+	} else if a.syncActive() {
 		// Authenticated Mode: Push raw telemetry to backend (single-flight guarded).
+		// Without a real session token (e.g. background daemon), skip the immediate
+		// push — the periodic retry cron handles queued uploads once a token exists.
 		go func() {
 			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			defer cancel()
 			_ = a.syncEngine.TriggerSyncNow(ctx)
 		}()
 	}
+}
+
+// syncActive reports whether the app currently holds a usable backend session
+// for telemetry sync (authenticated, non-guest, token set).
+func (a *App) syncActive() bool {
+	return a.syncEngine != nil && a.syncEngine.Enabled() && !a.isGuest
 }
 
 // SetAuthSession updates active session authentication token and mode (Guest vs Authenticated).

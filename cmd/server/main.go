@@ -2437,7 +2437,7 @@ const wizardHTML = `<!DOCTYPE html>
 
   async function fetchStats(){
     try{
-      const today=new Date().toISOString().slice(0,10);
+      const today=new Date().toLocaleDateString('en-CA');
       const r=await fetch('/api/stats?date='+today,{headers:authHdr()});
       if(!r.ok) return;
       const d=await r.json();

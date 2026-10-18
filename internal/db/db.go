@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -163,7 +164,7 @@ func Open(dataDir string, dbURLs ...string) (*DB, error) {
 
 	if dbURI != "" {
 		drvDialect = dialect.Postgres
-		rawDB, err = sql.Open("postgres", dbURI)
+		rawDB, err = sql.Open("postgres", withPostgresSessionTimeZone(dbURI))
 		if err != nil {
 			return nil, fmt.Errorf("open postgres ent: %w", err)
 		}
@@ -196,6 +197,44 @@ func Open(dataDir string, dbURLs ...string) (*DB, error) {
 		log.Printf("[db] migration note (%s): %v", drvDialect, err)
 	}
 	return db, nil
+}
+
+// resolveServerTimeZone returns the timezone used to bucket analytics by day.
+// Prefers a valid IANA name from the TZ env var or the system zone; falls back
+// to the current numeric UTC offset.
+func resolveServerTimeZone() string {
+	if tz := strings.TrimSpace(os.Getenv("TZ")); tz != "" {
+		if _, err := time.LoadLocation(tz); err == nil {
+			return tz
+		}
+	}
+	name, offset := time.Now().Zone()
+	if strings.Contains(name, "/") {
+		return name
+	}
+	sign := "+"
+	if offset < 0 {
+		sign = "-"
+		offset = -offset
+	}
+	return fmt.Sprintf("%s%02d:%02d", sign, offset/3600, (offset%3600)/60)
+}
+
+// withPostgresSessionTimeZone appends a session timezone option so day-bucketing
+// predicates (timestamp::date) match the server's local calendar instead of UTC.
+// Existing timezone/options parameters are left untouched.
+func withPostgresSessionTimeZone(dbURI string) string {
+	if strings.Contains(dbURI, "timezone=") || strings.Contains(dbURI, "options=") {
+		return dbURI
+	}
+	parsed, err := url.Parse(dbURI)
+	if err != nil {
+		return dbURI
+	}
+	q := parsed.Query()
+	q.Set("options", "-c timezone="+resolveServerTimeZone())
+	parsed.RawQuery = q.Encode()
+	return parsed.String()
 }
 
 func (db *DB) migrate() error {

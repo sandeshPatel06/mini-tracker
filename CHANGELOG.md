@@ -101,6 +101,11 @@ Data integrity, analytics & sync:
 - Sync engine: pushes now include `total_clicks`, non-2xx responses and malformed responses
   are logged instead of silently dropped, and the desktop collector uses the single-flight
   `TriggerSyncNow` so pending rows cannot be pushed twice concurrently.
+- Analytics day-bucketing follows the server's local timezone: Postgres sessions now set
+  `timezone` from `TZ` (or the system zone) so `timestamp::date` predicates align with the
+  local-time defaults used by `/api/stats`, `/api/logs` and `/api/work-sessions`; the
+  embedded dashboard no longer derives "today" from a UTC `toISOString()`. Docker users
+  can set `TZ` (documented in `.env.example` and `docker-compose.yml`).
 
 Real AI analytics (no fabricated values):
 

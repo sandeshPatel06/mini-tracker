@@ -3,10 +3,12 @@ package main
 import (
 	"context"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
 	"log"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -15,6 +17,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
@@ -57,6 +60,9 @@ type App struct {
 
 	// aiMu serializes batched AI analysis runs (single-flight).
 	aiMu sync.Mutex
+
+	// lastAIAttempt throttles automatic AI batch runs (guarded by statsMu).
+	lastAIAttempt time.Time
 }
 
 // NewApp creates a new App application struct.
@@ -175,32 +181,35 @@ func (a *App) startup(ctx context.Context) {
 				log.Printf("[app] auto-processed %d pending logs with Gemini", count)
 			}
 		}()
+	}
 
-		// Periodic batched AI analysis for Guest mode — throttled between 2 and 15
-		// minutes to minimize API usage while keeping the dashboard fresh.
-		go func() {
-			interval := cfg.AIAnalysisInterval
-			if interval < 2*time.Minute {
-				interval = 2 * time.Minute
-			}
-			if interval > 15*time.Minute {
-				interval = 15 * time.Minute
-			}
-			ticker := time.NewTicker(interval)
-			defer ticker.Stop()
-			log.Printf("[app] AI batch analysis cron interval: %v", interval)
-			for {
-				select {
-				case <-a.ctx.Done():
-					return
-				case <-ticker.C:
-					if a.isGuest {
-						a.processPendingAIBatched()
-					}
+	// Periodic batched AI analysis — throttled between 2 and 15 minutes to minimize
+	// API usage while keeping the dashboard fresh. Runs regardless of startup key so
+	// a key added at runtime is picked up automatically; no-ops without a key.
+	go func() {
+		interval := cfg.AIAnalysisInterval
+		if interval < 2*time.Minute {
+			interval = 2 * time.Minute
+		}
+		if interval > 15*time.Minute {
+			interval = 15 * time.Minute
+		}
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		log.Printf("[app] AI batch analysis cron interval: %v", interval)
+		for {
+			select {
+			case <-a.ctx.Done():
+				return
+			case <-ticker.C:
+				// Guest / solo / not-yet-authenticated modes analyze locally
+				// (including the background daemon, which has no auth token).
+				if a.isGuest || a.syncEngine == nil || !a.syncEngine.Enabled() {
+					a.processPendingAIBatched()
 				}
 			}
-		}()
-	}
+		}
+	}()
 
 	// 7-day Screenshot Retention Cron Routine (runs hourly to clean up files > 7 days old)
 	go func() {
@@ -679,9 +688,71 @@ func (a *App) UpdateScreenshotInterval(seconds int) (bool, error) {
 
 const aiBatchSize = 10
 
+// aiRetryMinGap is the minimum delay between automatic AI batch attempts.
+// It keeps offline devices from hammering the API while still recovering quickly
+// once connectivity returns.
+const aiRetryMinGap = 2 * time.Minute
+
+// isTransientAIError reports whether an AI batch failure is caused by connectivity
+// problems or temporary rate-limit/server errors instead of a permanent fault.
+// Transient failures must not consume the per-log retry budget: entries stay
+// pending so they are analyzed once the device is back online.
+func isTransientAIError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+		return true
+	}
+	if errors.Is(err, syscall.ECONNREFUSED) || errors.Is(err, syscall.ECONNRESET) ||
+		errors.Is(err, syscall.ENETUNREACH) || errors.Is(err, syscall.EHOSTUNREACH) ||
+		errors.Is(err, syscall.EPIPE) || errors.Is(err, syscall.ETIMEDOUT) {
+		return true
+	}
+	var dnsErr *net.DNSError
+	if errors.As(err, &dnsErr) {
+		return true
+	}
+	var netErr net.Error
+	if errors.As(err, &netErr) && netErr.Timeout() {
+		return true
+	}
+	msg := strings.ToLower(err.Error())
+	for _, needle := range []string{
+		"no such host", "server misbehaving", "network is unreachable",
+		"connection refused", "connection reset", "broken pipe",
+		"i/o timeout", "tls handshake timeout", "dial tcp", "lookup ",
+		"proxyconnect", "temporary failure in name resolution",
+		"gemini error 429", "gemini error 500", "gemini error 502",
+		"gemini error 503", "gemini error 504",
+	} {
+		if strings.Contains(msg, needle) {
+			return true
+		}
+	}
+	return false
+}
+
+// markAIAttempt records the start time of an AI batch run for throttling.
+func (a *App) markAIAttempt() {
+	a.statsMu.Lock()
+	a.lastAIAttempt = time.Now()
+	a.statsMu.Unlock()
+}
+
+// aiAttemptAllowed reports whether enough time has passed since the last AI run.
+func (a *App) aiAttemptAllowed() bool {
+	a.statsMu.Lock()
+	defer a.statsMu.Unlock()
+	return time.Since(a.lastAIAttempt) >= aiRetryMinGap
+}
+
 // notifyPendingAI kicks off a single-flight batch analysis when enough logs are queued.
 func (a *App) notifyPendingAI() {
 	if a.database == nil || a.gemini == nil || !a.gemini.HasKey() {
+		return
+	}
+	if !a.aiAttemptAllowed() {
 		return
 	}
 	count, err := a.database.CountUnanalyzedLogs()
@@ -700,6 +771,7 @@ func (a *App) processPendingAIBatched() {
 		return
 	}
 	defer a.aiMu.Unlock()
+	a.markAIAttempt()
 	_, _ = a.processPendingAI()
 }
 
@@ -707,6 +779,7 @@ func (a *App) processPendingAIBatched() {
 func (a *App) ProcessPendingLogs() (int, error) {
 	a.aiMu.Lock()
 	defer a.aiMu.Unlock()
+	a.markAIAttempt()
 	return a.processPendingAI()
 }
 
@@ -754,6 +827,12 @@ func (a *App) processPendingAI() (int, error) {
 		cancel()
 
 		if batchErr != nil && len(results) == 0 {
+			if isTransientAIError(batchErr) {
+				// Offline / temporary outage / rate limit: leave entries untouched so
+				// they are analyzed on a later run (cron, next collect or reopen).
+				log.Printf("[app] AI batch deferred (transient): %v — %d logs stay pending for retry", batchErr, len(chunk))
+				break
+			}
 			log.Printf("[app] AI batch failed for %d logs: %v — incrementing retry counts", len(chunk), batchErr)
 			for _, entry := range chunk {
 				_ = a.database.IncrementAIRetryCount(entry.ID)
@@ -783,7 +862,7 @@ func (a *App) processPendingAI() (int, error) {
 		}
 
 		for _, entry := range chunk {
-			if !got[entry.ID] {
+			if !got[entry.ID] && !isTransientAIError(batchErr) {
 				_ = a.database.IncrementAIRetryCount(entry.ID)
 			}
 		}

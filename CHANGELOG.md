@@ -139,6 +139,26 @@ Accessibility & UI/UX audit (earlier in this release cycle):
   defensive JSON parsing; clipboard `await`; proper input labels/autocomplete; dead code
   (`App.css`, `MiniTrackerWizard.tsx`, hidden pill) removed.
 
+Offline resilience (desktop):
+
+- AI analysis no longer burns the per-log retry budget while the device is offline.
+  Connectivity failures (DNS, dial, timeouts, connection resets), context cancellation
+  and temporary 429/5xx responses are classified as transient: entries stay pending
+  instead of being permanently marked `Failed` after 10 attempts, and are analyzed
+  automatically as soon as connectivity returns.
+- Automatic AI batch attempts are throttled to one per 2 minutes — an offline device
+  no longer fires a failing batch on every 30-second collection tick.
+- The periodic AI batch cron runs for solo / not-yet-authenticated users and inside
+  the background tracking daemon too (previously guest-only), and starts even when
+  the Gemini key is added at runtime — queued offline captures are picked up without
+  restarting the app.
+- `.env.example` now documents every supported variable (`GEMINI_MODEL`,
+  `AI_ANALYSIS_INTERVAL_SECONDS`, `DATA_DIR`, `DATABASE_URL`, `JWT_SECRET`,
+  `ALLOW_MOCK_OAUTH`, OAuth redirect URIs, Vite overrides, ...). The previously
+  documented `AI_ANALYSIS_INTERVAL` name was never read by the app.
+- README: corrected the `AI_ANALYSIS_INTERVAL_SECONDS` env var name and documented
+  `JWT_SECRET`.
+
 Installer & uninstaller hardening:
 
 - `install.sh`: database backup now runs **after** processes are stopped and includes the

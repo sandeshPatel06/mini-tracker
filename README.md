@@ -110,7 +110,7 @@ export GEMINI_API_KEY="your-gemini-api-key"
 export GEMINI_MODEL="gemma-4-31b-it"
 
 # AI Analysis Interval (Frequency of background AI analysis batch)
-export AI_ANALYSIS_INTERVAL="3h"
+export AI_ANALYSIS_INTERVAL_SECONDS="3h"
 
 # Screenshot Capture Frequency
 export SCREENSHOT_INTERVAL_SECONDS="30"
@@ -125,6 +125,9 @@ export GOOGLE_CLIENT_SECRET="your-google-client-secret"
 export AZURE_CLIENT_ID="your-azure-client-id"
 export AZURE_CLIENT_SECRET="your-azure-client-secret"
 export AZURE_TENANT_ID="common"
+
+# Web Session Signing Key (server mode; sessions reset on restart when unset)
+export JWT_SECRET="a-long-random-secret"
 ```
 
 Configuration file `~/.config/get-hike/config.json` example:

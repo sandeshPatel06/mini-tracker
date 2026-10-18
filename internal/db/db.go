@@ -973,6 +973,32 @@ func (db *DB) GetTodayLogs() ([]LogEntry, error) {
 	return db.GetLogsForDate(today)
 }
 
+// GetLogByID fetches a single log entry by its primary key.
+func (db *DB) GetLogByID(id int64) (*LogEntry, error) {
+	if id <= 0 {
+		return nil, fmt.Errorf("invalid log id %d", id)
+	}
+	placeholder := "$1"
+	if db.dialect == dialect.SQLite {
+		placeholder = "?"
+	}
+	query := fmt.Sprintf(`SELECT id, org_id, user_id, timestamp, image_path, total_keys, unique_keys, entropy_score,
+		total_clicks, app_name, app_category, window_title, ai_category, is_productive, productive_score,
+		ai_confidence, ai_reason, ai_retry_count FROM logs WHERE id = %s`, placeholder)
+
+	var e LogEntry
+	var ts interface{}
+	var productive int
+	if err := db.rawDB.QueryRow(query, id).Scan(&e.ID, &e.OrgID, &e.UserID, &ts, &e.ImagePath, &e.TotalKeys, &e.UniqueKeys,
+		&e.EntropyScore, &e.TotalClicks, &e.AppName, &e.AppCategory, &e.WindowTitle, &e.AICategory, &productive,
+		&e.ProductiveScore, &e.AIConfidence, &e.AIReason, &e.AIRetryCount); err != nil {
+		return nil, err
+	}
+	e.Timestamp = parseFlexibleTime(ts)
+	e.IsProductive = productive == 1 || e.ProductiveScore >= 50
+	return &e, nil
+}
+
 // SaveWorkSessions batch inserts work session summaries using Ent SQL Builder.
 func (db *DB) SaveWorkSessions(sessions []WorkSession) error {
 	for _, s := range sessions {

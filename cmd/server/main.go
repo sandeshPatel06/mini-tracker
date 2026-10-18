@@ -348,6 +348,54 @@ func main() {
 		jsonResp(w, logs)
 	})
 
+	// POST /api/ai/log-result — Persist a client-side (web guest) AI analysis result
+	// so results survive refreshes/new tabs instead of being re-analyzed every load.
+	mux.HandleFunc("/api/ai/log-result", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		userID, orgID, status, errMsg := getAuthContext(r, database)
+		if status != http.StatusOK {
+			jsonError(w, errMsg, status)
+			return
+		}
+
+		var req struct {
+			ID              int64   `json:"id"`
+			Category        string  `json:"category"`
+			AppName         string  `json:"app_name"`
+			AppCategory     string  `json:"app_category"`
+			WindowTitle     string  `json:"window_title"`
+			IsProductive    bool    `json:"is_productive"`
+			ProductiveScore float64 `json:"productive_score"`
+			Confidence      float64 `json:"ai_confidence"`
+			Reason          string  `json:"ai_reason"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.ID <= 0 || req.Category == "" {
+			http.Error(w, "Invalid analysis result", http.StatusBadRequest)
+			return
+		}
+
+		entry, err := database.GetLogByID(req.ID)
+		if err != nil || entry == nil {
+			http.Error(w, "Log not found", http.StatusNotFound)
+			return
+		}
+		// Authenticated callers may only persist results for their own logs;
+		// the unauthenticated fallback is already restricted to loopback.
+		if userID > 0 && (entry.UserID != userID || (orgID > 0 && entry.OrgID != orgID)) {
+			http.Error(w, "Forbidden", http.StatusForbidden)
+			return
+		}
+
+		if err := database.UpdateLogAnalysis(req.ID, req.Category, req.AppName, req.AppCategory, req.WindowTitle, 0, "", req.IsProductive, req.ProductiveScore, req.Confidence, req.Reason); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		jsonResp(w, map[string]interface{}{"success": true})
+	})
+
 	// GET /api/stats?date=YYYY-MM-DD&start_date=...&end_date=...&user_id=...
 	mux.HandleFunc("/api/stats", func(w http.ResponseWriter, r *http.Request) {
 		userID, orgID, status, errMsg := getAuthContext(r, database)

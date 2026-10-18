@@ -22,6 +22,10 @@ and this project aims to follow [Semantic Versioning](https://semver.org/spec/v2
     safe no-op fallback elsewhere.
   - Unit tests for PID helpers + verified smoke test (start, duplicate start rejected,
     SIGTERM cleans up PID file).
+- **Web guest AI results persist server-side**: client-side Gemini analysis results are
+  now saved via `POST /api/ai/log-result` (authenticated users or loopback guest), so
+  refreshes and new tabs reuse stored results instead of re-analyzing the same captures;
+  the in-memory cache remains a fallback.
 - **MIT `LICENSE` file** (Copyright © 2026 REAK INFOTECH LLP) — the README previously mentioned
   MIT without shipping the license text.
 - **Developer Menu (desktop app)**: 7 quick taps (≤2 s apart) on the sidebar/mobile logo unlock

@@ -226,6 +226,29 @@ Base every field strictly on the provided screenshot and metadata. Do NOT invent
       const patch = patches.get(log.id);
       return patch ? { ...log, ...patch } : log;
     }));
+
+    // Persist to the backend DB in web mode so a refresh or a new tab does not
+    // re-analyze the same captures (desktop persists via the Go-side pipeline).
+    if (!window.go?.main?.App) {
+      patches.forEach((patch, id) => {
+        if (!patch.ai_category) return;
+        void apiFetch('/api/ai/log-result', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            id,
+            category: patch.ai_category,
+            app_name: patch.app_name || '',
+            app_category: patch.app_category || '',
+            window_title: patch.window_title || '',
+            is_productive: !!patch.is_productive,
+            productive_score: patch.productive_score ?? 0,
+            ai_confidence: patch.ai_confidence ?? 0,
+            ai_reason: patch.ai_reason || '',
+          }),
+        }).catch(() => null);
+      });
+    }
     return patches.size;
   };
 

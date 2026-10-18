@@ -6,6 +6,7 @@ import Timeline from './pages/Timeline';
 import Analytics from './pages/Analytics';
 import { OrganizationPage } from './pages/Organization';
 import { AcceptInvitePage } from './pages/AcceptInvite';
+import type { AcceptInviteResult } from './pages/AcceptInvite';
 import { AuthPage } from './pages/Auth';
 import { SettingsPage } from './pages/Settings';
 import { Icon, IconName } from './components/Icon';
@@ -907,6 +908,26 @@ export default function App() {
     }
   }, [page]);
 
+  // Signs the user in automatically after accepting an email invitation: the
+  // server mints a JWT session with the accept response, so no manual login is needed.
+  const completeInviteSignIn = (result: AcceptInviteResult) => {
+    if (result.user) {
+      localStorage.setItem('mini_auth_user', JSON.stringify(result.user));
+    }
+    if (result.org) {
+      localStorage.setItem('mini_auth_org', JSON.stringify(result.org));
+    }
+    if (result.token) {
+      localStorage.setItem('mini_jwt_token', result.token);
+      syncBackendAuthSession(result.token, false);
+    }
+    localStorage.removeItem('mini_guest_mode');
+    setIsGuestMode(false);
+    setCurrentUser(result.user || null);
+    setAuthNotice(null);
+    navigateTo('dashboard');
+  };
+
   // Show Auth Page if user is not authenticated and has not chosen guest mode
   if (authChecked && !currentUser && !isGuestMode) {
     if (window.location.hash.includes('accept-invite')) {
@@ -915,7 +936,7 @@ export default function App() {
           <div className="page-container">
             <AcceptInvitePage
               token={inviteToken}
-              onSuccess={() => navigateTo('dashboard')}
+              onSuccess={completeInviteSignIn}
             />
           </div>
         </main>
@@ -1263,7 +1284,7 @@ export default function App() {
           {page === 'accept-invite' && (
             <AcceptInvitePage
               token={inviteToken}
-              onSuccess={() => navigateTo('dashboard')}
+              onSuccess={completeInviteSignIn}
             />
           )}
         </div>

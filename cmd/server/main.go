@@ -1683,9 +1683,13 @@ func main() {
 			return
 		}
 
+		// Sign the new member in immediately so no separate login step is needed.
+		token := setJWTTokenCookie(w, user)
+
 		org, _ := database.GetOrganization(user.OrgID)
 		jsonResp(w, map[string]interface{}{
 			"success": true,
+			"token":   token,
 			"user":    user,
 			"org":     org,
 		})

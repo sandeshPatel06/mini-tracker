@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { apiFetch } from '../api';
+import { User, Organization } from '../types';
 
 const parseJsonSafe = async (res: Response): Promise<any> => {
   const text = await res.text();
@@ -18,9 +19,15 @@ const friendlyError = (msg: string): string => {
   return msg;
 };
 
+export interface AcceptInviteResult {
+  user?: User | null;
+  org?: Organization | null;
+  token?: string;
+}
+
 interface AcceptInviteProps {
   token: string;
-  onSuccess: () => void;
+  onSuccess: (result: AcceptInviteResult) => void;
 }
 
 export const AcceptInvitePage: React.FC<AcceptInviteProps> = ({ token, onSuccess }) => {
@@ -78,7 +85,7 @@ export const AcceptInvitePage: React.FC<AcceptInviteProps> = ({ token, onSuccess
         throw new Error(data.message || data.error || 'Failed to accept invitation');
       }
 
-      onSuccess();
+      onSuccess({ user: data.user, org: data.org, token: data.token });
     } catch (err: any) {
       setError(friendlyError(err.message || 'Error creating user account'));
     } finally {

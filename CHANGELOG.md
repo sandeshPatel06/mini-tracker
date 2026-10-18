@@ -139,6 +139,25 @@ Accessibility & UI/UX audit (earlier in this release cycle):
   defensive JSON parsing; clipboard `await`; proper input labels/autocomplete; dead code
   (`App.css`, `MiniTrackerWizard.tsx`, hidden pill) removed.
 
+Installer & uninstaller hardening:
+
+- `install.sh`: database backup now runs **after** processes are stopped and includes the
+  SQLite `-wal`/`-shm` sidecars (or uses `sqlite3 .backup` when available), so updates can
+  no longer capture an inconsistent DB. The background daemon is stopped via its PID file
+  (TERM → wait → KILL) with a guarded `pgrep` fallback that excludes installer processes.
+- `install.sh`: works without `sudo`/`curl`/`getent` (wget fallback, `$HOME` fallback,
+  writable-log fallback), downloads to a `.part` file before replacing the binary, supports
+  `--help` / `--` / `LOCAL_BUILD_PATH` / `DOWNLOAD_URL`, and no longer breaks under `set -u`
+  (missing positional args, `$0` piped from `curl | bash`). Desktop integration fixes: icon
+  cache updated in the hicolor root (previous path was invalid), `.desktop` files installed
+  `0644`, udev rule resolved from the script directory, legacy `get-Hike (*.desktop`
+  launchers cleaned up.
+- `uninstall.sh`: now removes system-wide installs (`/opt/get-hike`, `/usr/local/bin`,
+  `/usr/share/applications|icons|pixmaps`, udev rule + `udevadm reload`) with sudo detection,
+  stops the background daemon via PID file, uses exact-name `pkill -x` instead of an
+  over-broad `pkill -9 -f` that could kill unrelated processes, removes the Desktop shortcut
+  and user launchers, and supports `--keep-data` (preserve DB/logs/config) and `--help`.
+
 ---
 
 ## Notes

@@ -54,6 +54,10 @@ export function GetStats(arg1) {
   return window['go']['main']['App']['GetStats'](arg1);
 }
 
+export function GetThumbnailBase64(arg1) {
+  return window['go']['main']['App']['GetThumbnailBase64'](arg1);
+}
+
 export function GetSyncStatus() {
   return window['go']['main']['App']['GetSyncStatus']();
 }

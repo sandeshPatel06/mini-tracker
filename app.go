@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"encoding/base64"
 	"errors"
 	"fmt"
@@ -17,6 +18,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -63,6 +65,10 @@ type App struct {
 
 	// lastAIAttempt throttles automatic AI batch runs (guarded by statsMu).
 	lastAIAttempt time.Time
+
+	// shuttingDown flips true once shutdown begins so collection loops skip
+	// racing inserts against the closing DB.
+	shuttingDown atomic.Bool
 }
 
 // NewApp creates a new App application struct.
@@ -300,7 +306,11 @@ func (a *App) collect() {
 	winRes, err := tracker.GetActiveWindowTitle()
 	windowTitle := ""
 	if err != nil {
-		log.Printf("[app] window title error: %v", err)
+		// "no active window" is an expected idle state (lock screen / desktop shell)
+		// — record it silently instead of spamming the error log.
+		if !errors.Is(err, tracker.ErrNoActiveWindow) {
+			log.Printf("[app] window title error: %v", err)
+		}
 	} else if winRes != nil {
 		windowTitle = winRes.Title
 	}
@@ -328,12 +338,16 @@ func (a *App) collect() {
 		SyncStatus:   syncStatus,
 	}
 
-	if a.database == nil {
+	if a.database == nil || a.shuttingDown.Load() {
 		return
 	}
 
 	if _, err := a.database.InsertLog(entry); err != nil {
-		log.Printf("[app] insert log error: %v", err)
+		// A close-during-insert race at shutdown is expected and harmless;
+		// only surface genuinely unexpected failures.
+		if !errors.Is(err, sql.ErrConnDone) && !strings.Contains(err.Error(), "database is closed") {
+			log.Printf("[app] insert log error: %v", err)
+		}
 		return
 	}
 
@@ -411,6 +425,10 @@ func (a *App) SetOrgGeminiKey(orgID int64, apiKey string) (bool, error) {
 
 // shutdown is called when the app terminates.
 func (a *App) shutdown(_ context.Context) {
+	// Mark shutdown so in-flight collection loops disable racing DB writes
+	// before the database handle is closed below.
+	a.shuttingDown.Store(true)
+
 	// If tracking is still active, hand it off to a detached background process
 	// so capture continues after this app exits.
 	if !a.headless && a.cfg != nil {
@@ -645,8 +663,13 @@ func (a *App) UpdateGeminiAPIKey(apiKey string) (bool, error) {
 	return true, nil
 }
 
-// UpdateAIModel updates the active model name in Gemini client.
+// UpdateAIModel updates the active model name in Gemini client. No-op (without
+// logging or persisting) when the requested model is already active.
 func (a *App) UpdateAIModel(modelName string) (bool, error) {
+	if a.gemini != nil && a.cfg != nil &&
+		a.gemini.GetModel() == modelName && a.cfg.GeminiModel == modelName {
+		return true, nil
+	}
 	if a.gemini != nil {
 		a.gemini.SetModel(modelName)
 	}
@@ -699,12 +722,16 @@ func (a *App) GetImageBase64(imagePath string) (string, error) {
 	return fmt.Sprintf("data:%s;base64,%s", mimeType, base64.StdEncoding.EncodeToString(data)), nil
 }
 
-// UpdateScreenshotInterval updates and persists the screenshot interval, then resets the collection ticker.
+// UpdateScreenshotInterval updates and persists the screenshot interval, then resets
+// the collection ticker. No-op when the requested interval is already active.
 func (a *App) UpdateScreenshotInterval(seconds int) (bool, error) {
 	if seconds < 5 {
 		seconds = 5
 	}
 	dur := time.Duration(seconds) * time.Second
+	if a.cfg != nil && a.cfg.ScreenshotInterval == dur {
+		return true, nil
+	}
 	if a.cfg != nil {
 		a.cfg.ScreenshotInterval = dur
 		if err := config.Save(a.cfg); err != nil {
@@ -857,7 +884,9 @@ func (a *App) processPendingAI() (int, error) {
 			byID[entry.ID] = entry
 		}
 
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+		// 3 minutes gives one stalling model enough room to time out and still
+		// leaves budget for the failover candidate to complete.
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 		results, batchErr := a.gemini.AnalyzeBatch(ctx, items)
 		cancel()
 

@@ -1054,21 +1054,28 @@ html, body, #root {
 }
 
 .modal-close {
-  background: transparent;
-  border: none;
-  color: var(--text-muted);
+  background: color-mix(in srgb, var(--text-primary) 8%, transparent);
+  border: 1px solid var(--border-medium);
+  color: var(--text-secondary);
   font-size: 18px;
   cursor: pointer;
   padding: 4px;
   min-width: 32px;
   min-height: 32px;
   border-radius: var(--radius-sm);
-  transition: color var(--transition);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  z-index: 5;
+  transition: color var(--transition), background var(--transition), border-color var(--transition);
 }
 
 .modal-close:hover {
   color: var(--text-primary);
-}
+  background: color-mix(in srgb, var(--text-primary) 14%, transparent);
+  border-color: var(--border-medium);
+ }
 
 .modal-body {
   padding: 22px;

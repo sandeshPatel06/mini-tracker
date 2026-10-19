@@ -1,12 +1,17 @@
 package tracker
 
 import (
+	"errors"
 	"fmt"
 	"log"
 
 	"github.com/jezek/xgb"
 	"github.com/jezek/xgb/xproto"
 )
+
+// ErrNoActiveWindow is returned when X11 reports no focused window (lock screen,
+// desktop shell or a logout session). Callers treat this as an expected idle state.
+var ErrNoActiveWindow = errors.New("no active window")
 
 // ActiveWindowResult holds information about the currently active window.
 type ActiveWindowResult struct {
@@ -48,7 +53,7 @@ func GetActiveWindowTitle() (*ActiveWindowResult, error) {
 
 	activeWinID := xproto.Window(xgb.Get32(activeWinReply.Value))
 	if activeWinID == 0 {
-		return nil, fmt.Errorf("no active window")
+		return nil, ErrNoActiveWindow
 	}
 
 	// Try to get _NET_WM_NAME (UTF8 string)

@@ -29,6 +29,11 @@ export function SettingsPage({ theme = 'auto', onThemeChange, syncIntervalSecond
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
 
   const fetchUsageSummary = useCallback(async () => {
+    // Desktop runs standalone (no backend): rely on local usage counters only.
+    if ((window as any).go?.main?.App) {
+      setUsageSummary(null);
+      return;
+    }
     try {
       const res = await apiFetch('/api/user/usage');
       if (res.ok) {

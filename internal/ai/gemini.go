@@ -367,6 +367,7 @@ type BatchAnalysisItem struct {
 	WindowTitle  string
 	EntropyScore float64
 	ImagePath    string
+	TotalKeys    int
 	TotalClicks  int
 	UserTask     string
 	AppName      string
@@ -429,6 +430,52 @@ func (g *GeminiClient) AnalyzeBatch(ctx context.Context, items []BatchAnalysisIt
 // analyzeChunk builds a compact prompt (plus thumbnails) for one group of items,
 // posts it with retry/backoff and model failover, and maps the parsed results back
 // to the input items. Items without a model result are omitted so callers can retry them.
+// maxIdleStreakGap caps how long a quiet same-window stretch can keep reusing a
+// single screenshot: beyond this gap a fresh screenshot is always sent.
+const maxIdleStreakGap = 15 * time.Minute
+
+// buildPromptItems maps batch items to prompt items, suppressing duplicate
+// screenshots for quiet same-window stretches. Images are by far the largest
+// token cost in a batch request and consecutive captures of an unchanged,
+// unattended window look identical, so only the newest screenshot of each
+// stretch is sent — later items flag img=false and the prompt instructs the
+// model to reuse the previous image. A window change, any keystroke/mouse
+// activity, or an oversized time gap always ends the stretch with a fresh
+// visual check.
+func buildPromptItems(items []BatchAnalysisItem) []PromptItem {
+	var lastKept *BatchAnalysisItem
+	promptItems := make([]PromptItem, len(items))
+	for i, item := range items {
+		hasImage := item.ImagePath != ""
+		suppressed := false
+		if hasImage && lastKept != nil &&
+			item.AppName == lastKept.AppName &&
+			item.WindowTitle == lastKept.WindowTitle &&
+			item.Timestamp.Sub(lastKept.Timestamp) <= maxIdleStreakGap &&
+			item.TotalKeys == 0 && item.TotalClicks == 0 {
+			hasImage = false
+			suppressed = true
+		}
+		if hasImage {
+			lastKept = &items[i]
+		}
+		if suppressed && os.Getenv("MINI_AI_SUPPRESS_DEBUG") != "" {
+			log.Printf("[ai/gemini] suppressed duplicate idle screenshot for item %d (%s)", item.LogID, item.WindowTitle)
+		}
+		promptItems[i] = PromptItem{
+			LogID:        item.LogID,
+			WindowTitle:  item.WindowTitle,
+			EntropyScore: item.EntropyScore,
+			TotalClicks:  item.TotalClicks,
+			AppName:      item.AppName,
+			Timestamp:    item.Timestamp,
+			ImagePath:    item.ImagePath,
+			HasImage:     hasImage,
+		}
+	}
+	return promptItems
+}
+
 func (g *GeminiClient) analyzeChunk(ctx context.Context, items []BatchAnalysisItem, sessionEvents []SessionEvent) ([]BatchAnalysisResult, error) {
 	activeTask := ""
 	for _, item := range items {
@@ -438,26 +485,22 @@ func (g *GeminiClient) analyzeChunk(ctx context.Context, items []BatchAnalysisIt
 		}
 	}
 
-	promptItems := make([]PromptItem, len(items))
-	for i, item := range items {
-		promptItems[i] = PromptItem{
-			LogID:        item.LogID,
-			WindowTitle:  item.WindowTitle,
-			EntropyScore: item.EntropyScore,
-			TotalClicks:  item.TotalClicks,
-			AppName:      item.AppName,
-			Timestamp:    item.Timestamp,
-		}
-	}
+	// Token savings: images are by far the largest cost in a batch request.
+	// Consecutive captures of the same window with no input activity look
+	// identical, so only the newest screenshot of each quiet stretch is sent —
+	// later items flag img=false and the prompt tells the model to reuse the
+	// previous image. Nothing is suppressed when the window changes or input
+	// happens, so real changes always get a fresh visual check.
+	promptItems := buildPromptItems(items)
 
 	parts := []map[string]interface{}{
 		{"text": BuildAnalysisPrompt(promptItems, activeTask, sessionEvents...)},
 	}
 
 	dataDir := g.GetDataDir()
-	for i, item := range items {
-		imgPath := item.ImagePath
-		if imgPath == "" {
+	for i := range promptItems {
+		imgPath := promptItems[i].ImagePath
+		if !promptItems[i].HasImage || imgPath == "" {
 			continue
 		}
 		if dataDir != "" {

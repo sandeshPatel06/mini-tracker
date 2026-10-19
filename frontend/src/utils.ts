@@ -92,5 +92,52 @@ export function formatCompactNumber(n: number): string {
   return new Intl.NumberFormat(undefined, { notation: 'compact', maximumFractionDigits: 1 }).format(n);
 }
 
+// Day-scoped AI usage counter. Stored as { day, count } so the number the user
+// sees always means "requests burned today" and freshly resets at midnight,
+// instead of a lifetime total that never goes down.
+const USAGE_META_KEY = 'mini_ai_usage_meta';
+const LEGACY_USAGE_KEY = 'mini_ai_usage_count';
+
+function readUsageMeta(): { day: string; count: number } | null {
+  try {
+    const raw = localStorage.getItem(USAGE_META_KEY);
+    if (!raw) return null;
+    const meta = JSON.parse(raw);
+    if (meta && meta.day === localISODate() && typeof meta.count === 'number') {
+      return meta;
+    }
+  } catch {
+    // Corrupt entry treated like an absent one.
+  }
+  return null;
+}
+
+export function getTodayUsageCount(): number {
+  const meta = readUsageMeta();
+  return meta ? meta.count : 0;
+}
+
+export function bumpUsageCount(n: number = 1): number {
+  const count = getTodayUsageCount() + Math.max(0, Math.round(n));
+  try {
+    localStorage.setItem(USAGE_META_KEY, JSON.stringify({ day: localISODate(), count }));
+    localStorage.setItem(LEGACY_USAGE_KEY, count.toString());
+  } catch {
+    // Storage may be unavailable (private mode) — still broadcast below.
+  }
+  window.dispatchEvent(new CustomEvent('ai_usage_updated', { detail: count }));
+  return count;
+}
+
+export function resetUsageCount(): void {
+  try {
+    localStorage.removeItem(USAGE_META_KEY);
+    localStorage.setItem(LEGACY_USAGE_KEY, '0');
+  } catch {
+    // Ignore storage failures.
+  }
+  window.dispatchEvent(new CustomEvent('ai_usage_updated', { detail: 0 }));
+}
+
 export const FOCUS_GOOD = 70;
 export const FOCUS_OK = 50;

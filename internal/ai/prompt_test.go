@@ -48,9 +48,9 @@ func TestSanitizeTitleUnicodeSafe(t *testing.T) {
 func TestBuildAnalysisPrompt(t *testing.T) {
 	base := time.Date(2026, 10, 18, 9, 5, 0, 0, time.UTC)
 	items := []PromptItem{
-		{LogID: 1, WindowTitle: "main.go - Visual Studio Code", EntropyScore: 12.34, TotalClicks: 25, AppName: "VS Code", Timestamp: base},
-		{LogID: 2, WindowTitle: "user@example.com - Inbox", EntropyScore: 4.06, TotalClicks: 3, AppName: "Mail", Timestamp: base.Add(5 * time.Minute)},
-		{LogID: 3, WindowTitle: "See https://news.example.com/x now", EntropyScore: 0, TotalClicks: 1, AppName: "Chrome", Timestamp: base.Add(10 * time.Minute)},
+		{LogID: 1, WindowTitle: "main.go - Visual Studio Code", EntropyScore: 12.34, TotalClicks: 25, AppName: "VS Code", Timestamp: base, HasImage: true},
+		{LogID: 2, WindowTitle: "user@example.com - Inbox", EntropyScore: 4.06, TotalClicks: 3, AppName: "Mail", Timestamp: base.Add(5 * time.Minute), HasImage: true},
+		{LogID: 3, WindowTitle: "See https://news.example.com/x now", EntropyScore: 0, TotalClicks: 1, AppName: "Chrome", Timestamp: base.Add(10 * time.Minute), HasImage: true},
 	}
 
 	got := BuildAnalysisPrompt(items, "Finish the quarterly report")
@@ -113,6 +113,68 @@ func TestBuildAnalysisPromptInstructionWordLimit(t *testing.T) {
 		if words := len(strings.Fields(prompt[:idx])); words > 180 {
 			t.Errorf("instruction section has %d words, want <= 180 (task %q)", words, task)
 		}
+	}
+}
+
+func TestBuildPromptItemsSuppressesIdleScreenshots(t *testing.T) {
+	base := time.Date(2026, 10, 19, 10, 0, 0, 0, time.UTC)
+	mk := func(mins int, title string, keys, clicks int, img bool) BatchAnalysisItem {
+		it := BatchAnalysisItem{
+			LogID:       int64(mins),
+			WindowTitle: title,
+			AppName:     "Code",
+			TotalKeys:   keys,
+			TotalClicks: clicks,
+			Timestamp:   base.Add(time.Duration(mins) * time.Minute),
+		}
+		if img {
+			it.ImagePath = "/tmp/x.webp"
+		}
+		return it
+	}
+	items := []BatchAnalysisItem{
+		mk(0, "main.go - VS Code", 3, 0, true),   // image kept
+		mk(1, "main.go - VS Code", 0, 0, true),   // idle, same window → suppressed
+		mk(2, "main.go - VS Code", 0, 0, true),   // still idle → suppressed
+		mk(3, "main.go - VS Code", 12, 0, true),  // keystrokes → fresh image
+		mk(4, "Slack - #general", 0, 2, true),    // window change → fresh image
+		mk(5, "Slack - #general", 0, 0, true),    // idle, same window → suppressed
+		mk(20, "Slack - #general", 0, 0, true),   // 15min gap exceeded → fresh
+		mk(21, "main.go - VS Code", 0, 0, false), // no image at all (stays imageless)
+	}
+
+	got := buildPromptItems(items)
+	if !got[0].HasImage {
+		t.Errorf("item 0 should keep its image")
+	}
+	for i := 1; i <= 2; i++ {
+		if got[i].HasImage {
+			t.Errorf("item %d should have a suppressed image (img=false)", i)
+		}
+	}
+	if !got[3].HasImage {
+		t.Errorf("item 3 (activity) should keep a fresh image")
+	}
+	if !got[4].HasImage {
+		t.Errorf("item 4 (window change) should keep a fresh image")
+	}
+	if got[5].HasImage {
+		t.Errorf("item 5 should be suppressed (idle same window)")
+	}
+	if !got[6].HasImage {
+		t.Errorf("item 6 (gap > %v) should keep a fresh image", maxIdleStreakGap)
+	}
+	if got[7].HasImage {
+		t.Errorf("item 7 has no image file and must stay imageless")
+	}
+
+	// Prompt flags must mirror HasImage exactly.
+	prompt := BuildAnalysisPrompt(
+		[]PromptItem{{WindowTitle: "x", Timestamp: base, HasImage: false}},
+		"",
+	)
+	if !strings.Contains(prompt, `"img":false`) {
+		t.Errorf("prompt missing img:false flag for suppressed item")
 	}
 }
 

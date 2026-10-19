@@ -18,6 +18,8 @@ type PromptItem struct {
 	TotalClicks  int
 	AppName      string
 	Timestamp    time.Time
+	ImagePath    string
+	HasImage     bool
 }
 
 // SessionEvent is one observed application lifecycle event ("open", "close",
@@ -106,7 +108,7 @@ func BuildAnalysisPrompt(items []PromptItem, activeTask string, sessionEvents ..
 			C:   item.TotalClicks,
 			A:   item.AppName,
 			TS:  item.Timestamp.Format("15:04"),
-			Img: true,
+			Img: item.HasImage,
 		})
 	}
 	itemsJSON, err := json.Marshal(encoded)
@@ -123,7 +125,7 @@ func BuildAnalysisPrompt(items []PromptItem, activeTask string, sessionEvents ..
 	b.WriteString("You are a desktop activity analyst. Classify and score each item.\n\n")
 	fmt.Fprintf(&b, "JSON OUTPUT CONTRACT (STRICT):\n1. Exactly %d objects, one per item, exact input order.\n2. First char '[' and last char ']'.\n3. Compact single-line JSON. No markdown, fences, prose, comments, trailing commas, or text outside the array.\n4. Never stop mid-array; shorten reasons instead.\n5. Keys: \"i\" (input index), \"cat\" (one of: %s), \"a\", \"ac\", \"p\" 0-100, \"c\" 0.0-1.0, \"r\" max 10 words.\n\n", len(items), strings.Join(AnalysisCategories, ", "))
 	b.WriteString("SCORING RUBRIC: on-task 70-100; related docs/research 45-70; neutral browsing/messaging 25-50; leisure/idle 0-25. Entropy e>20 adds 10; e<8 subtracts 10; clicks c>20 adds 5. Never default to 100.\n\n")
-	b.WriteString("SCREENSHOTS: each screenshot follows its item as \"IMAGE <i>:\"; use image and telemetry together.\n\n")
+	b.WriteString("SCREENSHOTS: each img=true item is followed by \"IMAGE <i>\" in input order. img=false = window unchanged since the previous item — reuse its screenshot; never claim new visual details for it.\n\n")
 	b.WriteString(taskLine)
 
 	if len(sessionEvents) > 0 {

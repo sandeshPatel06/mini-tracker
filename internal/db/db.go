@@ -62,6 +62,16 @@ type WorkSession struct {
 	CreatedAt     time.Time `json:"created_at"`
 }
 
+// AppEvent is one application lifecycle observation ("open", "close" or "focus")
+// captured from the desktop session, used for richer AI analytics context.
+type AppEvent struct {
+	ID          int64     `json:"id"`
+	Timestamp   time.Time `json:"timestamp"`
+	Kind        string    `json:"kind"`
+	AppName     string    `json:"app_name"`
+	WindowTitle string    `json:"window_title"`
+}
+
 // ProductivityStats holds aggregate stats for a day.
 type ProductivityStats struct {
 	Date            string  `json:"date"`
@@ -365,6 +375,14 @@ func (db *DB) migrate() error {
 		);`,
 		`CREATE INDEX IF NOT EXISTS idx_api_usage_org ON api_usage_logs(org_id);`,
 		`CREATE INDEX IF NOT EXISTS idx_api_usage_user ON api_usage_logs(user_id);`,
+		`CREATE TABLE IF NOT EXISTS app_events (
+			id           SERIAL PRIMARY KEY,
+			timestamp    TIMESTAMPTZ NOT NULL,
+			kind         TEXT NOT NULL,
+			app_name     TEXT DEFAULT '',
+			window_title TEXT DEFAULT ''
+		);`,
+		`CREATE INDEX IF NOT EXISTS idx_app_events_time ON app_events(timestamp);`,
 	}
 
 	if db.dialect == dialect.SQLite {
@@ -458,6 +476,14 @@ func (db *DB) migrate() error {
 			);`,
 			`CREATE INDEX IF NOT EXISTS idx_api_usage_org ON api_usage_logs(org_id);`,
 			`CREATE INDEX IF NOT EXISTS idx_api_usage_user ON api_usage_logs(user_id);`,
+			`CREATE TABLE IF NOT EXISTS app_events (
+				id           INTEGER PRIMARY KEY AUTOINCREMENT,
+				timestamp    DATETIME NOT NULL,
+				kind         TEXT NOT NULL CHECK(kind IN ('open', 'close', 'focus')),
+				app_name     TEXT DEFAULT '',
+				window_title TEXT DEFAULT ''
+			);`,
+			`CREATE INDEX IF NOT EXISTS idx_app_events_time ON app_events(timestamp);`,
 		}
 	}
 
@@ -720,6 +746,79 @@ func (db *DB) GetPendingInvitations(orgID int64) ([]Invitation, error) {
 		invs = append(invs, inv)
 	}
 	return invs, rows.Err()
+}
+
+// InsertAppEvent stores one application lifecycle event (best-effort — callers
+// must not fail tracking because an event write failed).
+func (db *DB) InsertAppEvent(e *AppEvent) (int64, error) {
+	builder := entsql.Dialect(db.dialect).Insert("app_events").
+		Columns("timestamp", "kind", "app_name", "window_title").
+		Values(e.Timestamp.UTC().Format(time.RFC3339), e.Kind, e.AppName, e.WindowTitle)
+
+	if db.dialect == dialect.Postgres {
+		builder.Returning("id")
+	}
+	query, args := builder.Query()
+
+	if db.dialect == dialect.Postgres {
+		var id int64
+		err := db.rawDB.QueryRow(query, args...).Scan(&id)
+		return id, err
+	}
+
+	res, err := db.rawDB.Exec(query, args...)
+	if err != nil {
+		return 0, err
+	}
+	return res.LastInsertId()
+}
+
+// GetRecentAppEvents returns up to `limit` app lifecycle events that happened at
+// or after `since`, oldest first — ready to embed as AI session context.
+func (db *DB) GetRecentAppEvents(since time.Time, limit int) ([]AppEvent, error) {
+	if limit <= 0 {
+		limit = 12
+	}
+	builder := entsql.Dialect(db.dialect).Select("id", "timestamp", "kind", "app_name", "window_title").
+		From(entsql.Table("app_events")).
+		Where(entsql.GTE("timestamp", since.UTC().Format(time.RFC3339))).
+		OrderBy(entsql.Desc("timestamp")).Limit(limit)
+
+	query, args := builder.Query()
+	rows, err := db.rawDB.Query(query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var events []AppEvent
+	for rows.Next() {
+		var ev AppEvent
+		var ts interface{}
+		if err := rows.Scan(&ev.ID, &ts, &ev.Kind, &ev.AppName, &ev.WindowTitle); err != nil {
+			continue
+		}
+		ev.Timestamp = parseFlexibleTime(ts)
+		events = append(events, ev)
+	}
+
+	// Query was newest-first for the LIMIT window; present chronologically.
+	for i, j := 0, len(events)-1; i < j; i, j = i+1, j-1 {
+		events[i], events[j] = events[j], events[i]
+	}
+	return events, rows.Err()
+}
+
+// DeleteOldAppEvents removes app lifecycle events older than the cutoff so the
+// table stays small on long-running machines.
+func (db *DB) DeleteOldAppEvents(cutoff time.Time) (int64, error) {
+	builder := entsql.Dialect(db.dialect).Delete("app_events").Where(entsql.LT("timestamp", cutoff.UTC().Format(time.RFC3339)))
+	query, args := builder.Query()
+	res, err := db.rawDB.Exec(query, args...)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
 }
 
 // InsertLog stores a new log entry using Ent SQL Builder.

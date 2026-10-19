@@ -405,14 +405,31 @@ export default function App() {
           // Stale cached user: clear it so the auth page renders instead of the app shell
           localStorage.removeItem('mini_auth_user');
           setCurrentUser(null);
+          // First run (no stored session): the login screen shows as-is —
+          // the user decides between Sign In and Continue as Guest.
           if (localStorage.getItem('mini_guest_mode') === 'true') {
             setIsGuestMode(true);
           }
         }
       })
       .catch(() => {
+        // Server unreachable / offline:
         if (localStorage.getItem('mini_guest_mode') === 'true') {
           setIsGuestMode(true);
+          return;
+        }
+        // Already signed in before: restore the locally stored session so the
+        // login screen is skipped while the backend is not reachable.
+        try {
+          const cached = localStorage.getItem('mini_auth_user');
+          if (cached) {
+            const parsed = JSON.parse(cached);
+            if (parsed?.id) {
+              setCurrentUser(parsed);
+            }
+          }
+        } catch {
+          // Ignore malformed cached user JSON
         }
       })
       .finally(() => {

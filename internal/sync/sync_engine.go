@@ -212,9 +212,15 @@ func (s *SyncEngine) PullAnalytics(ctx context.Context) (int, error) {
 	return syncedCount, nil
 }
 
-// TriggerSyncNow performs an immediate manual Push + Pull cycle (e.g. via UI button).
+// TriggerSyncNow performs an immediate manual Push + Pull cycle (e.g. via UI button),
+// or local/background retry. When no auth token is set (local guest mode) the
+// desktop app runs fully standalone, so the round-trip is skipped entirely.
 func (s *SyncEngine) TriggerSyncNow(ctx context.Context) error {
 	s.mutex.Lock()
+	if s.authToken == "" {
+		s.mutex.Unlock()
+		return nil
+	}
 	if s.isSyncing {
 		s.mutex.Unlock()
 		return nil // Already syncing

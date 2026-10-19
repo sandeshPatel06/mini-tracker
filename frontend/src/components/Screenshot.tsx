@@ -291,6 +291,20 @@ export function ImageModal({ imagePath, onClose }: ImageModalProps) {
       title={titleNode}
       actions={zoomControls}
       maxWidth={1060}
+      footer={
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, width: '100%' }}>
+          <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+            Press Esc to close · zoom via header buttons or +/-
+          </span>
+          <button
+            type="button"
+            onClick={onClose}
+            className="btn btn-primary btn-sm"
+          >
+            Close Inspection
+          </button>
+        </div>
+      }
     >
       <div style={{ overflow: 'auto', maxHeight: '78vh', borderRadius: 'var(--radius-md)', background: 'var(--bg-base)', padding: 12, display: 'flex', alignItems: 'center' }}>
         {loading ? (

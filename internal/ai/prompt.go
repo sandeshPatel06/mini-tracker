@@ -153,15 +153,38 @@ type AnalysisResultItem struct {
 }
 
 // ParseAnalysisJSON extracts the JSON array (fences/truncation handled) and unmarshals;
-// error if none.
+// error if none. When the whole array fails to parse (e.g. truncated output), valid
+// complete objects are salvaged individually so partial results are not discarded.
 func ParseAnalysisJSON(raw string, expectedItems int) ([]AnalysisResultItem, error) {
 	arrayStr := sanitizeJSONString(extractJSONArrayString(raw))
 	var results []AnalysisResultItem
 	if err := json.Unmarshal([]byte(arrayStr), &results); err != nil {
-		return nil, fmt.Errorf("parse analysis JSON (expected %d items, got %q): %w", expectedItems, truncateString(arrayStr, 120), err)
+		salvaged := salvageAnalysisObjects(arrayStr)
+		if len(salvaged) == 0 {
+			return nil, fmt.Errorf("parse analysis JSON (expected %d items, got %q): %w", expectedItems, truncateString(arrayStr, 120), err)
+		}
+		results = salvaged
 	}
 	if len(results) == 0 {
 		return nil, fmt.Errorf("parse analysis JSON: empty array (expected %d items)", expectedItems)
 	}
 	return results, nil
+}
+
+// salvageAnalysisObjects decodes as many complete analysis objects as possible from
+// a possibly truncated array, stopping at the first malformed object boundary.
+func salvageAnalysisObjects(raw string) []AnalysisResultItem {
+	if !strings.Contains(raw, "{") {
+		return nil
+	}
+	var out []AnalysisResultItem
+	dec := json.NewDecoder(strings.NewReader(raw))
+	for {
+		var item AnalysisResultItem
+		if err := dec.Decode(&item); err != nil {
+			break
+		}
+		out = append(out, item)
+	}
+	return out
 }

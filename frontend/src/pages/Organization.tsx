@@ -101,7 +101,7 @@ export const OrganizationPage: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  if (isStandaloneDesktop) {
+  if (isStandaloneDesktop || (loadFailed && !org && serverRequirementsMet.desktop)) {
     return (
       <div className="fade-in-up">
         <div className="page-header" style={{ marginBottom: 16 }}>
@@ -118,18 +118,29 @@ export const OrganizationPage: React.FC = () => {
           <div className="card-body" style={{ padding: '28px 22px', textAlign: 'center' }}>
             <div style={{ fontSize: 34, marginBottom: 10 }}>🔌</div>
             <div className="empty-state-title" style={{ fontSize: 17 }}>
-              Local Mode — Team features need the Get-Hike server
+              {isStandaloneDesktop
+                ? 'Local Mode — Team features need the Get-Hike server'
+                : 'Server not reachable — Team features are offline locally'}
             </div>
             <div className="empty-state-desc" style={{ maxWidth: 520, margin: '10px auto 0' }}>
-              Aap desktop app standalone (local) mode mein chal rahe hain, is wajah se team members,
+              Aap desktop app is samay server se connect nahi hai, is wajah se team members,
               organization aur invitations load nahi ho sakte. Aapka tracking, screenshots aur AI
-              analysis sab local DB mein smooth chal raha hai — sirf <strong>team features</strong> server
-              ke saath connect karne par milte hain.
+              analysis sab local DB mein smooth chal raha hai — sirf <strong>team features</strong> ke
+              liye server connection chahiye.
             </div>
-            <div style={{ marginTop: 16, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
+            <div style={{ marginTop: 16, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10 }}>
               <div style={{ fontSize: 13, color: 'var(--text-secondary)' }}>
-                Options: <strong>Sign in</strong> karke sync enable karein, ya admin se server URL ke saath
-                server account lein — phir ye page team data show karega.
+                Check karein: server chal raha hai / reachable hai, ya Sign in karke sync enable karein.
+              </div>
+              <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', justifyContent: 'center' }}>
+                {!isStandaloneDesktop && (
+                  <button
+                    className="btn btn-secondary btn-sm"
+                    onClick={() => { setLoadFailed(false); fetchTeamData(); }}
+                  >
+                    🔄 Retry Connection
+                  </button>
+                )}
               </div>
               <span className="badge badge-pending" style={{ fontSize: 11 }}>
                 Team management requires server connection

@@ -124,6 +124,27 @@ func (a *App) startup(ctx context.Context) {
 		statsCh = nil
 	}
 
+	// Application lifecycle watcher ("open"/"close"/"focus" events) — event-driven
+	// X11 monitoring with zero idle CPU; reconnects if the display session rotates.
+	go func() {
+		out := make(chan tracker.TrackerEvent, 64)
+		go a.drainAppEvents(out)
+		for {
+			err := tracker.StartAppWatcher(a.ctx.Done(), out)
+			if a.ctx.Err() != nil {
+				return
+			}
+			if err != nil {
+				log.Printf("[app] app watcher stopped (%v) — reconnecting in 30s", err)
+			}
+			select {
+			case <-a.ctx.Done():
+				return
+			case <-time.After(30 * time.Second):
+			}
+		}
+	}()
+
 	a.tickerResetCh = make(chan time.Duration, 1)
 
 	// Start mouse tracker
@@ -278,6 +299,13 @@ func (a *App) cleanOldScreenshots() {
 		return
 	}
 
+	// App lifecycle events share the same 7-day retention window.
+	if a.database != nil {
+		if _, err := a.database.DeleteOldAppEvents(time.Now().AddDate(0, 0, -7)); err != nil {
+			log.Printf("[app] app event retention note: %v", err)
+		}
+	}
+
 	imagesDir := filepath.Join(a.cfg.DataDir, "images")
 	entries, err := os.ReadDir(imagesDir)
 	if err != nil {
@@ -302,6 +330,54 @@ func (a *App) cleanOldScreenshots() {
 	}
 }
 
+// drainAppEvents persists application lifecycle events into the DB until shutdown.
+func (a *App) drainAppEvents(out <-chan tracker.TrackerEvent) {
+	for {
+		select {
+		case <-a.ctx.Done():
+			return
+		case ev, ok := <-out:
+			if !ok {
+				return
+			}
+			if a.database == nil || a.shuttingDown.Load() {
+				continue
+			}
+			_, err := a.database.InsertAppEvent(&db.AppEvent{
+				Timestamp:   time.Now(),
+				Kind:        string(ev.Kind),
+				AppName:     ev.AppName,
+				WindowTitle: ev.WindowTitle,
+			})
+			if err != nil {
+				log.Printf("[app] app event insert error: %v", err)
+			}
+		}
+	}
+}
+
+// recentSessionEvents formats the latest application lifecycle events as compact
+// AI prompt context (chronological), used to explain app switches in analytics.
+func (a *App) recentSessionEvents(n int) []ai.SessionEvent {
+	if n <= 0 || a.database == nil {
+		return nil
+	}
+	appEvents, err := a.database.GetRecentAppEvents(time.Now().Add(-6*time.Hour), n)
+	if err != nil || len(appEvents) == 0 {
+		return nil
+	}
+	out := make([]ai.SessionEvent, 0, len(appEvents))
+	for _, ev := range appEvents {
+		out = append(out, ai.SessionEvent{
+			Time:  ev.Timestamp.Format("15:04"),
+			Kind:  ev.Kind,
+			App:   ev.AppName,
+			Title: ev.WindowTitle,
+		})
+	}
+	return out
+}
+
 // collect captures a screenshot + uses latest keystroke/mouse stats, persists the
 // entry, then fires async Gemini analysis (in Guest mode) or queues for backend sync (in Auth mode).
 func (a *App) collect() {
@@ -312,8 +388,9 @@ func (a *App) collect() {
 	a.latestMouseStats = tracker.MouseStats{}
 	a.statsMu.Unlock()
 
-	winRes, err := tracker.GetActiveWindowTitle()
+	winRes, err := tracker.GetActiveWindowInfo()
 	windowTitle := ""
+	appName := ""
 	if err != nil {
 		// "no active window" is an expected idle state (lock screen / desktop shell)
 		// — record it silently instead of spamming the error log.
@@ -322,6 +399,7 @@ func (a *App) collect() {
 		}
 	} else if winRes != nil {
 		windowTitle = winRes.Title
+		appName = winRes.AppName
 	}
 
 	imagePath := ""
@@ -340,6 +418,7 @@ func (a *App) collect() {
 		Timestamp:    time.Now(),
 		ImagePath:    imagePath,
 		WindowTitle:  windowTitle,
+		AppName:      appName,
 		TotalKeys:    keyStats.TotalKeys,
 		UniqueKeys:   keyStats.UniqueKeys,
 		EntropyScore: keyStats.EntropyScore,
@@ -964,7 +1043,7 @@ func (a *App) processPendingAI() (int, error) {
 		// 3 minutes gives one stalling model enough room to time out and still
 		// leaves budget for the failover candidate to complete.
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
-		results, batchErr := a.gemini.AnalyzeBatch(ctx, items)
+		results, batchErr := a.gemini.AnalyzeBatch(ctx, items, a.recentSessionEvents(12)...)
 		cancel()
 
 		if batchErr != nil && len(results) == 0 {

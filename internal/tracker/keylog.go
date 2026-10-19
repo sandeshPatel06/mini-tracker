@@ -47,7 +47,10 @@ func NewKeystrokeTracker(interval time.Duration) *KeystrokeTracker {
 func (t *KeystrokeTracker) Start() (<-chan KeystrokeStats, error) {
 	devices, err := discoverKeyboards()
 	if err != nil || len(devices) == 0 {
-		log.Printf("[tracker] Zero-Sudo Mode Active: Application & API key input tracking enabled (no sudo or input group required).")
+		// /dev/input/event* is unreadable without input-group permissions. In
+		// zero-sudo mode we fall back to X11 keymap polling so system-wide
+		// keystroke entropy still gets captured without root access.
+		log.Printf("[tracker] Zero-Sudo Mode Active: /dev/input not readable (no input group) — enabling X11 keymap fallback for Application & API key input tracking")
 	} else {
 		log.Printf("[tracker] Found %d native evdev keyboard device(s)", len(devices))
 	}
@@ -86,6 +89,26 @@ func (t *KeystrokeTracker) Start() (<-chan KeystrokeStats, error) {
 				}
 			}
 		}(path)
+	}
+
+	// Zero-sudo fallback: without evdev devices, watch the X11 keyboard state so
+	// typing done outside the app window is still counted.
+	if len(devices) == 0 {
+		go func() {
+			for {
+				if err := pollX11Keymap(eventCh, t.stopCh); err != nil {
+					// No display or X server unavailable — retry occasionally in
+					// case the user logs into a graphical session later.
+					select {
+					case <-time.After(30 * time.Second):
+						continue
+					case <-t.stopCh:
+						return
+					}
+				}
+				return
+			}
+		}()
 	}
 
 	// Aggregator

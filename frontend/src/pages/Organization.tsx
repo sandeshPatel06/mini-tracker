@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Organization, User, Invitation } from '../types';
-import { apiFetch } from '../api';
+import { apiFetch, getApiBaseUrl } from '../api';
 import { Modal } from '../components/Modal';
 
 export const OrganizationPage: React.FC = () => {
@@ -9,6 +9,21 @@ export const OrganizationPage: React.FC = () => {
   const [invitations, setInvitations] = useState<Invitation[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadFailed, setLoadFailed] = useState(false);
+
+  // Team & organization features live on the Get-Hike server. The desktop build
+  // runs standalone unless a synced/authenticated backend is configured — detect
+  // that up front so users see a friendly explanation instead of a fetch failure.
+  const [serverRequirementsMet] = useState<{ desktop: boolean; hasBackend: boolean }>(() => {
+    try {
+      return {
+        desktop: Boolean((window as any).go?.main?.App),
+        hasBackend: Boolean(getApiBaseUrl()),
+      };
+    } catch {
+      return { desktop: false, hasBackend: true };
+    }
+  });
+  const isStandaloneDesktop = serverRequirementsMet.desktop && !serverRequirementsMet.hasBackend;
 
   // Modal state
   const [showInviteModal, setShowInviteModal] = useState(false);
@@ -78,8 +93,53 @@ export const OrganizationPage: React.FC = () => {
   };
 
   useEffect(() => {
+    if (isStandaloneDesktop) {
+      setLoading(false);
+      return;
+    }
     fetchTeamData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  if (isStandaloneDesktop) {
+    return (
+      <div className="fade-in-up">
+        <div className="page-header" style={{ marginBottom: 16 }}>
+          <div>
+            <h1 className="page-title">Team &amp; Organization</h1>
+            <p className="page-subtitle">Manage members, permissions and invitations.</p>
+          </div>
+        </div>
+        <div
+          className="card"
+          role="status"
+          style={{ border: '1px solid color-mix(in srgb, var(--accent-purple) 35%, transparent)', marginBottom: 16 }}
+        >
+          <div className="card-body" style={{ padding: '28px 22px', textAlign: 'center' }}>
+            <div style={{ fontSize: 34, marginBottom: 10 }}>🔌</div>
+            <div className="empty-state-title" style={{ fontSize: 17 }}>
+              Local Mode — Team features need the Get-Hike server
+            </div>
+            <div className="empty-state-desc" style={{ maxWidth: 520, margin: '10px auto 0' }}>
+              Aap desktop app standalone (local) mode mein chal rahe hain, is wajah se team members,
+              organization aur invitations load nahi ho sakte. Aapka tracking, screenshots aur AI
+              analysis sab local DB mein smooth chal raha hai — sirf <strong>team features</strong> server
+              ke saath connect karne par milte hain.
+            </div>
+            <div style={{ marginTop: 16, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
+              <div style={{ fontSize: 13, color: 'var(--text-secondary)' }}>
+                Options: <strong>Sign in</strong> karke sync enable karein, ya admin se server URL ke saath
+                server account lein — phir ye page team data show karega.
+              </div>
+              <span className="badge badge-pending" style={{ fontSize: 11 }}>
+                Team management requires server connection
+              </span>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   const handleSendInvite = async (e: React.FormEvent) => {
     e.preventDefault();

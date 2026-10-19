@@ -8,6 +8,7 @@ declare const window: Window & {
     main: {
       App: {
         GetImageBase64: (path: string) => Promise<string>;
+        GetThumbnailBase64?: (path: string) => Promise<string>;
       };
     };
   };
@@ -18,12 +19,25 @@ const imageMemoryCache = new Map<string, string>();
 const pendingRequests = new Map<string, Promise<string | null>>();
 const MAX_CACHE_SIZE = 100;
 
+// Separate small cache for list-view thumbnails so timeline scrolling never
+// swaps a preview with the huge full-resolution data URL (and vice versa).
+const thumbMemoryCache = new Map<string, string>();
+const pendingThumbRequests = new Map<string, Promise<string | null>>();
+
 function cacheImage(path: string, dataUrl: string) {
   if (imageMemoryCache.size >= MAX_CACHE_SIZE) {
     const firstKey = imageMemoryCache.keys().next().value;
     if (firstKey) imageMemoryCache.delete(firstKey);
   }
   imageMemoryCache.set(path, dataUrl);
+}
+
+function cacheThumb(path: string, dataUrl: string) {
+  if (thumbMemoryCache.size >= MAX_CACHE_SIZE) {
+    const firstKey = thumbMemoryCache.keys().next().value;
+    if (firstKey) thumbMemoryCache.delete(firstKey);
+  }
+  thumbMemoryCache.set(path, dataUrl);
 }
 
 function fetchImageData(imagePath: string): Promise<string | null> {
@@ -67,6 +81,50 @@ function fetchImageData(imagePath: string): Promise<string | null> {
   return promise;
 }
 
+// fetchThumbData returns a lightweight preview for list rows: the Go-side WebP
+// thumbnail when available, falling back to the standard image path (full data
+// URL on desktop, direct URL on web).
+function fetchThumbData(imagePath: string): Promise<string | null> {
+  if (!imagePath) return Promise.resolve(null);
+
+  if (thumbMemoryCache.has(imagePath)) {
+    return Promise.resolve(thumbMemoryCache.get(imagePath)!);
+  }
+
+  if (pendingThumbRequests.has(imagePath)) {
+    return pendingThumbRequests.get(imagePath)!;
+  }
+
+  const promise = (async () => {
+    try {
+      const goApp = (window as any).go?.main?.App;
+      if (goApp?.GetThumbnailBase64) {
+        const res = await goApp.GetThumbnailBase64(imagePath);
+        if (res) {
+          cacheThumb(imagePath, res);
+          return res;
+        }
+      }
+      if (!goApp) {
+        // Web mode: a relative API URL is already far lighter than raw data
+        const url = buildApiUrl(`/api/image?path=${encodeURIComponent(imagePath)}`);
+        cacheThumb(imagePath, url);
+        return url;
+      }
+    } catch {
+      // fall through to the full-image loader
+    } finally {
+      pendingThumbRequests.delete(imagePath);
+    }
+    const full = await fetchImageData(imagePath);
+    if (full) cacheThumb(imagePath, full);
+    return full;
+  })();
+
+  pendingThumbRequests.set(imagePath, promise);
+  return promise;
+}
+
 interface ThumbProps {
   imagePath?: string;
   onClick?: () => void;
@@ -75,7 +133,7 @@ interface ThumbProps {
 
 export function ScreenshotThumb({ imagePath, onClick, className }: ThumbProps) {
   const [src, setSrc] = useState<string | null>(() => {
-    return imagePath && imageMemoryCache.has(imagePath) ? imageMemoryCache.get(imagePath)! : null;
+    return imagePath && thumbMemoryCache.has(imagePath) ? thumbMemoryCache.get(imagePath)! : null;
   });
   const [loading, setLoading] = useState(false);
   const [failed, setFailed] = useState(false);
@@ -88,8 +146,8 @@ export function ScreenshotThumb({ imagePath, onClick, className }: ThumbProps) {
       return;
     }
 
-    if (imageMemoryCache.has(imagePath)) {
-      setSrc(imageMemoryCache.get(imagePath)!);
+    if (thumbMemoryCache.has(imagePath)) {
+      setSrc(thumbMemoryCache.get(imagePath)!);
       setLoading(false);
       setFailed(false);
       return;
@@ -99,7 +157,7 @@ export function ScreenshotThumb({ imagePath, onClick, className }: ThumbProps) {
     setLoading(true);
     setFailed(false);
 
-    fetchImageData(imagePath).then((data) => {
+    fetchThumbData(imagePath).then((data) => {
       if (isMounted) {
         setSrc(data);
         setLoading(false);

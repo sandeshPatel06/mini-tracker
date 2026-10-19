@@ -6,7 +6,7 @@ import { CategoryBadge } from '../components/CategoryBadge';
 import { ScreenshotThumb, ImageModal } from '../components/Screenshot';
 import { Icon } from '../components/Icon';
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, Cell } from 'recharts';
-import { localISODate, isPendingLog, FOCUS_GOOD, FOCUS_OK } from '../utils';
+import { localISODate, isPendingLog, buildLocalWorkSessions, FOCUS_GOOD, FOCUS_OK } from '../utils';
 
 const prefersReducedMotion =
   typeof window !== 'undefined' &&
@@ -35,6 +35,7 @@ declare const window: Window & {
       App: {
         UpdateGeminiAPIKey: (key: string) => Promise<boolean>;
         ProcessPendingLogs: () => Promise<number>;
+        GetLogsByDate: (date: string) => Promise<LogEntry[] | null>;
       };
     };
   };
@@ -95,15 +96,26 @@ export default function Dashboard({ logs, stats, config, loading, today, onRefre
   const [workSessions, setWorkSessions] = useState<WorkSession[]>([]);
 
   useEffect(() => {
-    if (today) {
-      apiFetch(`/api/work-sessions?date=${today}`)
-        .then((res) => res.json())
-        .then((data) => {
-          if (Array.isArray(data)) setWorkSessions(data);
-        })
-        .catch(() => {});
+    if (!today) return;
+
+    // Desktop runs fully local (no server required): derive the Work Sessions
+    // card from the captures we already have in the local database.
+    if (window.go?.main?.App?.GetLogsByDate) {
+      setWorkSessions(buildLocalWorkSessions(logs));
+      return;
     }
-  }, [today, logs.length]);
+
+    apiFetch(`/api/work-sessions?date=${today}`)
+      .then((res) => res.json())
+      .then((data) => {
+        if (Array.isArray(data) && data.length > 0) {
+          setWorkSessions(data);
+        } else {
+          setWorkSessions(buildLocalWorkSessions(logs));
+        }
+      })
+      .catch(() => setWorkSessions(buildLocalWorkSessions(logs)));
+  }, [today, logs]);
 
   const pendingCount = logs.filter(isPendingLog).length;
 

@@ -10,10 +10,19 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
 )
+
+// redactAPIKey removes the ?key=... query parameter from URLs embedded in error
+// messages so API keys never leak into logs.
+var redactKeyPattern = regexp.MustCompile(`key=[^&\s"']+`)
+
+func redactAPIKey(s string) string {
+	return redactKeyPattern.ReplaceAllLiteralString(s, "key=REDACTED")
+}
 
 // UsageMetadata represents token usage returned from Gemini REST API.
 type UsageMetadata struct {
@@ -53,6 +62,9 @@ type GeminiClient struct {
 	dataDir   string
 	client    *http.Client
 	mu        sync.Mutex
+	// disabled tracks models that returned a hard "unavailable/deprecated" error
+	// within this session so model selection stops picking them.
+	disabled map[string]bool
 }
 
 // NewGeminiClient returns a new Gemini client using an optional initialModel or GEMINI_MODEL env var.
@@ -66,7 +78,8 @@ func NewGeminiClient(apiKey string, initialModel ...string) *GeminiClient {
 	return &GeminiClient{
 		apiKey:    apiKey,
 		modelName: m,
-		client:    &http.Client{Timeout: 90 * time.Second},
+		client:    &http.Client{Timeout: 60 * time.Second},
+		disabled:  map[string]bool{},
 	}
 }
 
@@ -82,9 +95,43 @@ func (g *GeminiClient) SetAPIKey(apiKey string) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	g.apiKey = apiKey
+	if g.disabled == nil {
+		g.disabled = map[string]bool{}
+	}
 	if envModel := os.Getenv("GEMINI_MODEL"); envModel != "" {
 		g.modelName = envModel
 	}
+}
+
+// DisableModel marks a model permanently unavailable for this session.
+func (g *GeminiClient) DisableModel(modelName string) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.disabled == nil {
+		g.disabled = map[string]bool{}
+	}
+	g.disabled[modelName] = true
+}
+
+// IsDisabled reports whether a model was marked unavailable this session.
+func (g *GeminiClient) IsDisabled(modelName string) bool {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.disabled == nil {
+		return false
+	}
+	return g.disabled[modelName]
+}
+
+// listDisabledModels returns a snapshot of session-disabled model names.
+func (g *GeminiClient) listDisabledModels() []string {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	names := make([]string, 0, len(g.disabled))
+	for name := range g.disabled {
+		names = append(names, name)
+	}
+	return names
 }
 
 // HasKey checks if an API key is currently set.
@@ -130,7 +177,7 @@ func (g *GeminiClient) FetchAvailableModels(ctx context.Context) ([]string, erro
 
 	resp, err := g.client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("list models request: %w", err)
+		return nil, fmt.Errorf("list models request: %s", redactAPIKey(err.Error()))
 	}
 	defer resp.Body.Close()
 
@@ -160,6 +207,13 @@ func (g *GeminiClient) FetchAvailableModels(ctx context.Context) ([]string, erro
 
 		// Normalize name (remove "models/" prefix if present)
 		name := strings.TrimPrefix(m.Name, "models/")
+
+		// Skip models known to be deprecated/retired: ListModels still reports
+		// them but generateContent rejects 404 ("no longer available to new users").
+		if deprecatedModels[name] {
+			continue
+		}
+
 		candidates = append(candidates, name)
 	}
 
@@ -178,6 +232,9 @@ func (g *GeminiClient) FetchAvailableModels(ctx context.Context) ([]string, erro
 		}
 		if strings.Contains(lName, "gemma") {
 			return 160
+		}
+		if strings.Contains(lName, "gemini-3.8") {
+			return 120
 		}
 		if strings.Contains(lName, "flash") {
 			return 50
@@ -215,7 +272,7 @@ func (g *GeminiClient) SelectBestModel(ctx context.Context, exclude map[string]b
 	current := g.modelName
 	g.mu.Unlock()
 	if current != "" {
-		if exclude == nil || !exclude[current] {
+		if (exclude == nil || !exclude[current]) && !g.IsDisabled(current) {
 			log.Printf("[ai/gemini] Using pre-configured model: %s", current)
 			return current, nil
 		}
@@ -228,6 +285,10 @@ func (g *GeminiClient) SelectBestModel(ctx context.Context, exclude map[string]b
 			if exclude != nil && exclude[m] {
 				continue
 			}
+			// Skip models explicitly disabled during this session (hard 404/unavailable).
+			if g.IsDisabled(m) {
+				continue
+			}
 			g.mu.Lock()
 			g.modelName = m
 			g.mu.Unlock()
@@ -235,17 +296,15 @@ func (g *GeminiClient) SelectBestModel(ctx context.Context, exclude map[string]b
 			return m, nil
 		}
 	} else {
-		log.Printf("[ai/gemini] Model listing warning: %v — falling back to candidate list", err)
+		log.Printf("[ai/gemini] Model listing warning: %v — falling back to candidate list", redactAPIKey(err.Error()))
 	}
 
 	// 4. Fallback candidates prioritizing gemma models
-	fallbacks := []string{
-		"gemma-4-31b-it",
-		"gemma-2-27b-it",
-	}
-
-	for _, m := range fallbacks {
+	for _, m := range fallbackModels {
 		if exclude != nil && exclude[m] {
+			continue
+		}
+		if g.IsDisabled(m) {
 			continue
 		}
 		g.mu.Lock()
@@ -256,6 +315,20 @@ func (g *GeminiClient) SelectBestModel(ctx context.Context, exclude map[string]b
 	}
 
 	return "", fmt.Errorf("no working Gemini models available")
+}
+
+// deprecatedModels are retired model IDs still listed by ListModels but rejected
+// by generateContent. Filtered from auto-selection and never used as fallbacks.
+var deprecatedModels = map[string]bool{
+	"gemma-2-27b-it":   true,
+	"gemini-2.5-flash": true,
+}
+
+// fallbackModels are well-known model IDs used when ListModels is unreachable.
+var fallbackModels = []string{
+	"gemma-4-31b-it",
+	"gemma-4-26b-a4b-it",
+	"gemini-3.8-flash",
 }
 
 // Analyze sends window title and telemetry to Gemini by wrapping it in AnalyzeBatch.
@@ -404,9 +477,9 @@ func (g *GeminiClient) analyzeChunk(ctx context.Context, items []BatchAnalysisIt
 		)
 	}
 
-	maxOutputTokens := 128 + 96*len(items)
-	if maxOutputTokens > 2048 {
-		maxOutputTokens = 2048
+	maxOutputTokens := 128 + 128*len(items)
+	if maxOutputTokens > 3072 {
+		maxOutputTokens = 3072
 	}
 
 	reqPayload := map[string]interface{}{
@@ -422,6 +495,11 @@ func (g *GeminiClient) analyzeChunk(ctx context.Context, items []BatchAnalysisIt
 	}
 
 	exclude := map[string]bool{}
+	// Seed the exclusion set with models disabled earlier this session so
+	// selection starts at a healthy candidate instead of repeating 404s.
+	for _, name := range g.listDisabledModels() {
+		exclude[name] = true
+	}
 	var lastErr error
 	for attempt := 0; attempt < maxModelCandidates; attempt++ {
 		model, err := g.SelectBestModel(ctx, exclude)
@@ -469,7 +547,7 @@ func (g *GeminiClient) postGenerateContentWithRetry(ctx context.Context, model s
 	var rawText string
 	var usage UsageMetadata
 
-	policy := RetryPolicy{MaxAttempts: 4, BaseDelay: time.Second, MaxDelay: 20 * time.Second}
+	policy := RetryPolicy{MaxAttempts: 3, BaseDelay: 2 * time.Second, MaxDelay: 15 * time.Second}
 	err := DoWithRetry(ctx, policy, func(ctx context.Context) (error, bool, time.Duration) {
 		reqBody, err := json.Marshal(payload)
 		if err != nil {
@@ -484,7 +562,7 @@ func (g *GeminiClient) postGenerateContentWithRetry(ctx context.Context, model s
 
 		resp, err := g.client.Do(req)
 		if err != nil {
-			return fmt.Errorf("gemini request: %w", err), true, 0
+			return fmt.Errorf("gemini request: %s", redactAPIKey(err.Error())), true, 0
 		}
 		defer resp.Body.Close()
 
@@ -494,6 +572,12 @@ func (g *GeminiClient) postGenerateContentWithRetry(ctx context.Context, model s
 			text, meta, perr := extractResponseText(respData)
 			if perr != nil {
 				return perr, false, 0
+			}
+			if strings.TrimSpace(text) == "" {
+				// Model accepted the request but produced no text (e.g. stopped
+				// on the token budget or emitted only thought parts). Treat as a
+				// transient failure so the retry policy re-requests the payload.
+				return fmt.Errorf("gemini returned empty output"), true, 0
 			}
 			rawText, usage = text, meta
 			return nil, false, 0
@@ -506,6 +590,11 @@ func (g *GeminiClient) postGenerateContentWithRetry(ctx context.Context, model s
 			return fmt.Errorf("gemini 400 (schema unsupported): %s", truncateString(string(respData), 200)), true, 0
 		}
 
+		if resp.StatusCode == http.StatusNotFound && isHardUnavailable(respData) {
+			g.DisableModel(model)
+			log.Printf("[ai/gemini] model %s is retired/unavailable — disabled for this session", model)
+		}
+
 		return fmt.Errorf("gemini error %d: %s", resp.StatusCode, truncateString(string(respData), 300)),
 			IsRetryableStatus(resp.StatusCode),
 			RetryAfterFromHeader(resp.Header)
@@ -514,6 +603,15 @@ func (g *GeminiClient) postGenerateContentWithRetry(ctx context.Context, model s
 		return "", UsageMetadata{}, err
 	}
 	return rawText, usage, nil
+}
+
+// isHardUnavailable reports whether a 404 response body means the model itself is
+// gone for this API key ("is not found for API version..." / "no longer available
+// to new users") rather than a transient routing problem.
+func isHardUnavailable(body []byte) bool {
+	return bytes.Contains(body, []byte("is not found for API version")) ||
+		bytes.Contains(body, []byte("no longer available to new users")) ||
+		bytes.Contains(body, []byte("is not supported for generateContent"))
 }
 
 // extractResponseText pulls the last non-thought text part and usage metadata
@@ -657,7 +755,7 @@ func (g *GeminiClient) executeAnalysis(ctx context.Context, modelName string, re
 
 	resp, err := g.client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("gemini request: %w", err)
+		return nil, fmt.Errorf("gemini request: %s", redactAPIKey(err.Error()))
 	}
 	defer resp.Body.Close()
 

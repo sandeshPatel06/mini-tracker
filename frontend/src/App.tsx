@@ -13,7 +13,7 @@ import { Icon, IconName } from './components/Icon';
 import { Modal } from './components/Modal';
 import { DevMenu } from './components/DevMenu';
 import { useDevMode } from './hooks/useDevMode';
-import { localISODate, isPendingLog } from './utils';
+import { localISODate, isPendingLog, bumpUsageCount } from './utils';
 import { EventsOn } from '../wailsjs/runtime/runtime';
 import logoAsset from './assets/logo.png';
 import './style.css';
@@ -255,10 +255,7 @@ Base every field strictly on the provided screenshot and metadata. Do NOT invent
   };
 
   const bumpUsage = () => {
-    const currentUsage = parseInt(localStorage.getItem('mini_ai_usage_count') || '0', 10);
-    const newUsage = currentUsage + 1;
-    localStorage.setItem('mini_ai_usage_count', newUsage.toString());
-    window.dispatchEvent(new CustomEvent('ai_usage_updated', { detail: newUsage }));
+    bumpUsageCount(1);
   };
 
   const requestModel = async (modelName: string): Promise<number> => {
@@ -476,16 +473,14 @@ export default function App() {
   };
 
   // Desktop: background Go-side AI batch runs broadcast usage events. Mirror them
-  // into the local counter so the Settings usage panel stays live even without a
-  // backend endpoint (web mode keeps the server-driven counter via /api/user/usage).
+  // into the day-scoped local counter so the Settings usage panel stays live and
+  // resets every morning even without a backend endpoint (web mode keeps the
+  // server-driven counter via /api/user/usage).
   useEffect(() => {
     if (!(window as any).go?.main?.App) return;
     const off = EventsOn('ai_usage_updated', (payload: any) => {
       const requests = typeof payload?.requests === 'number' && payload.requests > 0 ? payload.requests : 1;
-      const current = parseInt(localStorage.getItem('mini_ai_usage_count') || '0', 10) || 0;
-      const next = current + requests;
-      localStorage.setItem('mini_ai_usage_count', next.toString());
-      window.dispatchEvent(new CustomEvent('ai_usage_updated', { detail: next }));
+      bumpUsageCount(requests);
     });
     return () => {
       try { (off as unknown as () => void)?.(); } catch { /* noop */ }

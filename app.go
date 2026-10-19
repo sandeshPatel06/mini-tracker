@@ -1032,6 +1032,7 @@ func (a *App) processPendingAI() (int, error) {
 				WindowTitle:  entry.WindowTitle,
 				EntropyScore: entry.EntropyScore,
 				ImagePath:    entry.ImagePath,
+				TotalKeys:    entry.TotalKeys,
 				TotalClicks:  entry.TotalClicks,
 				UserTask:     a.GetActiveTask(),
 				AppName:      entry.AppName,

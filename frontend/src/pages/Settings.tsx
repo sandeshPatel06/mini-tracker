@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { apiFetch } from '../api';
+import { getTodayUsageCount, bumpUsageCount, resetUsageCount } from '../utils';
 
 interface AIModel {
   name: string;
@@ -21,9 +22,7 @@ export function SettingsPage({ theme = 'auto', onThemeChange, syncIntervalSecond
   const [availableModels, setAvailableModels] = useState<AIModel[]>([]);
   const [fetchingModels, setFetchingModels] = useState<boolean>(false);
   const [usageSummary, setUsageSummary] = useState<{ total_requests: number; prompt_tokens: number; candidate_tokens: number; total_tokens: number } | null>(null);
-  const [usageCount, setUsageCount] = useState<number>(() => {
-    return parseInt(localStorage.getItem('mini_ai_usage_count') || '0', 10);
-  });
+  const [usageCount, setUsageCount] = useState<number>(() => getTodayUsageCount());
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
@@ -46,8 +45,7 @@ export function SettingsPage({ theme = 'auto', onThemeChange, syncIntervalSecond
   // Periodic usage refresh + cross-tab/local event sync
   useEffect(() => {
     const syncUsage = () => {
-      const stored = parseInt(localStorage.getItem('mini_ai_usage_count') || '0', 10);
-      setUsageCount(stored);
+      setUsageCount(getTodayUsageCount());
       fetchUsageSummary();
     };
     syncUsage();
@@ -176,10 +174,8 @@ export function SettingsPage({ theme = 'auto', onThemeChange, syncIntervalSecond
         })
       });
       if (res.ok) {
-        const newUsage = parseInt(localStorage.getItem('mini_ai_usage_count') || '0', 10) + 1;
-        localStorage.setItem('mini_ai_usage_count', newUsage.toString());
+        const newUsage = bumpUsageCount(1);
         setUsageCount(newUsage);
-        window.dispatchEvent(new CustomEvent('ai_usage_updated', { detail: newUsage }));
         setStatusMessage(`✓ Connected successfully to ${cleanModel}!`);
       } else {
         const err = await res.json();
@@ -202,7 +198,7 @@ export function SettingsPage({ theme = 'auto', onThemeChange, syncIntervalSecond
     }
     try {
       await (window as any).go.main.App.ClearAllLocalData();
-      localStorage.setItem('mini_ai_usage_count', '0');
+      resetUsageCount();
       setUsageCount(0);
       setStatusMessage('✓ Successfully deleted all local screenshots and reset database!');
       setTimeout(() => window.location.reload(), 1500);
@@ -396,9 +392,9 @@ export function SettingsPage({ theme = 'auto', onThemeChange, syncIntervalSecond
         <div className="card-body">
           <div className="stats-grid" style={{ marginBottom: 14 }}>
             <div className="stat-card">
-              <span className="stat-label">Total AI Requests</span>
+              <span className="stat-label">{usageSummary ? 'Total AI Requests (all-time)' : 'AI Requests Today'}</span>
               <div className="stat-value text-purple" style={{ fontSize: 24 }}>{usageSummary?.total_requests ?? usageCount}</div>
-              <div className="stat-sub">Tracked API requests</div>
+              <div className="stat-sub">{usageSummary ? 'Tracked API requests' : 'Resets every morning (desktop live count)'}</div>
             </div>
             <div className="stat-card">
               <span className="stat-label">Prompt Tokens</span>
@@ -418,7 +414,7 @@ export function SettingsPage({ theme = 'auto', onThemeChange, syncIntervalSecond
           </div>
 
           <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
-            Free-tier RPM/RPD/TPM limits are enforced by Google per model (check <strong>Google AI Studio → Rate limits</strong>); the numbers above are live app usage. Analysis is batched (up to 10 logs/request) with automatic retry and model fallback, and screenshots are downscaled before upload.
+            Free-tier RPM/RPD/TPM limits are enforced by Google per model (check <strong>Google AI Studio → Rate limits</strong>); the numbers above are live app usage. Analysis is batched (up to 10 logs/request) with automatic retry and model fallback. Tokens are kept low: screenshots are downscaled, and unchanged idle windows reuse the last screenshot instead of sending a fresh one.
           </div>
         </div>
       </div>

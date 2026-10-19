@@ -773,7 +773,16 @@ func (a *App) GetThumbnailBase64(imagePath string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return fmt.Sprintf("data:image/webp;base64,%s", base64.StdEncoding.EncodeToString(data)), nil
+	// ThumbnailForImage falls back to the original file when no thumbnail could
+	// be produced — match the mime type to the file actually being served.
+	mimeType := "image/webp"
+	ext := strings.ToLower(filepath.Ext(thumbPath))
+	if ext == ".png" {
+		mimeType = "image/png"
+	} else if ext == ".jpg" || ext == ".jpeg" {
+		mimeType = "image/jpeg"
+	}
+	return fmt.Sprintf("data:%s;base64,%s", mimeType, base64.StdEncoding.EncodeToString(data)), nil
 }
 
 // UpdateScreenshotInterval updates and persists the screenshot interval, then resets

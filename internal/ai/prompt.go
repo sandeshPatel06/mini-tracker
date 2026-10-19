@@ -20,6 +20,16 @@ type PromptItem struct {
 	Timestamp    time.Time
 }
 
+// SessionEvent is one observed application lifecycle event ("open", "close",
+// "focus") provided to the analysis prompt so the model sees the broader
+// app-switch narrative instead of isolated one-minute snapshots.
+type SessionEvent struct {
+	Time  string `json:"time"`
+	Kind  string `json:"kind"`
+	App   string `json:"app"`
+	Title string `json:"title"`
+}
+
 // AnalysisCategories is the fixed set of activity categories the model may output.
 var AnalysisCategories = []string{
 	"Coding",
@@ -80,8 +90,9 @@ func sanitizePromptTask(task string) string {
 }
 
 // BuildAnalysisPrompt returns a compact prompt embedding items as a JSON array with
-// keys i,t,e,c,a,ts,img, the JSON output contract, and screenshot ordering rules.
-func BuildAnalysisPrompt(items []PromptItem, activeTask string) string {
+// keys i,t,e,c,a,ts,img, the JSON output contract, screenshot ordering rules, and
+// (optionally) a chronological SESSION CONTEXT of app lifecycle events.
+func BuildAnalysisPrompt(items []PromptItem, activeTask string, sessionEvents ...SessionEvent) string {
 	encoded := make([]promptItemJSON, 0, len(items))
 	for i, item := range items {
 		entropy := math.Round(item.EntropyScore*10) / 10
@@ -114,6 +125,19 @@ func BuildAnalysisPrompt(items []PromptItem, activeTask string) string {
 	b.WriteString("SCORING RUBRIC: on-task 70-100; related docs/research 45-70; neutral browsing/messaging 25-50; leisure/idle 0-25. Entropy e>20 adds 10; e<8 subtracts 10; clicks c>20 adds 5. Never default to 100.\n\n")
 	b.WriteString("SCREENSHOTS: each screenshot follows its item as \"IMAGE <i>:\"; use image and telemetry together.\n\n")
 	b.WriteString(taskLine)
+
+	if len(sessionEvents) > 0 {
+		b.WriteString("SESSION CONTEXT (chronological app activity): ")
+		for _, ev := range sessionEvents {
+			fmt.Fprintf(&b, "%s %s %s", ev.Time, ev.Kind, SanitizeTitle(ev.App, 40))
+			if title := SanitizeTitle(ev.Title, 40); title != "" {
+				fmt.Fprintf(&b, " (%s)", title)
+			}
+			b.WriteString("; ")
+		}
+		b.WriteString("judge app-switch cadence with it (rapid toggling between a work app and chat = notification checks; sustained single app = focused work; app opened right before a stretch = likely the main task).\n\n")
+	}
+
 	b.WriteString("\n\nITEMS: ")
 	b.WriteString(string(itemsJSON))
 	return b.String()

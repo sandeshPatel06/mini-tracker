@@ -389,8 +389,9 @@ type BatchAnalysisResult struct {
 
 // AnalyzeBatch sends multiple items in grouped Gemini requests. Chunks of up to
 // maxItemsPerRequest are analyzed independently so one failure never blocks the rest.
-// Returns partial results together with the last error when some chunks fail.
-func (g *GeminiClient) AnalyzeBatch(ctx context.Context, items []BatchAnalysisItem) ([]BatchAnalysisResult, error) {
+// Optional sessionEvents give the model context about app switches. Returns partial
+// results together with the last error when some chunks fail.
+func (g *GeminiClient) AnalyzeBatch(ctx context.Context, items []BatchAnalysisItem, sessionEvents ...SessionEvent) ([]BatchAnalysisResult, error) {
 	if !g.HasKey() || len(items) == 0 {
 		return nil, fmt.Errorf("no API key set or empty batch")
 	}
@@ -408,7 +409,7 @@ func (g *GeminiClient) AnalyzeBatch(ctx context.Context, items []BatchAnalysisIt
 		if end > len(items) {
 			end = len(items)
 		}
-		results, err := g.analyzeChunk(ctx, items[start:end])
+		results, err := g.analyzeChunk(ctx, items[start:end], sessionEvents)
 		if err != nil {
 			lastErr = err
 			continue
@@ -428,7 +429,7 @@ func (g *GeminiClient) AnalyzeBatch(ctx context.Context, items []BatchAnalysisIt
 // analyzeChunk builds a compact prompt (plus thumbnails) for one group of items,
 // posts it with retry/backoff and model failover, and maps the parsed results back
 // to the input items. Items without a model result are omitted so callers can retry them.
-func (g *GeminiClient) analyzeChunk(ctx context.Context, items []BatchAnalysisItem) ([]BatchAnalysisResult, error) {
+func (g *GeminiClient) analyzeChunk(ctx context.Context, items []BatchAnalysisItem, sessionEvents []SessionEvent) ([]BatchAnalysisResult, error) {
 	activeTask := ""
 	for _, item := range items {
 		if strings.TrimSpace(item.UserTask) != "" {
@@ -450,7 +451,7 @@ func (g *GeminiClient) analyzeChunk(ctx context.Context, items []BatchAnalysisIt
 	}
 
 	parts := []map[string]interface{}{
-		{"text": BuildAnalysisPrompt(promptItems, activeTask)},
+		{"text": BuildAnalysisPrompt(promptItems, activeTask, sessionEvents...)},
 	}
 
 	dataDir := g.GetDataDir()

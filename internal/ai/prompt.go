@@ -109,10 +109,10 @@ func BuildAnalysisPrompt(items []PromptItem, activeTask string) string {
 	}
 
 	var b strings.Builder
-	b.WriteString("You are a desktop activity productivity analyst. Classify each item and score its productivity.\n\n")
-	fmt.Fprintf(&b, "JSON OUTPUT CONTRACT: Respond ONLY with a valid JSON array, no markdown, no prose. One object per item in exact input order with keys: i (integer index), cat (one of: %s), a (app name), ac (app category), p (productivity score 0-100), c (confidence 0.0-1.0), r (reason, at most 12 words).\n\n", strings.Join(AnalysisCategories, ", "))
-	b.WriteString("SCORING RUBRIC: focused on-task work 70-100; related docs or research 45-70; neutral browsing or messaging 25-50; leisure, social media, or idle 0-25. Keystroke entropy e>20 adds 10; e<8 subtracts 10; clicks c>20 adds 5. Never default to 100.\n\n")
-	b.WriteString("SCREENSHOTS: Each screenshot follows in item order, preceded by a text part \"IMAGE <i>:\" where i is the item index; use image and telemetry together.\n\n")
+	b.WriteString("You are a desktop activity analyst. Classify and score each item.\n\n")
+	fmt.Fprintf(&b, "JSON OUTPUT CONTRACT (STRICT):\n1. Exactly %d objects, one per item, exact input order.\n2. First char '[' and last char ']'.\n3. Compact single-line JSON. No markdown, fences, prose, comments, trailing commas, or text outside the array.\n4. Never stop mid-array; shorten reasons instead.\n5. Keys: \"i\" (input index), \"cat\" (one of: %s), \"a\", \"ac\", \"p\" 0-100, \"c\" 0.0-1.0, \"r\" max 10 words.\n\n", len(items), strings.Join(AnalysisCategories, ", "))
+	b.WriteString("SCORING RUBRIC: on-task 70-100; related docs/research 45-70; neutral browsing/messaging 25-50; leisure/idle 0-25. Entropy e>20 adds 10; e<8 subtracts 10; clicks c>20 adds 5. Never default to 100.\n\n")
+	b.WriteString("SCREENSHOTS: each screenshot follows its item as \"IMAGE <i>:\"; use image and telemetry together.\n\n")
 	b.WriteString(taskLine)
 	b.WriteString("\n\nITEMS: ")
 	b.WriteString(string(itemsJSON))
@@ -171,20 +171,67 @@ func ParseAnalysisJSON(raw string, expectedItems int) ([]AnalysisResultItem, err
 	return results, nil
 }
 
-// salvageAnalysisObjects decodes as many complete analysis objects as possible from
-// a possibly truncated array, stopping at the first malformed object boundary.
+// salvageAnalysisObjects scans a possibly truncated JSON array and decodes every
+// complete analysis object it can find, skipping malformed fragments instead of
+// stopping at the first broken boundary. Objects behind a truncated fragment are
+// still recovered so maximal partial results are left for later retries.
 func salvageAnalysisObjects(raw string) []AnalysisResultItem {
 	if !strings.Contains(raw, "{") {
 		return nil
 	}
+
+	inString := false
+	escaped := false
+	depth := 0
+	var objStart = -1
+
 	var out []AnalysisResultItem
-	dec := json.NewDecoder(strings.NewReader(raw))
-	for {
+	appendCandidate := func(candidate string) {
 		var item AnalysisResultItem
-		if err := dec.Decode(&item); err != nil {
-			break
+		if err := json.Unmarshal([]byte(candidate), &item); err != nil {
+			return
+		}
+		if item.Category == "" && item.AppName == "" && item.Reason == "" && item.Score == 0 {
+			return
+		}
+		for _, existing := range out {
+			if existing.Index == item.Index {
+				return
+			}
 		}
 		out = append(out, item)
+	}
+
+	for i := 0; i < len(raw); i++ {
+		ch := raw[i]
+		if inString {
+			if escaped {
+				escaped = false
+			} else if ch == '\\' {
+				escaped = true
+			} else if ch == '"' {
+				inString = false
+			}
+			continue
+		}
+		switch ch {
+		case '"':
+			inString = true
+		case '{':
+			if depth == 0 {
+				objStart = i
+			}
+			depth++
+		case '}':
+			if depth == 0 {
+				continue
+			}
+			depth--
+			if depth == 0 && objStart >= 0 {
+				appendCandidate(raw[objStart : i+1])
+				objStart = -1
+			}
+		}
 	}
 	return out
 }

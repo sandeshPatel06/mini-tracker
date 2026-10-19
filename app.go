@@ -59,6 +59,9 @@ type App struct {
 	isTrackingActive bool
 	trackerStartTime time.Time
 	accumulatedSec   int64
+	// accumDay is the local date (YYYY-MM-DD) accumulatedSec was seeded for so the
+	// timer continues from the DB total on restarts instead of resetting to zero.
+	accumDay string
 
 	// aiMu serializes batched AI analysis runs (single-flight).
 	aiMu sync.Mutex
@@ -137,6 +140,12 @@ func (a *App) startup(ctx context.Context) {
 			}
 		}()
 	}
+
+	// Seed today's tracked duration from the DB so the timer keeps its day total
+	// across restarts (and silently picks up background-daemon runs) instead of
+	// starting from zero.
+	a.accumulatedSec = a.todaysDBTrackedSeconds()
+	a.accumDay = time.Now().Format("2006-01-02")
 
 	a.isTrackingActive = true
 	a.trackerStartTime = time.Now()
@@ -509,6 +518,31 @@ func (a *App) GetLogsByDate(date string) ([]db.LogEntry, error) {
 	return a.database.GetLogsForDate(date)
 }
 
+// todaysDBTrackedSeconds returns today's persisted tracked seconds (logs x
+// interval). It includes rows written by previous sessions and the background
+// daemon, which is what keeps the timer continuous across restarts.
+func (a *App) todaysDBTrackedSeconds() int64 {
+	if a.database == nil || a.cfg == nil {
+		return 0
+	}
+	return a.database.GetTodayTrackedSeconds(int64(a.cfg.ScreenshotInterval.Seconds()))
+}
+
+// ensureSameDaySeed re-seeds the accumulated base whenever the local date changes
+// so a session that runs past midnight picks up the fresh day's totals instead of
+// carrying yesterday's elapsed time into a new day.
+func (a *App) ensureSameDaySeed() {
+	today := time.Now().Format("2006-01-02")
+	if a.accumDay == today {
+		return
+	}
+	a.accumDay = today
+	a.accumulatedSec = a.todaysDBTrackedSeconds()
+	if a.isTrackingActive {
+		a.trackerStartTime = time.Now()
+	}
+}
+
 // ToggleTracking starts or pauses tracking session.
 func (a *App) ToggleTracking() (map[string]interface{}, error) {
 	a.statsMu.Lock()
@@ -522,6 +556,8 @@ func (a *App) ToggleTracking() (map[string]interface{}, error) {
 		a.latestKeyStats = tracker.KeystrokeStats{}
 		a.latestMouseStats = tracker.MouseStats{}
 	} else {
+		a.accumulatedSec = a.todaysDBTrackedSeconds()
+		a.accumDay = time.Now().Format("2006-01-02")
 		a.trackerStartTime = time.Now()
 		a.isTrackingActive = true
 	}
@@ -542,6 +578,7 @@ func (a *App) ToggleTracking() (map[string]interface{}, error) {
 func (a *App) GetTrackingStatus() map[string]interface{} {
 	a.statsMu.Lock()
 	defer a.statsMu.Unlock()
+	a.ensureSameDaySeed()
 
 	elapsed := a.accumulatedSec
 	if a.isTrackingActive && !a.trackerStartTime.IsZero() {
@@ -559,19 +596,14 @@ func (a *App) GetTodayTrackedSeconds() int64 {
 	a.statsMu.Lock()
 	active := a.isTrackingActive
 	startTime := a.trackerStartTime
+	a.ensureSameDaySeed()
 	accum := a.accumulatedSec
 	a.statsMu.Unlock()
 
 	if active && !startTime.IsZero() {
 		return accum + int64(time.Since(startTime).Seconds())
 	}
-	if accum > 0 {
-		return accum
-	}
-	if a.database == nil || a.cfg == nil {
-		return 0
-	}
-	return a.database.GetTodayTrackedSeconds(int64(a.cfg.ScreenshotInterval.Seconds()))
+	return accum
 }
 
 // GetStats returns productivity stats for today.
@@ -722,6 +754,28 @@ func (a *App) GetImageBase64(imagePath string) (string, error) {
 	return fmt.Sprintf("data:%s;base64,%s", mimeType, base64.StdEncoding.EncodeToString(data)), nil
 }
 
+// GetThumbnailBase64 serves a cached downscaled WebP thumbnail (512px) as a data
+// URL. List views (Timeline) use this so previews stay tiny and instant, while
+// full-resolution images stay reserved for the inspection modal.
+func (a *App) GetThumbnailBase64(imagePath string) (string, error) {
+	if imagePath == "" {
+		return "", nil
+	}
+	dataDir := ""
+	if a.cfg != nil {
+		dataDir = a.cfg.DataDir
+	}
+	thumbPath := ai.ThumbnailForImage(imagePath, dataDir)
+	if thumbPath == "" {
+		thumbPath = imagePath
+	}
+	data, err := os.ReadFile(thumbPath)
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("data:image/webp;base64,%s", base64.StdEncoding.EncodeToString(data)), nil
+}
+
 // UpdateScreenshotInterval updates and persists the screenshot interval, then resets
 // the collection ticker. No-op when the requested interval is already active.
 func (a *App) UpdateScreenshotInterval(seconds int) (bool, error) {
@@ -837,6 +891,20 @@ func (a *App) processPendingAIBatched() {
 	_, _ = a.processPendingAI()
 }
 
+// emitAIUsageEvent broadcasts one AI request's token usage to the frontend so
+// open windows (Settings usage panel etc.) refresh their counters without polling.
+func (a *App) emitAIUsageEvent(promptTokens, candidateTokens, totalTokens int) {
+	if a.ctx == nil {
+		return
+	}
+	wailsruntime.EventsEmit(a.ctx, "ai_usage_updated", map[string]interface{}{
+		"requests":         1,
+		"prompt_tokens":    promptTokens,
+		"candidate_tokens": candidateTokens,
+		"total_tokens":     totalTokens,
+	})
+}
+
 // ProcessPendingLogs scans for unanalyzed logs and processes them in batched Gemini requests.
 func (a *App) ProcessPendingLogs() (int, error) {
 	a.aiMu.Lock()
@@ -923,6 +991,11 @@ func (a *App) processPendingAI() (int, error) {
 				_ = a.database.RecordAPIUsage(entry.OrgID, entry.UserID, "guest", res.Usage.PromptTokenCount, res.Usage.CandidatesTokenCount, res.Usage.TotalTokenCount, a.gemini.GetModel())
 			}
 			processed++
+		}
+
+		// Surface this chunk's API call to the UI (Settings usage counter etc.)
+		if len(got) > 0 && results[0].Usage.TotalTokenCount > 0 {
+			a.emitAIUsageEvent(results[0].Usage.PromptTokenCount, results[0].Usage.CandidatesTokenCount, results[0].Usage.TotalTokenCount)
 		}
 
 		for _, entry := range chunk {
@@ -1420,6 +1493,7 @@ func (a *App) RunAIDebugOnLatest() (map[string]interface{}, error) {
 	}
 	if res.Usage.TotalTokenCount > 0 {
 		_ = a.database.RecordAPIUsage(entry.OrgID, entry.UserID, "guest", res.Usage.PromptTokenCount, res.Usage.CandidatesTokenCount, res.Usage.TotalTokenCount, a.gemini.GetModel())
+		a.emitAIUsageEvent(res.Usage.PromptTokenCount, res.Usage.CandidatesTokenCount, res.Usage.TotalTokenCount)
 	}
 	return result, nil
 }

@@ -14,6 +14,7 @@ import { Modal } from './components/Modal';
 import { DevMenu } from './components/DevMenu';
 import { useDevMode } from './hooks/useDevMode';
 import { localISODate, isPendingLog } from './utils';
+import { EventsOn } from '../wailsjs/runtime/runtime';
 import logoAsset from './assets/logo.png';
 import './style.css';
 
@@ -474,11 +475,27 @@ export default function App() {
     setPage('dashboard');
   };
 
+  // Desktop: background Go-side AI batch runs broadcast usage events. Mirror them
+  // into the local counter so the Settings usage panel stays live even without a
+  // backend endpoint (web mode keeps the server-driven counter via /api/user/usage).
+  useEffect(() => {
+    if (!(window as any).go?.main?.App) return;
+    const off = EventsOn('ai_usage_updated', (payload: any) => {
+      const requests = typeof payload?.requests === 'number' && payload.requests > 0 ? payload.requests : 1;
+      const current = parseInt(localStorage.getItem('mini_ai_usage_count') || '0', 10) || 0;
+      const next = current + requests;
+      localStorage.setItem('mini_ai_usage_count', next.toString());
+      window.dispatchEvent(new CustomEvent('ai_usage_updated', { detail: next }));
+    });
+    return () => {
+      try { (off as unknown as () => void)?.(); } catch { /* noop */ }
+    };
+  }, []);
+
   // Fetch initial tracker status & restore accumulated today's duration.
   // Prefer the Wails backend status when running as a desktop app; only use the
   // HTTP endpoint in web mode so the two sources cannot race each other.
-  useEffect(() => {
-    const app = (window as any).go?.main?.App;
+  useEffect(() => {    const app = (window as any).go?.main?.App;
     if (app?.GetTrackingStatus) {
       callGo(() => app.GetTrackingStatus())
         .then((status: any) => {

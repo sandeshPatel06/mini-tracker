@@ -30,6 +30,8 @@ export function GetStats(arg1:string):Promise<db.ProductivityStats>;
 
 export function GetSyncStatus():Promise<Record<string, any>>;
 
+export function GetThumbnailBase64(arg1:string):Promise<string>;
+
 export function GetTodayLogs():Promise<Array<db.LogEntry>>;
 
 export function GetTodayTrackedSeconds():Promise<number>;

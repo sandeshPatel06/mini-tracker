@@ -477,9 +477,11 @@ func (g *GeminiClient) analyzeChunk(ctx context.Context, items []BatchAnalysisIt
 		)
 	}
 
-	maxOutputTokens := 128 + 128*len(items)
-	if maxOutputTokens > 3072 {
-		maxOutputTokens = 3072
+	// Output budget: roomy floor so pretty-printed or long-reason outputs never
+	// truncate mid-array; 160 tokens per plenty for compact objects.
+	maxOutputTokens := 1280 + 160*len(items)
+	if maxOutputTokens > 4096 {
+		maxOutputTokens = 4096
 	}
 
 	reqPayload := map[string]interface{}{
@@ -491,6 +493,14 @@ func (g *GeminiClient) analyzeChunk(ctx context.Context, items []BatchAnalysisIt
 			"maxOutputTokens":  maxOutputTokens,
 			"responseMimeType": "application/json",
 			"responseSchema":   AnalysisResponseSchema(),
+			// Thinking tokens count against maxOutputTokens on thinking-capable
+			// models (gemini-2.x/3.x flash) and burning through the budget is the
+			// usual cause of truncated/empty outputs for structured answers. The
+			// schema already pins the shape, so inner monologue is pure waste. If
+			// a model rejects the field, the retry path drops it gracefully.
+			"thinkingConfig": map[string]interface{}{
+				"thinkingBudget": 0,
+			},
 		},
 	}
 
@@ -537,13 +547,17 @@ func (g *GeminiClient) analyzeChunk(ctx context.Context, items []BatchAnalysisIt
 
 // postGenerateContentWithRetry performs a single generateContent call with retry,
 // honoring Retry-After and backing off on 429/5xx/network errors. If the model
-// rejects responseSchema with a 400, the payload is retried once without it.
+// rejects responseSchema or thinkingConfig with a 400, the payload is retried once
+// without that option. A model that succeeds but returns empty text is re-asked
+// without the schema as well — gemma-class models often refuse to emit any text
+// under rigid schemas but answer fine in free-form JSON mode.
 func (g *GeminiClient) postGenerateContentWithRetry(ctx context.Context, model string, reqPayload map[string]interface{}) (string, UsageMetadata, error) {
 	cleanModel := strings.TrimPrefix(model, "models/")
 	url := fmt.Sprintf("https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent?key=%s", cleanModel, g.apiKey)
 
 	payload := reqPayload
 	schemaDropped := false
+	thinkingDropped := false
 	var rawText string
 	var usage UsageMetadata
 
@@ -575,12 +589,28 @@ func (g *GeminiClient) postGenerateContentWithRetry(ctx context.Context, model s
 			}
 			if strings.TrimSpace(text) == "" {
 				// Model accepted the request but produced no text (e.g. stopped
-				// on the token budget or emitted only thought parts). Treat as a
-				// transient failure so the retry policy re-requests the payload.
+				// on the schema, the token budget or emitted only thought parts).
+				// First fall back to free-form JSON mode; retain the retryable
+				// error so the retry policy keeps the remaining attempts.
+				if !schemaDropped {
+					schemaDropped = true
+					payload = withoutResponseSchema(reqPayload)
+					log.Printf("[ai/gemini] model %s returned empty output — retrying without responseSchema", model)
+					return fmt.Errorf("gemini returned empty output"), true, 0
+				}
 				return fmt.Errorf("gemini returned empty output"), true, 0
 			}
 			rawText, usage = text, meta
 			return nil, false, 0
+		}
+
+		if resp.StatusCode == http.StatusBadRequest && !thinkingDropped &&
+			(bytes.Contains(respData, []byte("\"thinkingConfig\"")) ||
+				bytes.Contains(respData, []byte("thinkingConfig")) ||
+				bytes.Contains(respData, []byte("thinking_budget"))) {
+			thinkingDropped = true
+			payload = withoutThinkingConfig(reqPayload)
+			return fmt.Errorf("gemini 400 (thinking unsupported): %s", truncateString(string(respData), 200)), true, 0
 		}
 
 		if resp.StatusCode == http.StatusBadRequest && !schemaDropped &&
@@ -705,6 +735,24 @@ func mapChunkResults(items []BatchAnalysisItem, parsed []AnalysisResultItem, usa
 		results[0].Usage = usage
 	}
 	return results
+}
+
+// withoutThinkingConfig returns a copy of the payload with thinkingConfig removed
+// from generationConfig (for models that reject the adaptive-thinking controls).
+func withoutThinkingConfig(payload map[string]interface{}) map[string]interface{} {
+	cloned := make(map[string]interface{}, len(payload))
+	for k, v := range payload {
+		cloned[k] = v
+	}
+	if gcRaw, ok := cloned["generationConfig"].(map[string]interface{}); ok {
+		gc := make(map[string]interface{}, len(gcRaw))
+		for k, v := range gcRaw {
+			gc[k] = v
+		}
+		delete(gc, "thinkingConfig")
+		cloned["generationConfig"] = gc
+	}
+	return cloned
 }
 
 // withoutResponseSchema returns a copy of the payload with responseSchema removed

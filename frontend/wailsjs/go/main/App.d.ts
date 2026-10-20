@@ -10,6 +10,8 @@ export function ClearAppLogs():Promise<void>;
 
 export function ClearDemoLogs():Promise<number>;
 
+export function GetAIUsageSummary():Promise<db.APIUsageSummary>;
+
 export function GetActiveTask():Promise<string>;
 
 export function GetAppLogs(arg1:string,arg2:number):Promise<string>;
@@ -38,7 +40,7 @@ export function GetTodayTrackedSeconds():Promise<number>;
 
 export function GetTrackingStatus():Promise<Record<string, any>>;
 
-export function ListAppLogFiles():Promise<Array<{name:string;size_bytes:number;mod_time:string}>>;
+export function ListAppLogFiles():Promise<Array<Record<string, any>>>;
 
 export function ListAvailableModels():Promise<Array<string>>;
 

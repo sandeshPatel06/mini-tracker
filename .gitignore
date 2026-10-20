@@ -1,9 +1,17 @@
 # Environment & secret files
 .env
+.env.*
 *.env
 !.env.example
 config.yaml
 !config.yaml.example
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+*.secret
+secrets/
 
 # Binaries & build artifacts
 bin/

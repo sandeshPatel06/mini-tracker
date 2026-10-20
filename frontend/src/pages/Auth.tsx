@@ -6,9 +6,11 @@ import logoAsset from '../assets/logo.png';
 interface AuthProps {
   onAuthSuccess: (user: User, org: Organization | null, token?: string) => void;
   onSkip?: () => void;
+  backendUnavailable?: boolean;
+  onRetryConnection?: () => Promise<boolean>;
 }
 
-export function AuthPage({ onAuthSuccess, onSkip }: AuthProps) {
+export function AuthPage({ onAuthSuccess, onSkip, backendUnavailable = false, onRetryConnection }: AuthProps) {
   const [isLogin, setIsLogin] = useState(true);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -18,6 +20,8 @@ export function AuthPage({ onAuthSuccess, onSkip }: AuthProps) {
   const [loading, setLoading] = useState(false);
   const [oauthLoading, setOauthLoading] = useState<'google' | 'azure' | null>(null);
   const [error, setError] = useState('');
+  const [retryingConnection, setRetryingConnection] = useState(false);
+  const [retryFailed, setRetryFailed] = useState(false);
 
   const pollTimerRef = React.useRef<any>(null);
   const oauthTimeoutRef = React.useRef<any>(null);
@@ -138,6 +142,75 @@ export function AuthPage({ onAuthSuccess, onSkip }: AuthProps) {
       }
     }
   };
+
+  const handleRetryConnection = async () => {
+    if (!onRetryConnection) return;
+    setRetryingConnection(true);
+    setRetryFailed(false);
+    const reachable = await onRetryConnection();
+    setRetryingConnection(false);
+    if (!reachable) setRetryFailed(true);
+  };
+
+  if (backendUnavailable) {
+    return (
+      <div className="auth-container">
+        <div className="card fade-in-up" style={{ width: '100%', maxWidth: 400, margin: 'auto', flexShrink: 0 }}>
+          <div className="card-header" style={{ justifyContent: 'center', gap: 10 }}>
+            <img
+              src={logoAsset}
+              alt="get-Hike Logo"
+              style={{ width: 26, height: 26, display: 'block', filter: 'drop-shadow(0 4px 8px color-mix(in srgb, var(--accent-indigo) 40%, transparent))' }}
+            />
+            <span className="card-title" style={{ fontSize: 14, textTransform: 'none', letterSpacing: 0, color: 'var(--text-primary)' }}>
+              get-Hike
+            </span>
+          </div>
+
+          <div className="card-body" style={{ textAlign: 'center' }}>
+            <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 8 }}>Server unavailable</div>
+            <p style={{ fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.55, marginBottom: 16 }}>
+              We couldn't connect to the get-Hike server. You can continue in <strong>Guest Mode</strong> — tracking and
+              AI analysis run locally on this device and your data stays private.
+            </p>
+
+            {onSkip && (
+              <button
+                type="button"
+                className="btn btn-primary w-full"
+                onClick={onSkip}
+                style={{ padding: '10px 16px', fontWeight: 700 }}
+              >
+                Continue in Guest Mode
+              </button>
+            )}
+
+            {onRetryConnection && (
+              <button
+                type="button"
+                className="btn btn-secondary w-full"
+                onClick={handleRetryConnection}
+                disabled={retryingConnection}
+                style={{ marginTop: 8, opacity: retryingConnection ? 0.6 : undefined, cursor: retryingConnection ? 'wait' : undefined }}
+              >
+                {retryingConnection ? 'Checking connection…' : 'Retry connection'}
+              </button>
+            )}
+
+            {retryFailed && (
+              <div className="alert alert-error" style={{ marginTop: 12, fontSize: 12 }} role="alert">
+                Still can't reach the server. Check your network or server address and try again.
+              </div>
+            )}
+
+            <p style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 14, lineHeight: 1.5 }}>
+              Sign-in, team sync, and shared analytics will be available once the server is reachable.
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="auth-container">

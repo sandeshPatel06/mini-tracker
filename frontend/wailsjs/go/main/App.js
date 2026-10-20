@@ -18,6 +18,10 @@ export function ClearDemoLogs() {
   return window['go']['main']['App']['ClearDemoLogs']();
 }
 
+export function GetAIUsageSummary() {
+  return window['go']['main']['App']['GetAIUsageSummary']();
+}
+
 export function GetActiveTask() {
   return window['go']['main']['App']['GetActiveTask']();
 }
@@ -54,12 +58,12 @@ export function GetStats(arg1) {
   return window['go']['main']['App']['GetStats'](arg1);
 }
 
-export function GetThumbnailBase64(arg1) {
-  return window['go']['main']['App']['GetThumbnailBase64'](arg1);
-}
-
 export function GetSyncStatus() {
   return window['go']['main']['App']['GetSyncStatus']();
+}
+
+export function GetThumbnailBase64(arg1) {
+  return window['go']['main']['App']['GetThumbnailBase64'](arg1);
 }
 
 export function GetTodayLogs() {

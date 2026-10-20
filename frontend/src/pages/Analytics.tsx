@@ -182,6 +182,49 @@ export default function Analytics({
   const intervalSec = config?.screenshot_interval_seconds ?? 30;
   const activeMinutes = logs.length > 0 ? (logs.length * intervalSec) / 60 : 0;
 
+  // Quick date-range presets. The selected preset is derived from the active
+  // range so manually picking dates naturally switches the dropdown to Custom.
+  const isoDaysAgo = (days: number) => {
+    const d = new Date();
+    d.setDate(d.getDate() - days);
+    return localISODate(d);
+  };
+  const nowISO = localISODate();
+  const yesterdayISO = isoDaysAgo(1);
+  const last7StartISO = isoDaysAgo(6);
+  const last30StartISO = isoDaysAgo(29);
+
+  const rangePreset = (() => {
+    const s = startDate || today;
+    const e = endDate || today;
+    if (s === e) {
+      if (s === nowISO) return 'today';
+      if (s === yesterdayISO) return 'yesterday';
+    }
+    if (s === last7StartISO && e === nowISO) return 'last7';
+    if (s === last30StartISO && e === nowISO) return 'last30';
+    return 'custom';
+  })();
+
+  const applyRangePreset = (preset: string) => {
+    switch (preset) {
+      case 'today':
+        onDateRangeChange?.(nowISO, nowISO);
+        break;
+      case 'yesterday':
+        onDateRangeChange?.(yesterdayISO, yesterdayISO);
+        break;
+      case 'last7':
+        onDateRangeChange?.(last7StartISO, nowISO);
+        break;
+      case 'last30':
+        onDateRangeChange?.(last30StartISO, nowISO);
+        break;
+      default:
+        break;
+    }
+  };
+
   return (
     <div aria-busy={loading}>
       <div className="page-header" style={{ flexWrap: 'wrap', gap: 12, marginBottom: 16 }}>
@@ -209,6 +252,20 @@ export default function Analytics({
               ))}
             </select>
           )}
+
+          <select
+            className="form-select"
+            aria-label="Date range preset"
+            value={rangePreset}
+            onChange={(e) => applyRangePreset(e.target.value)}
+            style={{ width: 'auto', padding: '8px 32px 8px 10px', fontSize: 13 }}
+          >
+            <option value="today">Today</option>
+            <option value="yesterday">Yesterday</option>
+            <option value="last7">Last 7 days</option>
+            <option value="last30">Last 30 days</option>
+            <option value="custom">Custom range</option>
+          </select>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
             <input

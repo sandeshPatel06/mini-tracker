@@ -1,5 +1,71 @@
 export namespace db {
 	
+	export class UserUsageBreakdown {
+	    user_id: number;
+	    full_name: string;
+	    email: string;
+	    role: string;
+	    total_requests: number;
+	    prompt_tokens: number;
+	    candidate_tokens: number;
+	    total_tokens: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new UserUsageBreakdown(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.user_id = source["user_id"];
+	        this.full_name = source["full_name"];
+	        this.email = source["email"];
+	        this.role = source["role"];
+	        this.total_requests = source["total_requests"];
+	        this.prompt_tokens = source["prompt_tokens"];
+	        this.candidate_tokens = source["candidate_tokens"];
+	        this.total_tokens = source["total_tokens"];
+	    }
+	}
+	export class APIUsageSummary {
+	    total_requests: number;
+	    prompt_tokens: number;
+	    candidate_tokens: number;
+	    total_tokens: number;
+	    by_key_source: Record<string, number>;
+	    user_breakdown?: UserUsageBreakdown[];
+	
+	    static createFrom(source: any = {}) {
+	        return new APIUsageSummary(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.total_requests = source["total_requests"];
+	        this.prompt_tokens = source["prompt_tokens"];
+	        this.candidate_tokens = source["candidate_tokens"];
+	        this.total_tokens = source["total_tokens"];
+	        this.by_key_source = source["by_key_source"];
+	        this.user_breakdown = this.convertValues(source["user_breakdown"], UserUsageBreakdown);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
 	export class LogEntry {
 	    id: number;
 	    org_id: number;

@@ -75,7 +75,7 @@ func StartAppWatcher(stopCh <-chan struct{}, out chan<- TrackerEvent) error {
 
 	// Subscribe to root property changes once; every event afterwards is pushed
 	// to us by the server — no polling anywhere.
-	if err := xproto.ChangeWindowAttributes(X, root, xproto.CwEventMask,
+	if err := xproto.ChangeWindowAttributesChecked(X, root, xproto.CwEventMask,
 		[]uint32{xproto.EventMaskPropertyChange}).Check(); err != nil {
 		return err
 	}

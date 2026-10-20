@@ -24,7 +24,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/holoplot/go-evdev"
 	"github.com/reak/get-hike/internal/ai"
 	"github.com/reak/get-hike/internal/config"
 	"github.com/reak/get-hike/internal/db"
@@ -566,7 +565,7 @@ func main() {
 		}
 
 		if payload.KeyCode > 0 {
-			keyTracker.RecordKeyCode(evdev.EvCode(payload.KeyCode))
+			keyTracker.RecordKeyCode(payload.KeyCode)
 		} else if payload.TotalKeys > 0 {
 			keyTracker.RecordKeystrokes(payload.TotalKeys, payload.UniqueKeys)
 		}

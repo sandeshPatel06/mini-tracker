@@ -5,15 +5,9 @@
 package tracker
 
 import (
-	"log"
 	"math"
-	"os"
-	"path/filepath"
-	"strings"
 	"sync"
 	"time"
-
-	"github.com/holoplot/go-evdev"
 )
 
 // KeystrokeStats holds the keystroke uniqueness metrics for one interval.
@@ -28,7 +22,7 @@ type KeystrokeTracker struct {
 	mu       sync.Mutex
 	stopOnce sync.Once
 	total    int
-	unique   map[evdev.EvCode]struct{}
+	unique   map[int]struct{}
 	stopCh   chan struct{}
 	interval time.Duration
 }
@@ -36,80 +30,17 @@ type KeystrokeTracker struct {
 // NewKeystrokeTracker creates a tracker with the given flush interval.
 func NewKeystrokeTracker(interval time.Duration) *KeystrokeTracker {
 	return &KeystrokeTracker{
-		unique:   make(map[evdev.EvCode]struct{}),
+		unique:   make(map[int]struct{}),
 		stopCh:   make(chan struct{}),
 		interval: interval,
 	}
 }
 
-// Start launches goroutines for all discovered keyboard devices and a flush
-// ticker. The provided channel receives a KeystrokeStats every interval.
+// Start launches native key capture (where supported) and a flush ticker.
+// The provided channel receives a KeystrokeStats every interval.
 func (t *KeystrokeTracker) Start() (<-chan KeystrokeStats, error) {
-	devices, err := discoverKeyboards()
-	if err != nil || len(devices) == 0 {
-		// /dev/input/event* is unreadable without input-group permissions. In
-		// zero-sudo mode we fall back to X11 keymap polling so system-wide
-		// keystroke entropy still gets captured without root access.
-		log.Printf("[tracker] Zero-Sudo Mode Active: /dev/input not readable (no input group) — enabling X11 keymap fallback for Application & API key input tracking")
-	} else {
-		log.Printf("[tracker] Found %d native evdev keyboard device(s)", len(devices))
-	}
-
-	eventCh := make(chan evdev.EvCode, 256)
-
-	// One goroutine per keyboard device
-	for _, path := range devices {
-		go func(devPath string) {
-			dev, err := evdev.Open(devPath)
-			if err != nil {
-				log.Printf("[tracker] cannot open %s: %v", devPath, err)
-				return
-			}
-			defer dev.Close()
-			log.Printf("[tracker] listening on %s", devPath)
-
-			for {
-				// BLOCKING read — goroutine sleeps until the kernel delivers an event.
-				// No select/default spin-loop → zero idle CPU usage.
-				ev, err := dev.ReadOne()
-				if err != nil {
-					return
-				}
-				select {
-				case <-t.stopCh:
-					return
-				default:
-				}
-				// Only capture key-press events (value==1), not releases or repeats
-				if ev.Type == evdev.EV_KEY && ev.Value == 1 {
-					select {
-					case eventCh <- ev.Code:
-					default:
-					}
-				}
-			}
-		}(path)
-	}
-
-	// Zero-sudo fallback: without evdev devices, watch the X11 keyboard state so
-	// typing done outside the app window is still counted.
-	if len(devices) == 0 {
-		go func() {
-			for {
-				if err := pollX11Keymap(eventCh, t.stopCh); err != nil {
-					// No display or X server unavailable — retry occasionally in
-					// case the user logs into a graphical session later.
-					select {
-					case <-time.After(30 * time.Second):
-						continue
-					case <-t.stopCh:
-						return
-					}
-				}
-				return
-			}
-		}()
-	}
+	eventCh := make(chan int, 256)
+	startNativeKeyCapture(eventCh, t.stopCh)
 
 	// Aggregator
 	go func() {
@@ -155,20 +86,20 @@ func (t *KeystrokeTracker) RecordKeystrokes(total, unique int) {
 	defer t.mu.Unlock()
 	t.total += total
 	if t.unique == nil {
-		t.unique = make(map[evdev.EvCode]struct{})
+		t.unique = make(map[int]struct{})
 	}
 	for i := 0; i < unique; i++ {
-		t.unique[evdev.EvCode(100+i)] = struct{}{}
+		t.unique[100+i] = struct{}{}
 	}
 }
 
 // RecordKeyCode records a single keypress event code.
-func (t *KeystrokeTracker) RecordKeyCode(code evdev.EvCode) {
+func (t *KeystrokeTracker) RecordKeyCode(code int) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.total++
 	if t.unique == nil {
-		t.unique = make(map[evdev.EvCode]struct{})
+		t.unique = make(map[int]struct{})
 	}
 	t.unique[code] = struct{}{}
 }
@@ -184,7 +115,7 @@ func (t *KeystrokeTracker) flush() KeystrokeStats {
 	total := t.total
 	unique := len(t.unique)
 	t.total = 0
-	t.unique = make(map[evdev.EvCode]struct{})
+	t.unique = make(map[int]struct{})
 	t.mu.Unlock()
 
 	score := ComputeEntropyScore(total, unique)
@@ -209,47 +140,4 @@ func ComputeEntropyScore(total, unique int) float64 {
 		score = 100
 	}
 	return math.Round(score*10) / 10
-}
-
-// discoverKeyboards returns all /dev/input/event* keyboard device paths.
-// Scans only /dev/input directly and resolves symlinks to avoid duplicate opens.
-func discoverKeyboards() ([]string, error) {
-	entries, err := os.ReadDir("/dev/input")
-	if err != nil {
-		return nil, err
-	}
-
-	seen := make(map[string]bool)
-	var keyboards []string
-
-	for _, e := range entries {
-		name := e.Name()
-		if !strings.HasPrefix(name, "event") {
-			continue
-		}
-		path := filepath.Join("/dev/input", name)
-
-		real, err := filepath.EvalSymlinks(path)
-		if err != nil {
-			real = path
-		}
-		if seen[real] {
-			continue
-		}
-
-		dev, err := evdev.Open(path)
-		if err != nil {
-			continue
-		}
-		caps := dev.CapableTypes()
-		for _, t := range caps {
-			if t == evdev.EV_KEY {
-				keyboards = append(keyboards, path)
-				seen[real] = true
-				break
-			}
-		}
-		dev.Close()
-	}
-	return keyboards, nil
 }

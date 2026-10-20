@@ -193,9 +193,27 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+  build-gate:
+    name: Build & Publish Release Binary
+    needs:
+      - frontend
+      - build
+    if: always()
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Verify all builds succeeded
+        run: |
+          echo "Frontend: ${{ needs.frontend.result }}"
+          echo "Build matrix: ${{ needs.build.result }}"
+          if [ "${{ needs.frontend.result }}" != "success" ] || [ "${{ needs.build.result }}" != "success" ]; then
+            echo "One or more build jobs failed."
+            exit 1
+          fi
+
   release:
     name: Publish Release
-    needs: build
+    needs: build-gate
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
     permissions:

@@ -22,8 +22,8 @@ type Config struct {
 	GoogleClientID     string        `mapstructure:"google_client_id" json:"google_client_id"`
 	GoogleClientSecret string        `mapstructure:"google_client_secret" json:"google_client_secret"`
 	AzureClientID      string        `mapstructure:"azure_client_id" json:"azure_client_id"`
-	AzureClientSecret string        `mapstructure:"azure_client_secret" json:"azure_client_secret"`
-	AzureTenantID     string        `mapstructure:"azure_tenant_id" json:"azure_tenant_id"`
+	AzureClientSecret  string        `mapstructure:"azure_client_secret" json:"azure_client_secret"`
+	AzureTenantID      string        `mapstructure:"azure_tenant_id" json:"azure_tenant_id"`
 }
 
 // Load loads configuration using Viper from config.yaml, .env files, and environment variables.
@@ -36,7 +36,7 @@ func Load() (*Config, error) {
 	}
 
 	// 1. Set default values
-	v.SetDefault("gemini_model", "models/gemma-4-31b-it")
+	v.SetDefault("gemini_model", "models/gemini-3.5-flash-lite")
 	v.SetDefault("screenshot_interval_seconds", 30*time.Second)
 	v.SetDefault("ai_analysis_interval_seconds", 3*time.Hour)
 	v.SetDefault("backend_port", 8080)

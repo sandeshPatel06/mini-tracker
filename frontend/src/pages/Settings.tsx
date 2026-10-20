@@ -18,7 +18,7 @@ interface SettingsPageProps {
 
 export function SettingsPage({ theme = 'auto', onThemeChange, syncIntervalSeconds = 30 }: SettingsPageProps) {
   const [apiKey, setApiKey] = useState(() => localStorage.getItem('mini_gemini_api_key') || '');
-  const [model, setModel] = useState(() => localStorage.getItem('mini_ai_model') || 'models/gemma-4-31b-it');
+  const [model, setModel] = useState(() => localStorage.getItem('mini_ai_model') || 'models/gemini-3.5-flash-lite');
   const [availableModels, setAvailableModels] = useState<AIModel[]>([]);
   const [fetchingModels, setFetchingModels] = useState<boolean>(false);
   const [usageSummary, setUsageSummary] = useState<{ total_requests: number; prompt_tokens: number; candidate_tokens: number; total_tokens: number } | null>(null);
@@ -28,9 +28,14 @@ export function SettingsPage({ theme = 'auto', onThemeChange, syncIntervalSecond
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
 
   const fetchUsageSummary = useCallback(async () => {
-    // Desktop runs standalone (no backend): rely on local usage counters only.
-    if ((window as any).go?.main?.App) {
-      setUsageSummary(null);
+    // Desktop runs standalone (no backend): read today's usage from the local DB.
+    if ((window as any).go?.main?.App?.GetAIUsageSummary) {
+      try {
+        const data = await (window as any).go.main.App.GetAIUsageSummary();
+        setUsageSummary(data);
+      } catch {
+        setUsageSummary(null);
+      }
       return;
     }
     try {
@@ -303,10 +308,10 @@ export function SettingsPage({ theme = 'auto', onThemeChange, syncIntervalSecond
                   ))
                 ) : (
                   <>
-                    <option value="models/gemma-4-31b-it">Gemma 4 31B IT (Fast & Recommended)</option>
+                    <option value="models/gemini-3.5-flash-lite">Gemini 3.5 Flash Lite (Fast & Recommended)</option>
+                    <option value="models/gemini-3.8-flash">Gemini 3.8 Flash (Balanced)</option>
                     <option value="models/gemini-2.5-pro">Gemini 2.5 Pro (Deep Reasoning)</option>
-                    <option value="models/gemini-2.0-flash">Gemini 2.0 Flash (Open Multimodal Fallback)</option>
-                    <option value="models/gemini-2.5-flash">Gemini 2.5 Flash (Balanced)</option>
+                    <option value="models/gemma-4-31b-it">Gemma 4 31B IT (Schema-free Fallback)</option>
                   </>
                 )}
               </select>
@@ -392,9 +397,9 @@ export function SettingsPage({ theme = 'auto', onThemeChange, syncIntervalSecond
         <div className="card-body">
           <div className="stats-grid" style={{ marginBottom: 14 }}>
             <div className="stat-card">
-              <span className="stat-label">{usageSummary ? 'Total AI Requests (all-time)' : 'AI Requests Today'}</span>
+              <span className="stat-label">AI Requests Today</span>
               <div className="stat-value text-purple" style={{ fontSize: 24 }}>{usageSummary?.total_requests ?? usageCount}</div>
-              <div className="stat-sub">{usageSummary ? 'Tracked API requests' : 'Resets every morning (desktop live count)'}</div>
+              <div className="stat-sub">Tracked API requests (resets daily)</div>
             </div>
             <div className="stat-card">
               <span className="stat-label">Prompt Tokens</span>
@@ -414,7 +419,7 @@ export function SettingsPage({ theme = 'auto', onThemeChange, syncIntervalSecond
           </div>
 
           <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
-            Free-tier RPM/RPD/TPM limits are enforced by Google per model (check <strong>Google AI Studio → Rate limits</strong>); the numbers above are live app usage. Analysis is batched (up to 10 logs/request) with automatic retry and model fallback. Tokens are kept low: screenshots are downscaled, and unchanged idle windows reuse the last screenshot instead of sending a fresh one.
+            Free-tier RPM/RPD/TPM limits are enforced by Google per model (check <strong>Google AI Studio → Rate limits</strong>); the numbers above are live app usage. Each completed 5-minute window is analyzed as one session bundle with automatic retry and model fallback. Tokens are kept low: screenshots are downscaled, unchanged idle windows reuse the last screenshot, and stable instructions use Gemini context caching when the model supports it.
           </div>
         </div>
       </div>

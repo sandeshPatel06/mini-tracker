@@ -281,9 +281,33 @@ func (db *DB) migrate() error {
 		"ALTER TABLE logs ADD COLUMN sync_status TEXT DEFAULT 'pending_upload'",
 		"ALTER TABLE logs ADD COLUMN remote_id INTEGER DEFAULT 0",
 		"ALTER TABLE logs ADD COLUMN synced_at DATETIME",
+		"ALTER TABLE logs ADD COLUMN ai_retry_count INTEGER DEFAULT 0",
 	}
 	for _, alter := range colMigrations {
 		_, _ = db.rawDB.Exec(alter)
+	}
+
+	// PostgreSQL accepts IF NOT EXISTS and needs dialect-correct types. Older
+	// server databases predate some columns (notably ai_retry_count), and unlike
+	// SQLite they never went through safeAddColumn below — leaving desktop AI
+	// queries failing with "column ai_retry_count does not exist".
+	if db.dialect == dialect.Postgres {
+		pgMigrations := []string{
+			"ALTER TABLE organizations ADD COLUMN IF NOT EXISTS gemini_api_key TEXT DEFAULT ''",
+			"ALTER TABLE organizations ADD COLUMN IF NOT EXISTS gemini_model TEXT DEFAULT ''",
+			"ALTER TABLE users ADD COLUMN IF NOT EXISTS personal_gemini_api_key TEXT DEFAULT ''",
+			"ALTER TABLE logs ADD COLUMN IF NOT EXISTS sync_status TEXT DEFAULT 'pending_upload'",
+			"ALTER TABLE logs ADD COLUMN IF NOT EXISTS remote_id INTEGER DEFAULT 0",
+			"ALTER TABLE logs ADD COLUMN IF NOT EXISTS synced_at TIMESTAMPTZ",
+			"ALTER TABLE logs ADD COLUMN IF NOT EXISTS ai_retry_count INTEGER DEFAULT 0",
+			"ALTER TABLE logs ADD COLUMN IF NOT EXISTS total_clicks INTEGER DEFAULT 0",
+			"ALTER TABLE logs ADD COLUMN IF NOT EXISTS mouse_distance DOUBLE PRECISION DEFAULT 0",
+		}
+		for _, alter := range pgMigrations {
+			if _, err := db.rawDB.Exec(alter); err != nil {
+				log.Printf("[db] postgres migration note: %v", err)
+			}
+		}
 	}
 
 	stmts := []string{
@@ -1643,7 +1667,7 @@ func (db *DB) SetUserPersonalKey(userID int64, apiKey string) error {
 // 3. Global System Key (fallback)
 func (db *DB) ResolveEffectiveGeminiKey(userID, orgID int64, defaultKey, defaultModel string) (apiKey string, model string, source string, err error) {
 	if defaultModel == "" {
-		defaultModel = "models/gemma-4-31b-it"
+		defaultModel = "models/gemini-3.5-flash-lite"
 	}
 
 	// 1. Check if user is part of an Organization with an Admin-configured key
@@ -1796,6 +1820,46 @@ func (db *DB) GetUserUsageSummary(userID int64) (*APIUsageSummary, error) {
 			GROUP BY key_source
 		`
 	args := []interface{}{userID}
+
+	rows, err := db.rawDB.Query(query, args...)
+	if err != nil {
+		return summary, nil
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var ks string
+		var count int
+		var pTokens, cTokens, tTokens int64
+		if err := rows.Scan(&ks, &count, &pTokens, &cTokens, &tTokens); err == nil {
+			summary.TotalRequests += count
+			summary.PromptTokens += pTokens
+			summary.CandidateTokens += cTokens
+			summary.TotalTokens += tTokens
+			summary.ByKeySource[ks] = tTokens
+		}
+	}
+
+	return summary, rows.Err()
+}
+
+// GetTodayUsageSummary aggregates today's API token usage across all key
+// sources. It powers the desktop settings panel, which has no backend to query.
+func (db *DB) GetTodayUsageSummary() (*APIUsageSummary, error) {
+	summary := &APIUsageSummary{ByKeySource: make(map[string]int64)}
+
+	query := `SELECT key_source, COUNT(*), COALESCE(SUM(prompt_tokens), 0), COALESCE(SUM(candidate_tokens), 0), COALESCE(SUM(total_tokens), 0)
+		FROM api_usage_logs
+		WHERE substr(created_at, 1, 10) = ?
+		GROUP BY key_source`
+	args := []interface{}{time.Now().Format("2006-01-02")}
+	if db.dialect == dialect.Postgres {
+		query = `SELECT key_source, COUNT(*), COALESCE(SUM(prompt_tokens), 0), COALESCE(SUM(candidate_tokens), 0), COALESCE(SUM(total_tokens), 0)
+			FROM api_usage_logs
+			WHERE created_at::date = CURRENT_DATE
+			GROUP BY key_source`
+		args = nil
+	}
 
 	rows, err := db.rawDB.Query(query, args...)
 	if err != nil {

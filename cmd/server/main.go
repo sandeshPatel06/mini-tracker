@@ -936,7 +936,7 @@ func main() {
 		}
 
 		if payload.GeminiModel == "" {
-			payload.GeminiModel = "models/gemma-4-31b-it"
+			payload.GeminiModel = "models/gemini-3.5-flash-lite"
 		}
 
 		if err := database.SetOrgGeminiConfig(user.OrgID, payload.GeminiAPIKey, payload.GeminiModel); err != nil {
@@ -1868,6 +1868,63 @@ func cors(next http.Handler) http.Handler {
 	})
 }
 
+// Bundle scoring: one completed 5-minute capture window becomes one Gemini
+// request whose single score is written back to every capture in the window.
+const (
+	aiBundleWindow     = 5 * time.Minute
+	aiMaxBundleItems   = 12
+	aiMaxBundlesPerRun = 6
+)
+
+// bundleWindowStart returns the local wall-clock 5-minute window start for t.
+func bundleWindowStart(t time.Time) time.Time {
+	minute := t.Minute() - t.Minute()%int(aiBundleWindow/time.Minute)
+	return time.Date(t.Year(), t.Month(), t.Day(), t.Hour(), minute, 0, 0, t.Location())
+}
+
+// bundleWindowLabel renders a human-readable window description for the prompt.
+func bundleWindowLabel(start time.Time) string {
+	end := start.Add(aiBundleWindow)
+	return fmt.Sprintf("%s %s-%s (5-minute bundle)", start.Format("2006-01-02"), start.Format("15:04"), end.Format("15:04"))
+}
+
+// aiBundle is one completed 5-minute window with the captures it contains.
+type aiBundle struct {
+	start time.Time
+	logs  []db.LogEntry
+}
+
+// groupCompletedBundles buckets timestamp-ascending entries into 5-minute
+// wall-clock windows and returns only fully elapsed windows, so the active
+// window stays pending until it is complete.
+func groupCompletedBundles(entries []db.LogEntry, now time.Time) []aiBundle {
+	var bundles []aiBundle
+	index := make(map[string]int)
+	for _, entry := range entries {
+		start := bundleWindowStart(entry.Timestamp)
+		if entry.Timestamp.IsZero() {
+			start = bundleWindowStart(now).Add(-aiBundleWindow)
+		}
+		if !start.Add(aiBundleWindow).Before(now) {
+			break
+		}
+		key := start.Format(time.RFC3339)
+		pos, ok := index[key]
+		if !ok {
+			pos = len(bundles)
+			index[key] = pos
+			bundles = append(bundles, aiBundle{start: start})
+		}
+		bundles[pos].logs = append(bundles[pos].logs, entry)
+	}
+	// Freshest windows first so a large historical backlog cannot delay recent
+	// scores when a run submits only a limited number of requests.
+	for i, j := 0, len(bundles)-1; i < j; i, j = i+1, j-1 {
+		bundles[i], bundles[j] = bundles[j], bundles[i]
+	}
+	return bundles
+}
+
 func processPendingLogs(database *db.DB, gemini *ai.GeminiClient) int {
 	processPendingMu.Lock()
 	defer processPendingMu.Unlock()
@@ -1880,62 +1937,69 @@ func processPendingLogs(database *db.DB, gemini *ai.GeminiClient) int {
 		return 0
 	}
 
-	log.Printf("[server] processing %d pending unanalyzed logs with Gemini (using multi-screenshot batching)...", len(logs))
-	processed := 0
-
-	batchSize := 4
-	for i := 0; i < len(logs); i += batchSize {
-		end := i + batchSize
-		if end > len(logs) {
-			end = len(logs)
-		}
-		chunk := logs[i:end]
-
-		var batchItems []ai.BatchAnalysisItem
-		for _, entry := range chunk {
-			batchItems = append(batchItems, ai.BatchAnalysisItem{
-				LogID:        entry.ID,
-				WindowTitle:  entry.WindowTitle,
-				EntropyScore: entry.EntropyScore,
-				ImagePath:    entry.ImagePath,
-				TotalClicks:  entry.TotalClicks,
-			})
-		}
-
-		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-		results, err := gemini.AnalyzeBatch(ctx, batchItems)
-		cancel()
-
-		if err != nil {
-			log.Printf("[server] batch AI analysis error for %d logs: %v (falling back to single item analysis)", len(batchItems), err)
-			for _, entry := range chunk {
-				sCtx, sCancel := context.WithTimeout(context.Background(), 45*time.Second)
-				res, sErr := gemini.Analyze(sCtx, entry.WindowTitle, entry.EntropyScore, entry.TotalClicks)
-				sCancel()
-				if sErr == nil {
-					_ = database.UpdateLogAnalysis(entry.ID, res.Category, res.AppName, res.AppCategory, res.WindowTitle, 0, "", res.Productive, res.ProductiveScore, res.Confidence, res.Reason)
-					_ = database.RecordAPIUsage(0, 0, "global_system", res.Usage.PromptTokenCount, res.Usage.CandidatesTokenCount, res.Usage.TotalTokenCount, gemini.GetModel())
-					processed++
-				} else {
-					_ = database.IncrementAIRetryCount(entry.ID)
-				}
-			}
-			continue
-		}
-
-		for _, res := range results {
-			if err := database.UpdateLogAnalysis(res.LogID, res.Category, res.AppName, res.AppCategory, res.WindowTitle, 0, "", res.Productive, res.ProductiveScore, res.Confidence, res.Reason); err == nil {
-				processed++
-			}
-			if res.Usage.TotalTokenCount > 0 {
-				_ = database.RecordAPIUsage(0, 0, "global_system", res.Usage.PromptTokenCount, res.Usage.CandidatesTokenCount, res.Usage.TotalTokenCount, gemini.GetModel())
-			}
-		}
-
-		time.Sleep(1 * time.Second)
+	bundles := groupCompletedBundles(logs, time.Now())
+	if len(bundles) == 0 {
+		return 0
 	}
 
-	log.Printf("[server] completed processing %d/%d pending logs", processed, len(logs))
+	log.Printf("[server] processing %d pending logs in %d completed 5-minute bundles...", len(logs), len(bundles))
+	processed := 0
+	requests := 0
+
+bundleLoop:
+	for _, bundle := range bundles {
+		for i := 0; i < len(bundle.logs); i += aiMaxBundleItems {
+			end := i + aiMaxBundleItems
+			if end > len(bundle.logs) {
+				end = len(bundle.logs)
+			}
+			chunk := bundle.logs[i:end]
+
+			if requests >= aiMaxBundlesPerRun {
+				log.Printf("[server] bundle run budget reached (%d requests) — remaining bundles stay pending", requests)
+				break bundleLoop
+			}
+			requests++
+
+			batchItems := make([]ai.BatchAnalysisItem, 0, len(chunk))
+			for _, entry := range chunk {
+				batchItems = append(batchItems, ai.BatchAnalysisItem{
+					LogID:        entry.ID,
+					WindowTitle:  entry.WindowTitle,
+					EntropyScore: entry.EntropyScore,
+					ImagePath:    entry.ImagePath,
+					TotalClicks:  entry.TotalClicks,
+					AppName:      entry.AppName,
+					Timestamp:    entry.Timestamp,
+				})
+			}
+
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+			result, usage, bundleErr := gemini.AnalyzeSessionBundle(ctx, batchItems, bundleWindowLabel(bundle.start))
+			cancel()
+
+			if bundleErr != nil {
+				log.Printf("[server] bundle AI analysis error for %d logs: %v — incrementing retry counts", len(chunk), bundleErr)
+				for _, entry := range chunk {
+					_ = database.IncrementAIRetryCount(entry.ID)
+				}
+				continue
+			}
+
+			for _, entry := range chunk {
+				if err := database.UpdateLogAnalysis(entry.ID, result.Category, result.AppName, result.AppCategory, entry.WindowTitle, 0, "", result.Score >= 50, result.Score, result.Confidence, result.Reason); err == nil {
+					processed++
+				}
+			}
+			if usage.TotalTokenCount > 0 {
+				_ = database.RecordAPIUsage(0, 0, "global_system", usage.PromptTokenCount, usage.CandidatesTokenCount, usage.TotalTokenCount, gemini.GetModel())
+			}
+
+			time.Sleep(1 * time.Second)
+		}
+	}
+
+	log.Printf("[server] completed processing %d/%d pending logs in %d bundle requests", processed, len(logs), requests)
 	return processed
 }
 

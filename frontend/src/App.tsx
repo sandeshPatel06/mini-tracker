@@ -329,6 +329,7 @@ export default function App() {
     return localStorage.getItem('mini_guest_mode') === 'true';
   });
   const [authNotice, setAuthNotice] = useState<string | null>(null);
+  const [backendUnavailable, setBackendUnavailable] = useState<boolean>(false);
 
   // Theme Management (Dark, Light, Auto System Preference)
   const [theme, setTheme] = useState<'dark' | 'light' | 'auto'>(() => {
@@ -393,9 +394,24 @@ export default function App() {
 
   // Verify active user session on startup
   useEffect(() => {
-    apiFetch('/api/auth/me')
-      .then(r => r.ok ? r.json() : null)
-      .then(data => {
+    const checkSession = async () => {
+      // Desktop: resolve the configured backend URL before probing auth,
+      // otherwise relative requests hit the Wails asset server.
+      if ((window as any).go?.main?.App?.GetConfig) {
+        try {
+          const appConfig = await (window as any).go.main.App.GetConfig();
+          if (appConfig?.backend_endpoint) {
+            setRuntimeBackendUrl(appConfig.backend_endpoint);
+          }
+        } catch {
+          // Keep the relative URL; the probe below decides reachability.
+        }
+      }
+
+      try {
+        const res = await apiFetch('/api/auth/me');
+        const data = res.ok ? await res.json() : null;
+        setBackendUnavailable(false);
         if (data && data.authenticated && data.user) {
           setCurrentUser(data.user);
           localStorage.setItem('mini_auth_user', JSON.stringify(data.user));
@@ -409,9 +425,11 @@ export default function App() {
             setIsGuestMode(true);
           }
         }
-      })
-      .catch(() => {
-        // Server unreachable / offline:
+      } catch {
+        // Server unreachable / offline: desktop shows guest-only sign-in.
+        if ((window as any).go?.main?.App) {
+          setBackendUnavailable(true);
+        }
         if (localStorage.getItem('mini_guest_mode') === 'true') {
           setIsGuestMode(true);
           return;
@@ -429,10 +447,33 @@ export default function App() {
         } catch {
           // Ignore malformed cached user JSON
         }
-      })
-      .finally(() => {
+      } finally {
         setAuthChecked(true);
-      });
+      }
+    };
+
+    checkSession();
+  }, []);
+
+  const retryBackendConnection = useCallback(async (): Promise<boolean> => {
+    if ((window as any).go?.main?.App?.GetConfig) {
+      try {
+        const appConfig = await (window as any).go.main.App.GetConfig();
+        if (appConfig?.backend_endpoint) {
+          setRuntimeBackendUrl(appConfig.backend_endpoint);
+        }
+      } catch {
+        // Retry below reports the failure.
+      }
+    }
+    try {
+      await apiFetch('/api/auth/me');
+      setBackendUnavailable(false);
+      return true;
+    } catch {
+      setBackendUnavailable(true);
+      return false;
+    }
   }, []);
 
   // Keep the Wails backend session in sync with the real auth state (JWT + guest flag)
@@ -741,7 +782,7 @@ export default function App() {
 
     const localApiKey = localStorage.getItem('mini_gemini_api_key');
     setAiKeyPresent(!!localApiKey);
-    const rawModel = localStorage.getItem('mini_ai_model') || 'models/gemma-4-31b-it';
+    const rawModel = localStorage.getItem('mini_ai_model') || 'models/gemini-3.5-flash-lite';
     const localModel = rawModel.startsWith('models/') ? rawModel : `models/${rawModel}`;
     const intervalSec = configData?.screenshot_interval_seconds || 30;
 
@@ -983,6 +1024,8 @@ export default function App() {
           </div>
         )}
         <AuthPage
+          backendUnavailable={backendUnavailable}
+          onRetryConnection={retryBackendConnection}
           onAuthSuccess={(user, org, token) => {
             if (user) {
               localStorage.setItem('mini_auth_user', JSON.stringify(user));

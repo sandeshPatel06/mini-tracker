@@ -12,7 +12,7 @@
 
 ## Current State (baseline)
 
-- Sync path: `internal/ai/gemini.go:298` `AnalyzeBatch` (no request-level retry/failover), default model `gemma-4-31b-it`.
+- Sync path: `internal/ai/gemini.go:298` `AnalyzeBatch` (no request-level retry/failover), default model `gemini-3.5-flash-lite`.
 - Server cron: `cmd/server/main.go:57-68`; batch-of-4 loop `processPendingLogs` at `cmd/server/main.go:1704`.
 - Wails: one-shot auto-process `app.go:156-166`, `ProcessPendingLogs` `app.go:652` (sequential single-item).
 - Queue state: `logs.ai_category` + `ai_retry_count` (`internal/db/db.go:1257`, `internal/db/db.go:1300`); no job tables exist.
@@ -81,7 +81,7 @@ ai_batch_items(job_id, log_id, item_key, status[pending|success|error], error, P
 
 ## Fallback Chain (paid never)
 
-probing → free-batch active? → batch … otherwise interactive `gemma-4-31b-it` (existing). Probe failure = zero charge (free keys have no billing account).
+probing → free-batch active? → batch … otherwise interactive `gemini-3.5-flash-lite` (existing). Probe failure = zero charge (free keys have no billing account).
 
 ## Tests
 

@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Modal } from './Modal';
+import { CustomSelect } from './CustomSelect';
+import { Icon } from './Icon';
 import {
   BrowserOpenURL,
   ClipboardSetText,
@@ -278,49 +280,58 @@ function LogsTab({ results, report, run }: DevTabProps) {
   return (
     <div>
       <div className="dev-toolbar">
-        <label className="dev-field">
-          File
-          <select
-            className="dev-select"
+        <div className="dev-field">
+          <span>File</span>
+          <CustomSelect
+            compact
+            ariaLabel="Log file"
             value={selectedFile}
-            onChange={(event) => setSelectedFile(event.target.value)}
-          >
-            <option value="">Today</option>
-            {files.map((file) => (
-              <option key={file.name} value={file.name}>
-                {file.name}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="dev-field">
-          Tail
-          <select
-            className="dev-select"
-            value={tailLines}
-            onChange={(event) => setTailLines(Number(event.target.value))}
-          >
-            <option value={100}>100</option>
-            <option value={500}>500</option>
-            <option value={1000}>1000</option>
-          </select>
-        </label>
-        <label className="dev-field">
-          Level
-          <select
-            className="dev-select"
+            onChange={setSelectedFile}
+            triggerStyle={{ minWidth: 120, background: 'var(--bg-base)' }}
+            options={[
+              { value: '', label: 'Today', leading: <Icon name="file-text" size={13} /> },
+              ...files.map((file) => ({
+                value: file.name,
+                label: file.name,
+                leading: <Icon name="file-text" size={13} />,
+              })),
+            ]}
+          />
+        </div>
+        <div className="dev-field">
+          <span>Tail</span>
+          <CustomSelect
+            compact
+            ariaLabel="Tail lines"
+            value={String(tailLines)}
+            onChange={(value) => setTailLines(Number(value))}
+            triggerStyle={{ minWidth: 78, background: 'var(--bg-base)' }}
+            options={[100, 500, 1000].map((lines) => ({
+              value: String(lines),
+              label: String(lines),
+              meta: 'lines',
+            }))}
+          />
+        </div>
+        <div className="dev-field">
+          <span>Level</span>
+          <CustomSelect
+            compact
+            ariaLabel="Log level"
             value={level}
-            onChange={(event) =>
-              setLevel(event.target.value as 'all' | 'debug' | 'info' | 'warn' | 'error')
+            onChange={(value) =>
+              setLevel(value as 'all' | 'debug' | 'info' | 'warn' | 'error')
             }
-          >
-            <option value="all">All</option>
-            <option value="debug">Debug</option>
-            <option value="info">Info</option>
-            <option value="warn">Warn</option>
-            <option value="error">Error</option>
-          </select>
-        </label>
+            triggerStyle={{ minWidth: 92, background: 'var(--bg-base)' }}
+            options={[
+              { value: 'all', label: 'All' },
+              { value: 'debug', label: 'Debug' },
+              { value: 'info', label: 'Info' },
+              { value: 'warn', label: 'Warn' },
+              { value: 'error', label: 'Error' },
+            ]}
+          />
+        </div>
         <label className="dev-field">
           <input
             className="dev-checkbox"
@@ -808,11 +819,12 @@ function AITab({ results, report, run }: DevTabProps) {
 
       <div className="dev-section-title">Backend log level</div>
       <div className="dev-btn-row">
-        <select
-          className="dev-select"
+        <CustomSelect
+          compact
+          ariaLabel="Backend log level"
           value={logLevel}
-          onChange={(event) => {
-            const value = event.target.value as 'all' | 'debug' | 'info' | 'warn' | 'error';
+          onChange={(nextValue) => {
+            const value = nextValue as 'all' | 'debug' | 'info' | 'warn' | 'error';
             setLogLevel(value);
             void run('ai-loglevel', async () => {
               const mapped = value === 'all' ? 'debug' : value;
@@ -822,13 +834,15 @@ function AITab({ results, report, run }: DevTabProps) {
                 : `Log level set to ${value}`;
             });
           }}
-        >
-          <option value="all">All</option>
-          <option value="debug">Debug</option>
-          <option value="info">Info</option>
-          <option value="warn">Warn</option>
-          <option value="error">Error</option>
-        </select>
+          triggerStyle={{ minWidth: 96, background: 'var(--bg-base)' }}
+          options={[
+            { value: 'all', label: 'All' },
+            { value: 'debug', label: 'Debug' },
+            { value: 'info', label: 'Info' },
+            { value: 'warn', label: 'Warn' },
+            { value: 'error', label: 'Error' },
+          ]}
+        />
       </div>
       <ResultLine result={results['ai-loglevel']} />
     </div>

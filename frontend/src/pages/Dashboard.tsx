@@ -1,10 +1,12 @@
 import { useState, useEffect } from 'react';
+import type { ReactNode } from 'react';
 import { LogEntry, ProductivityStats, AppConfig, WorkSession } from '../types';
 import { apiFetch } from '../api';
 import { format } from 'date-fns';
 import { CategoryBadge } from '../components/CategoryBadge';
 import { ScreenshotThumb, ImageModal } from '../components/Screenshot';
 import { Icon } from '../components/Icon';
+import { AppIcon } from '../components/AppIcon';
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, Cell } from 'recharts';
 import { localISODate, isPendingLog, buildLocalWorkSessions, FOCUS_GOOD, FOCUS_OK } from '../utils';
 
@@ -60,6 +62,7 @@ function StatCard({
   sub,
   valueClass,
   valueColor,
+  leading,
 }: {
   label: string;
   value: string | number;
@@ -67,6 +70,7 @@ function StatCard({
   sub?: string;
   valueClass?: string;
   valueColor?: string;
+  leading?: ReactNode;
 }) {
   return (
     <div className="stat-card">
@@ -75,15 +79,18 @@ function StatCard({
         className={`stat-value${valueClass ? ` ${valueClass}` : ''}`}
         title={valueTitle}
         style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 8,
           fontSize: 24,
           fontVariantNumeric: 'tabular-nums',
           overflow: 'hidden',
-          textOverflow: 'ellipsis',
           whiteSpace: 'nowrap',
           color: valueColor,
         }}
       >
-        {value}
+        {leading}
+        <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>{value}</span>
       </div>
       {sub && <div className="stat-sub">{sub}</div>}
     </div>
@@ -321,6 +328,7 @@ export default function Dashboard({ logs, stats, config, loading, today, onRefre
           valueTitle={topApps[0]?.appName || stats?.top_category || undefined}
           sub={topApps[0] ? `${topApps[0].percent}% of captures` : `${logs.length} snapshots recorded`}
           valueClass="text-teal"
+          leading={topApps[0] ? <AppIcon name={topApps[0].appName} size={22} /> : undefined}
         />
       </div>
 
@@ -399,6 +407,7 @@ export default function Dashboard({ logs, stats, config, loading, today, onRefre
                   <div key={app.appName} style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, fontSize: 13 }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0, flex: 1 }}>
+                        <AppIcon name={app.appName} size={16} />
                         <span title={app.appName} style={{ fontWeight: 600, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{app.appName}</span>
                         <span title={app.category} style={{ fontSize: 11, color: 'var(--text-muted)', maxWidth: 120, flexShrink: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>({app.category})</span>
                       </div>
@@ -456,8 +465,11 @@ export default function Dashboard({ logs, stats, config, loading, today, onRefre
                 }}
               >
                 <div style={{ minWidth: 0, flex: 1 }}>
-                  <div title={session.title} style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {session.title}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+                    {session.top_app_name && <AppIcon name={session.top_app_name} size={16} />}
+                    <span title={session.title} style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {session.title}
+                    </span>
                   </div>
                   <div title={session.summary} style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     {session.summary}
@@ -525,6 +537,9 @@ export default function Dashboard({ logs, stats, config, loading, today, onRefre
                           <span
                             title={log.app_name}
                             style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: 5,
                               fontSize: 11,
                               fontWeight: 600,
                               padding: '2px 8px',
@@ -534,11 +549,13 @@ export default function Dashboard({ logs, stats, config, loading, today, onRefre
                               border: '1px solid var(--border-subtle)',
                               maxWidth: 180,
                               overflow: 'hidden',
-                              textOverflow: 'ellipsis',
                               whiteSpace: 'nowrap',
                             }}
                           >
-                            💻 {log.app_name}
+                            <AppIcon name={log.app_name} size={14} />
+                            <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                              {log.app_name}
+                            </span>
                           </span>
                         )}
                         {log.app_category && (

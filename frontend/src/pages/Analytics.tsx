@@ -2,6 +2,9 @@ import { useState, useEffect, useMemo } from 'react';
 import { LogEntry, ProductivityStats, User, AppConfig } from '../types';
 import { apiFetch } from '../api';
 import { format } from 'date-fns';
+import { AppIcon } from '../components/AppIcon';
+import { CustomSelect } from '../components/CustomSelect';
+import { Icon } from '../components/Icon';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   LineChart, Line, PieChart, Pie, Cell, Legend,
@@ -237,35 +240,43 @@ export default function Analytics({
 
         <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
           {(currentUser?.role === 'admin' || currentUser?.role === 'owner') && members.length > 0 && (
-            <select
-              className="form-select"
-              aria-label="Filter by team member"
-              value={selectedUserId || ''}
-              onChange={(e) => onUserChange?.(e.target.value ? Number(e.target.value) : null)}
-              style={{ width: 'auto', maxWidth: 280, padding: '8px 32px 8px 10px', fontSize: 13 }}
-            >
-              <option value="">👥 All Organization Users</option>
-              {members.map(m => (
-                <option key={m.id} value={m.id}>
-                  👤 {m.full_name || m.email} ({m.role})
-                </option>
-              ))}
-            </select>
+            <CustomSelect
+              ariaLabel="Filter by team member"
+              value={selectedUserId ? String(selectedUserId) : ''}
+              onChange={(value) => onUserChange?.(value ? Number(value) : null)}
+              triggerStyle={{ maxWidth: 280 }}
+              options={[
+                {
+                  value: '',
+                  label: 'All Organization Users',
+                  leading: <Icon name="users" size={14} />,
+                },
+                ...members.map((member) => {
+                  const name = member.full_name || member.email;
+                  return {
+                    value: String(member.id),
+                    label: name,
+                    triggerLabel: `${name} (${member.role})`,
+                    meta: member.role,
+                    leading: <Icon name="user" size={14} />,
+                  };
+                }),
+              ]}
+            />
           )}
 
-          <select
-            className="form-select"
-            aria-label="Date range preset"
+          <CustomSelect
+            ariaLabel="Date range preset"
             value={rangePreset}
-            onChange={(e) => applyRangePreset(e.target.value)}
-            style={{ width: 'auto', padding: '8px 32px 8px 10px', fontSize: 13 }}
-          >
-            <option value="today">Today</option>
-            <option value="yesterday">Yesterday</option>
-            <option value="last7">Last 7 days</option>
-            <option value="last30">Last 30 days</option>
-            <option value="custom">Custom range</option>
-          </select>
+            onChange={applyRangePreset}
+            options={[
+              { value: 'today', label: 'Today', leading: <Icon name="calendar" size={14} /> },
+              { value: 'yesterday', label: 'Yesterday', leading: <Icon name="calendar" size={14} /> },
+              { value: 'last7', label: 'Last 7 days', leading: <Icon name="calendar" size={14} /> },
+              { value: 'last30', label: 'Last 30 days', leading: <Icon name="calendar" size={14} /> },
+              { value: 'custom', label: 'Custom range', leading: <Icon name="calendar" size={14} /> },
+            ]}
+          />
 
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
             <input
@@ -402,7 +413,8 @@ export default function Analytics({
                     <div key={app.name} style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, fontSize: 13 }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0, flex: 1 }}>
-                          <span title={app.name} style={{ fontWeight: 600, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>💻 {app.name}</span>
+                          <AppIcon name={app.name} size={16} />
+                          <span title={app.name} style={{ fontWeight: 600, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{app.name}</span>
                           <span title={app.category} style={{ fontSize: 11, color: 'var(--text-muted)', maxWidth: 120, flexShrink: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>({app.category})</span>
                         </div>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>

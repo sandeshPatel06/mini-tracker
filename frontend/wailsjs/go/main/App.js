@@ -26,6 +26,10 @@ export function GetActiveTask() {
   return window['go']['main']['App']['GetActiveTask']();
 }
 
+export function GetAppIcon(arg1) {
+  return window['go']['main']['App']['GetAppIcon'](arg1);
+}
+
 export function GetAppLogs(arg1, arg2) {
   return window['go']['main']['App']['GetAppLogs'](arg1, arg2);
 }

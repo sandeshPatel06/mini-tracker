@@ -3,6 +3,7 @@ import { LogEntry, ProductivityStats, User, AppConfig } from '../types';
 import { apiFetch } from '../api';
 import { format } from 'date-fns';
 import { AppIcon } from '../components/AppIcon';
+import { canonicalAppName } from '../lib/appNames';
 import { CustomSelect } from '../components/CustomSelect';
 import { Icon } from '../components/Icon';
 import {
@@ -122,7 +123,7 @@ export default function Analytics({
   const appData = useMemo(() => {
     const appMap: Record<string, { count: number; category: string; totalScore: number }> = {};
     logs.forEach(l => {
-      const app = l.app_name || 'Other';
+      const app = canonicalAppName(l.app_name) || 'Other';
       if (!appMap[app]) {
         appMap[app] = { count: 0, category: l.app_category || 'Application', totalScore: 0 };
       }

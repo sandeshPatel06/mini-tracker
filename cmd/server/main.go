@@ -62,6 +62,12 @@ func main() {
 	}
 	defer database.Close()
 
+	if updated, err := database.NormalizeAppNames(); err != nil {
+		log.Printf("[server] app name normalisation error: %v", err)
+	} else if updated > 0 {
+		log.Printf("[server] normalised %d legacy app name rows", updated)
+	}
+
 	gemini := ai.NewGeminiClient(cfg.GeminiAPIKey, cfg.GeminiModel)
 	if gemini.HasKey() {
 		go processPendingLogs(database, gemini)

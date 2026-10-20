@@ -276,3 +276,26 @@ func TestWithPostgresSessionTimeZone(t *testing.T) {
 		t.Fatalf("expected explicit options to be preserved, got %q", got)
 	}
 }
+
+func TestGetTodayUsageSummary(t *testing.T) {
+	database, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	if err := database.RecordAPIUsage(0, 0, "guest", 100, 20, 120, "gemini-3.5-flash-lite"); err != nil {
+		t.Fatalf("RecordAPIUsage: %v", err)
+	}
+	if err := database.RecordAPIUsage(0, 0, "guest", 50, 10, 60, "gemini-3.5-flash-lite"); err != nil {
+		t.Fatalf("RecordAPIUsage: %v", err)
+	}
+
+	summary, err := database.GetTodayUsageSummary()
+	if err != nil {
+		t.Fatalf("GetTodayUsageSummary: %v", err)
+	}
+	if summary.TotalRequests != 2 {
+		t.Fatalf("requests = %d, want 2", summary.TotalRequests)
+	}
+	if summary.PromptTokens != 150 || summary.CandidateTokens != 30 || summary.TotalTokens != 180 {
+		t.Fatalf("tokens = %d/%d/%d, want 150/30/180", summary.PromptTokens, summary.CandidateTokens, summary.TotalTokens)
+	}
+}

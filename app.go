@@ -69,6 +69,11 @@ type App struct {
 	// lastAIAttempt throttles automatic AI batch runs (guarded by statsMu).
 	lastAIAttempt time.Time
 
+	// syncOffline is true while the last backend sync attempt failed, meaning
+	// backend-side analysis cannot be relied on and the desktop must fall back
+	// to local Gemini analysis (guarded by statsMu).
+	syncOffline bool
+
 	// shuttingDown flips true once shutdown begins so collection loops skip
 	// racing inserts against the closing DB.
 	shuttingDown atomic.Bool
@@ -226,7 +231,9 @@ func (a *App) startup(ctx context.Context) {
 					continue
 				}
 				ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
-				if err := a.syncEngine.TriggerSyncNow(ctx); err != nil {
+				err = a.syncEngine.TriggerSyncNow(ctx)
+				a.markSyncReachable(err == nil)
+				if err != nil {
 					log.Printf("[app] pending upload retry failed (%d queued): %v", pending, err)
 				}
 				cancel()
@@ -246,28 +253,30 @@ func (a *App) startup(ctx context.Context) {
 		}()
 	}
 
-	// Periodic batched AI analysis — throttled between 2 and 15 minutes to minimize
-	// API usage while keeping the dashboard fresh. Runs regardless of startup key so
-	// a key added at runtime is picked up automatically; no-ops without a key.
+	// Periodic bundle AI analysis — throttled between 2 and 5 minutes: each
+	// completed 5-minute capture window is sent as one bundle, so the cron must
+	// fire at least once per window to keep scores flowing. Runs regardless of
+	// startup key so a key added at runtime is picked up automatically; no-ops
+	// without a key. In authenticated mode this is a fallback: the backend
+	// analyzes pushed telemetry while sync is healthy, but if the backend is
+	// unreachable the desktop analyzes locally so captures never stay pending.
 	go func() {
 		interval := cfg.AIAnalysisInterval
 		if interval < 2*time.Minute {
 			interval = 2 * time.Minute
 		}
-		if interval > 15*time.Minute {
-			interval = 15 * time.Minute
+		if interval > aiBundleWindow {
+			interval = aiBundleWindow
 		}
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
-		log.Printf("[app] AI batch analysis cron interval: %v", interval)
+		log.Printf("[app] AI bundle analysis cron interval: %v", interval)
 		for {
 			select {
 			case <-a.ctx.Done():
 				return
 			case <-ticker.C:
-				// Guest / solo / not-yet-authenticated modes analyze locally
-				// (including the background daemon, which has no auth token).
-				if a.isGuest || a.syncEngine == nil || !a.syncEngine.Enabled() {
+				if a.syncUnavailable() {
 					a.processPendingAIBatched()
 				}
 			}
@@ -449,9 +458,35 @@ func (a *App) collect() {
 		go func() {
 			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			defer cancel()
-			_ = a.syncEngine.TriggerSyncNow(ctx)
+			err := a.syncEngine.TriggerSyncNow(ctx)
+			a.markSyncReachable(err == nil)
+			if err != nil {
+				// Backend unavailable: fall back to local analysis so captures
+				// do not stay unanalyzed just because sync is down.
+				go a.notifyPendingAI()
+			}
 		}()
 	}
+}
+
+// markSyncReachable records whether the backend sync path is currently usable.
+func (a *App) markSyncReachable(ok bool) {
+	a.statsMu.Lock()
+	a.syncOffline = !ok
+	a.statsMu.Unlock()
+}
+
+// syncUnavailable reports whether backend-side analysis cannot currently be
+// relied on — no sync session at all, or the last sync attempt failed — so the
+// desktop should analyze locally instead. This keeps AI scoring working when
+// the desktop app runs standalone (backend down or never configured).
+func (a *App) syncUnavailable() bool {
+	if a.isGuest || a.syncEngine == nil || !a.syncEngine.Enabled() {
+		return true
+	}
+	a.statsMu.Lock()
+	defer a.statsMu.Unlock()
+	return a.syncOffline
 }
 
 // syncActive reports whether the app currently holds a usable backend session
@@ -483,10 +518,20 @@ func (a *App) TriggerSyncNow() (bool, error) {
 	defer cancel()
 
 	err := a.syncEngine.TriggerSyncNow(ctx)
+	a.markSyncReachable(err == nil)
 	if err != nil {
 		return false, err
 	}
 	return true, nil
+}
+
+// GetAIUsageSummary returns today's local AI request/token totals so the
+// desktop settings panel can show real token usage without a backend.
+func (a *App) GetAIUsageSummary() (*db.APIUsageSummary, error) {
+	if a.database == nil {
+		return &db.APIUsageSummary{ByKeySource: map[string]int64{}}, nil
+	}
+	return a.database.GetTodayUsageSummary()
 }
 
 // SetUserPersonalKey sets personal Gemini API Key for solo users.
@@ -504,7 +549,7 @@ func (a *App) SetUserPersonalKey(apiKey string) (bool, error) {
 // SetOrgGeminiKey updates the organization Gemini API key in backend DB.
 func (a *App) SetOrgGeminiKey(orgID int64, apiKey string) (bool, error) {
 	if a.database != nil && orgID > 0 {
-		if err := a.database.SetOrgGeminiConfig(orgID, apiKey, "models/gemma-4-31b-it"); err != nil {
+		if err := a.database.SetOrgGeminiConfig(orgID, apiKey, "models/gemini-3.5-flash-lite"); err != nil {
 			return false, err
 		}
 	}
@@ -890,7 +935,74 @@ func (a *App) UpdateScreenshotInterval(seconds int) (bool, error) {
 	return true, nil
 }
 
-const aiBatchSize = 10
+// aiBundleWindow is the wall-clock width of one work-session bundle: every
+// completed 5-minute window is sent to Gemini as a single request and receives
+// one score that is written back to every capture in the window.
+const aiBundleWindow = 5 * time.Minute
+
+// aiMaxBundleItems caps how many captures one bundle request may contain;
+// denser windows are split into consecutive requests.
+const aiMaxBundleItems = 12
+
+// aiMaxBundlesPerRun bounds how many bundle requests one run submits so a large
+// backlog drains in steady increments instead of one very long run.
+const aiMaxBundlesPerRun = 6
+
+// aiBundleMinLogs is the pending-log floor that triggers an early analysis run.
+const aiBundleMinLogs = 5
+
+// bundleWindowStart returns the local wall-clock 5-minute window start for t.
+func bundleWindowStart(t time.Time) time.Time {
+	minute := t.Minute() - t.Minute()%int(aiBundleWindow/time.Minute)
+	return time.Date(t.Year(), t.Month(), t.Day(), t.Hour(), minute, 0, 0, t.Location())
+}
+
+// bundleWindowLabel renders a human-readable window description for the prompt.
+func bundleWindowLabel(start time.Time) string {
+	end := start.Add(aiBundleWindow)
+	return fmt.Sprintf("%s %s-%s (5-minute bundle)", start.Format("2006-01-02"), start.Format("15:04"), end.Format("15:04"))
+}
+
+// aiBundle is one completed 5-minute window with the captures it contains.
+type aiBundle struct {
+	start time.Time
+	logs  []db.LogEntry
+}
+
+// groupCompletedBundles buckets timestamp-ascending entries into 5-minute
+// wall-clock windows and returns only windows that have fully elapsed, so the
+// currently-active window stays pending until it is complete. Entries with a
+// zero timestamp are attached to the most recent completed window.
+func groupCompletedBundles(entries []db.LogEntry, now time.Time) []aiBundle {
+	var bundles []aiBundle
+	index := make(map[string]int)
+	for _, entry := range entries {
+		start := bundleWindowStart(entry.Timestamp)
+		if entry.Timestamp.IsZero() {
+			start = bundleWindowStart(now).Add(-aiBundleWindow)
+		}
+		if !start.Add(aiBundleWindow).Before(now) {
+			// Sorted ascending: everything after this point is in the current or
+			// a future window, which must not be scored before it is complete.
+			break
+		}
+		key := start.Format(time.RFC3339)
+		pos, ok := index[key]
+		if !ok {
+			pos = len(bundles)
+			index[key] = pos
+			bundles = append(bundles, aiBundle{start: start})
+		}
+		bundles[pos].logs = append(bundles[pos].logs, entry)
+	}
+	// Process the freshest windows first: a large historical backlog must not
+	// delay today's scores when a run can only submit a limited number of
+	// requests.
+	for i, j := 0, len(bundles)-1; i < j; i, j = i+1, j-1 {
+		bundles[i], bundles[j] = bundles[j], bundles[i]
+	}
+	return bundles
+}
 
 // aiRetryMinGap is the minimum delay between automatic AI batch attempts.
 // It keeps offline devices from hammering the API while still recovering quickly
@@ -960,7 +1072,7 @@ func (a *App) notifyPendingAI() {
 		return
 	}
 	count, err := a.database.CountUnanalyzedLogs()
-	if err != nil || count < aiBatchSize {
+	if err != nil || count < aiBundleMinLogs {
 		return
 	}
 	a.processPendingAIBatched()
@@ -1001,9 +1113,11 @@ func (a *App) ProcessPendingLogs() (int, error) {
 	return a.processPendingAI()
 }
 
-// processPendingAI analyzes pending logs in groups of aiBatchSize using the compact
-// prompt, thumbnail images, request-level retry and model failover. Partial results
-// are applied immediately; items without results get their retry counter incremented.
+// processPendingAI scores pending captures in 5-minute bundles: consecutive
+// captures of a completed wall-clock window go to Gemini as one request and the
+// single returned score is written back to every capture in that window. The
+// currently-active window stays pending until it elapses. Request-level retry,
+// model failover and the Gemini context cache are handled by AnalyzeSessionBundle.
 func (a *App) processPendingAI() (int, error) {
 	if a.database == nil || a.gemini == nil || !a.gemini.HasKey() {
 		return 0, nil
@@ -1014,91 +1128,97 @@ func (a *App) processPendingAI() (int, error) {
 		return 0, err
 	}
 
-	log.Printf("[app] AI batch analysis: %d pending logs (%d per request, thumbnails, retry+failover)", len(logs), aiBatchSize)
+	bundles := groupCompletedBundles(logs, time.Now())
+	if len(bundles) == 0 {
+		return 0, nil
+	}
+
+	log.Printf("[app] AI bundle analysis: %d pending logs in %d completed 5-minute windows (%d bundles per run)", len(logs), len(bundles), aiMaxBundlesPerRun)
 	processed := 0
+	requests := 0
 
-	for start := 0; start < len(logs); start += aiBatchSize {
-		end := start + aiBatchSize
-		if end > len(logs) {
-			end = len(logs)
-		}
-		chunk := logs[start:end]
-
-		items := make([]ai.BatchAnalysisItem, 0, len(chunk))
-		byID := make(map[int64]db.LogEntry, len(chunk))
-		for _, entry := range chunk {
-			items = append(items, ai.BatchAnalysisItem{
-				LogID:        entry.ID,
-				WindowTitle:  entry.WindowTitle,
-				EntropyScore: entry.EntropyScore,
-				ImagePath:    entry.ImagePath,
-				TotalKeys:    entry.TotalKeys,
-				TotalClicks:  entry.TotalClicks,
-				UserTask:     a.GetActiveTask(),
-				AppName:      entry.AppName,
-				Timestamp:    entry.Timestamp,
-			})
-			byID[entry.ID] = entry
-		}
-
-		// 3 minutes gives one stalling model enough room to time out and still
-		// leaves budget for the failover candidate to complete.
-		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
-		results, batchErr := a.gemini.AnalyzeBatch(ctx, items, a.recentSessionEvents(12)...)
-		cancel()
-
-		if batchErr != nil && len(results) == 0 {
-			if isTransientAIError(batchErr) {
-				// Offline / temporary outage / rate limit: leave entries untouched so
-				// they are analyzed on a later run (cron, next collect or reopen).
-				log.Printf("[app] AI batch deferred (transient): %v — %d logs stay pending for retry", batchErr, len(chunk))
-				break
+bundleLoop:
+	for _, bundle := range bundles {
+		chunks := make([][]db.LogEntry, 0, 1)
+		for start := 0; start < len(bundle.logs); start += aiMaxBundleItems {
+			end := start + aiMaxBundleItems
+			if end > len(bundle.logs) {
+				end = len(bundle.logs)
 			}
-			log.Printf("[app] AI batch failed for %d logs: %v — incrementing retry counts", len(chunk), batchErr)
+			chunks = append(chunks, bundle.logs[start:end])
+		}
+
+		for part, chunk := range chunks {
+			if requests >= aiMaxBundlesPerRun {
+				log.Printf("[app] AI bundle run budget reached (%d requests) — remaining bundles stay pending", requests)
+				break bundleLoop
+			}
+			requests++
+
+			items := make([]ai.BatchAnalysisItem, 0, len(chunk))
 			for _, entry := range chunk {
-				_ = a.database.IncrementAIRetryCount(entry.ID)
+				items = append(items, ai.BatchAnalysisItem{
+					LogID:        entry.ID,
+					WindowTitle:  entry.WindowTitle,
+					EntropyScore: entry.EntropyScore,
+					ImagePath:    entry.ImagePath,
+					TotalKeys:    entry.TotalKeys,
+					TotalClicks:  entry.TotalClicks,
+					UserTask:     a.GetActiveTask(),
+					AppName:      entry.AppName,
+					Timestamp:    entry.Timestamp,
+				})
 			}
-			continue
-		}
-		if batchErr != nil {
-			log.Printf("[app] AI batch partially failed (%v) — applying %d/%d results", batchErr, len(results), len(chunk))
-		}
 
-		got := make(map[int64]bool, len(results))
-		for _, res := range results {
-			entry, ok := byID[res.LogID]
-			if !ok || got[res.LogID] {
+			windowLabel := bundleWindowLabel(bundle.start)
+			if len(chunks) > 1 {
+				windowLabel = fmt.Sprintf("%s part %d/%d", windowLabel, part+1, len(chunks))
+			}
+
+			// 3 minutes gives one stalling model enough room to time out and still
+			// leaves budget for the failover candidate to complete.
+			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+			result, usage, bundleErr := a.gemini.AnalyzeSessionBundle(ctx, items, windowLabel, a.recentSessionEvents(12)...)
+			cancel()
+
+			if bundleErr != nil {
+				if isTransientAIError(bundleErr) {
+					// Offline / temporary outage / rate limit: leave entries untouched
+					// so they are analyzed on a later run (cron, next collect or reopen).
+					log.Printf("[app] AI bundle deferred (transient): %v — %d logs stay pending for retry", bundleErr, len(chunk))
+					break bundleLoop
+				}
+				log.Printf("[app] AI bundle failed for %d logs: %v — incrementing retry counts", len(chunk), bundleErr)
+				for _, entry := range chunk {
+					_ = a.database.IncrementAIRetryCount(entry.ID)
+				}
 				continue
 			}
-			got[res.LogID] = true
-			updateErr := a.database.UpdateLogAnalysis(res.LogID, res.Category, res.AppName, res.AppCategory, entry.WindowTitle, 0, "", res.Productive, res.ProductiveScore, res.Confidence, res.Reason)
-			if updateErr != nil {
-				log.Printf("[app] update AI result for #%d error: %v", res.LogID, updateErr)
-				continue
-			}
-			if res.Usage.TotalTokenCount > 0 {
-				_ = a.database.RecordAPIUsage(entry.OrgID, entry.UserID, "guest", res.Usage.PromptTokenCount, res.Usage.CandidatesTokenCount, res.Usage.TotalTokenCount, a.gemini.GetModel())
-			}
-			processed++
-		}
 
-		// Surface this chunk's API call to the UI (Settings usage counter etc.)
-		if len(got) > 0 && results[0].Usage.TotalTokenCount > 0 {
-			a.emitAIUsageEvent(results[0].Usage.PromptTokenCount, results[0].Usage.CandidatesTokenCount, results[0].Usage.TotalTokenCount)
-		}
-
-		for _, entry := range chunk {
-			if !got[entry.ID] && !isTransientAIError(batchErr) {
-				_ = a.database.IncrementAIRetryCount(entry.ID)
+			for _, entry := range chunk {
+				updateErr := a.database.UpdateLogAnalysis(entry.ID, result.Category, result.AppName, result.AppCategory, entry.WindowTitle, 0, "", result.Score >= 50, result.Score, result.Confidence, result.Reason)
+				if updateErr != nil {
+					log.Printf("[app] update bundle score for #%d error: %v", entry.ID, updateErr)
+					continue
+				}
+				if usage.TotalTokenCount > 0 {
+					_ = a.database.RecordAPIUsage(entry.OrgID, entry.UserID, "guest", usage.PromptTokenCount, usage.CandidatesTokenCount, usage.TotalTokenCount, a.gemini.GetModel())
+				}
+				processed++
 			}
-		}
 
-		if end < len(logs) {
-			time.Sleep(500 * time.Millisecond)
+			// Surface this bundle's API call to the UI (Settings usage counter etc.)
+			if usage.TotalTokenCount > 0 {
+				a.emitAIUsageEvent(usage.PromptTokenCount, usage.CandidatesTokenCount, usage.TotalTokenCount)
+			}
+
+			if requests < aiMaxBundlesPerRun {
+				time.Sleep(500 * time.Millisecond)
+			}
 		}
 	}
 
-	log.Printf("[app] AI batch analysis complete: %d/%d logs", processed, len(logs))
+	log.Printf("[app] AI bundle analysis complete: %d/%d logs in %d requests", processed, len(logs), requests)
 	return processed, nil
 }
 

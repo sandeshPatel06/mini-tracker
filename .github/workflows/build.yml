@@ -8,8 +8,10 @@ on:
     branches:
       - main
 
+# Least privilege by default: the build job never receives secrets or write
+# access. Only the release job (trusted main pushes) may publish.
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   build:
@@ -60,10 +62,54 @@ jobs:
           log_info "Generating SHA-256 Checksums..."
           (cd bin && sha256sum get-hike get-hike-server mini-tracker mini-tracker-server > checksums.txt)
 
+      - name: Verify artifacts contain no embedded secrets
+        run: |
+          failure=0
+          for artifact in bin/get-hike bin/get-hike-server bin/mini-tracker bin/mini-tracker-server; do
+            if grep -aEq 'AIza[0-9A-Za-z_-]{35}|AQ\.[A-Za-z0-9_.-]{25,}|-----BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY-----' "$artifact"; then
+              echo "::error::Potential credential embedded in build artifact: $artifact"
+              failure=1
+            fi
+          done
+          if [ "$failure" -ne 0 ]; then
+            echo "Refusing to publish artifacts containing credential-like strings."
+            exit 1
+          fi
+          echo "No embedded credentials detected in build artifacts."
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: get-hike-binaries
+          path: |
+            bin/get-hike
+            bin/get-hike-server
+            bin/mini-tracker
+            bin/mini-tracker-server
+            bin/checksums.txt
+          retention-days: 7
+
+  release:
+    name: Publish Release
+    needs: build
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: get-hike-binaries
+          path: bin
+
       - name: Create Release Notes & Publish Release
-        if: github.event_name == 'push'
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           TAG_NAME="v$(date +'%Y.%m.%d-%H%M')"
           SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)

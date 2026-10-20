@@ -222,7 +222,7 @@ function LogsTab({ results, report, run }: DevTabProps) {
   const loadFiles = useCallback(async () => {
     try {
       const list = await ListAppLogFiles();
-      setFiles(Array.isArray(list) ? list : []);
+      setFiles(Array.isArray(list) ? (list as unknown as AppLogFile[]) : []);
     } catch {
       setFiles([]);
     }

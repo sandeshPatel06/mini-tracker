@@ -14,7 +14,7 @@ To provide developers, remote workers, and teams with accurate, automated, AI-as
 ### Major Features
 * **Automated Screenshots & Retention**: Captures active displays at configurable intervals (default: 15 seconds) with a strict 7-day automatic rolling retention cleanup.
 * **Hardware Telemetry (Zero-Sudo & Hybrid)**: Tracks keystroke entropy (chaos index), mouse click counts, and mouse pixel distance via Linux `/dev/input/event*` devices or browser fallback handlers.
-* **AI Multimodal Vision Analysis**: Uses Google Gemini API (preferred: `gemma-4-31b-it`, `gemma-2-27b-it`) to inspect screenshots in batch, detect active applications, categorize activities (Coding, Browsing, Communication, Entertainment, Idle), and evaluate productivity scores (0–100).
+* **AI Multimodal Vision Analysis**: Uses Google Gemini API (preferred: `gemini-3.5-flash-lite`, `gemini-flash-lite-latest`) to inspect screenshots in batch, detect active applications, categorize activities (Coding, Browsing, Communication, Entertainment, Idle), and evaluate productivity scores (0–100).
 * **Task Goal Context Alignment**: Allows users to set a current task goal (max 20 words). The AI prompt integrates this goal to assess whether desktop activity aligns with the user's intended objective.
 * **Multi-Organization & Team Sync**: Supports tenant organization creation, member invites via token, and background API sync (push local logs to central server, pull team activity).
 * **Dual Runtime Modes**:
@@ -167,7 +167,7 @@ mini-tracker/
    - `entropy.go`: Calculates Shannon-style keystroke entropy score normalized (0–100) to measure input diversity versus repetitive typing.
 3. **`internal/ai`**:
    - `gemini.go`: Implements `GeminiClient`. Uses HTTP client directly against Gemini v1beta endpoint to avoid heavy SDK dependencies.
-   - **Model Hierarchy**: Prefers low-latency efficient vision models like `gemma-4-31b-it` or `gemma-2-27b-it`.
+   - **Model Hierarchy**: Prefers low-latency vision models that accept structured output (`responseSchema`), like `gemini-3.5-flash-lite` or `gemini-flash-lite-latest`; schema-averse gemma models are last-resort fallbacks.
    - **Thinking Model Parser Filter**: Strips out chain-of-thought parts before JSON parsing to avoid syntax errors when using candidate models with reasoning output.
 4. **`internal/db`**:
    - `db.go`: Initializes SQLite database at `~/.local/share/get-hike/tracker.db`.
@@ -216,7 +216,7 @@ Configurations are stored in JSON at `~/.local/share/get-hike/config.json`.
   "api_key": "AIzaSy...",
   "screenshot_interval": 15,
   "retention_days": 7,
-  "ai_model": "gemma-4-31b-it",
+  "ai_model": "gemini-3.5-flash-lite",
   "org_id": "",
   "sync_server_url": "https://api.get-hike.com"
 }

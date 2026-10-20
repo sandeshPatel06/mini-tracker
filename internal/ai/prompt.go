@@ -91,10 +91,9 @@ func sanitizePromptTask(task string) string {
 	return clean
 }
 
-// BuildAnalysisPrompt returns a compact prompt embedding items as a JSON array with
-// keys i,t,e,c,a,ts,img, the JSON output contract, screenshot ordering rules, and
-// (optionally) a chronological SESSION CONTEXT of app lifecycle events.
-func BuildAnalysisPrompt(items []PromptItem, activeTask string, sessionEvents ...SessionEvent) string {
+// encodePromptItems renders item metadata as the compact JSON array embedded in
+// the analysis prompt.
+func encodePromptItems(items []PromptItem) string {
 	encoded := make([]promptItemJSON, 0, len(items))
 	for i, item := range items {
 		entropy := math.Round(item.EntropyScore*10) / 10
@@ -115,7 +114,12 @@ func BuildAnalysisPrompt(items []PromptItem, activeTask string, sessionEvents ..
 	if err != nil {
 		itemsJSON = []byte("[]")
 	}
+	return string(itemsJSON)
+}
 
+// analysisInstructions returns the model instructions that are identical for
+// every request of the same shape (candidate for a Gemini cached content).
+func analysisInstructions(itemCount int, activeTask string) string {
 	taskLine := "TASK CONTEXT: No active task provided; assess general work relevance."
 	if task := sanitizePromptTask(activeTask); task != "" {
 		taskLine = fmt.Sprintf("TASK CONTEXT: The active user task is %q; score each item by how directly it advances this task.", task)
@@ -123,26 +127,46 @@ func BuildAnalysisPrompt(items []PromptItem, activeTask string, sessionEvents ..
 
 	var b strings.Builder
 	b.WriteString("You are a desktop activity analyst. Classify and score each item.\n\n")
-	fmt.Fprintf(&b, "JSON OUTPUT CONTRACT (STRICT):\n1. Exactly %d objects, one per item, exact input order.\n2. First char '[' and last char ']'.\n3. Compact single-line JSON. No markdown, fences, prose, comments, trailing commas, or text outside the array.\n4. Never stop mid-array; shorten reasons instead.\n5. Keys: \"i\" (input index), \"cat\" (one of: %s), \"a\", \"ac\", \"p\" 0-100, \"c\" 0.0-1.0, \"r\" max 10 words.\n\n", len(items), strings.Join(AnalysisCategories, ", "))
+	fmt.Fprintf(&b, "JSON OUTPUT CONTRACT (STRICT):\n1. Exactly %d objects, one per item, exact input order.\n2. First char '[' and last char ']'.\n3. Compact single-line JSON. No markdown, fences, prose, comments, trailing commas, or text outside the array.\n4. Never stop mid-array; shorten reasons instead.\n5. Keys: \"i\" (input index), \"cat\" (one of: %s), \"a\", \"ac\", \"p\" 0-100, \"c\" 0.0-1.0, \"r\" max 10 words.\n\n", itemCount, strings.Join(AnalysisCategories, ", "))
 	b.WriteString("SCORING RUBRIC: on-task 70-100; related docs/research 45-70; neutral browsing/messaging 25-50; leisure/idle 0-25. Entropy e>20 adds 10; e<8 subtracts 10; clicks c>20 adds 5. Never default to 100.\n\n")
 	b.WriteString("SCREENSHOTS: each img=true item is followed by \"IMAGE <i>\" in input order. img=false = window unchanged since the previous item — reuse its screenshot; never claim new visual details for it.\n\n")
 	b.WriteString(taskLine)
-
-	if len(sessionEvents) > 0 {
-		b.WriteString("SESSION CONTEXT (chronological app activity): ")
-		for _, ev := range sessionEvents {
-			fmt.Fprintf(&b, "%s %s %s", ev.Time, ev.Kind, SanitizeTitle(ev.App, 40))
-			if title := SanitizeTitle(ev.Title, 40); title != "" {
-				fmt.Fprintf(&b, " (%s)", title)
-			}
-			b.WriteString("; ")
-		}
-		b.WriteString("judge app-switch cadence with it (rapid toggling between a work app and chat = notification checks; sustained single app = focused work; app opened right before a stretch = likely the main task).\n\n")
-	}
-
-	b.WriteString("\n\nITEMS: ")
-	b.WriteString(string(itemsJSON))
 	return b.String()
+}
+
+// sessionContextText renders the chronological app-event narrative.
+func sessionContextText(sessionEvents []SessionEvent) string {
+	if len(sessionEvents) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("SESSION CONTEXT (chronological app activity): ")
+	for _, ev := range sessionEvents {
+		fmt.Fprintf(&b, "%s %s %s", ev.Time, ev.Kind, SanitizeTitle(ev.App, 40))
+		if title := SanitizeTitle(ev.Title, 40); title != "" {
+			fmt.Fprintf(&b, " (%s)", title)
+		}
+		b.WriteString("; ")
+	}
+	b.WriteString("judge app-switch cadence with it (rapid toggling between a work app and chat = notification checks; sustained single app = focused work; app opened right before a stretch = likely the main task).\n\n")
+	return b.String()
+}
+
+// BuildAnalysisPromptSplit returns the stable instructions separately from the
+// dynamic session/items text. The stable half can be stored once as a Gemini
+// cached content and reused by every request with the same shape.
+func BuildAnalysisPromptSplit(items []PromptItem, activeTask string, sessionEvents ...SessionEvent) (staticText, dynamicText string) {
+	staticText = analysisInstructions(len(items), activeTask)
+	dynamicText = sessionContextText(sessionEvents) + "\n\nITEMS: " + encodePromptItems(items)
+	return staticText, dynamicText
+}
+
+// BuildAnalysisPrompt returns a compact prompt embedding items as a JSON array with
+// keys i,t,e,c,a,ts,img, the JSON output contract, screenshot ordering rules, and
+// (optionally) a chronological SESSION CONTEXT of app lifecycle events.
+func BuildAnalysisPrompt(items []PromptItem, activeTask string, sessionEvents ...SessionEvent) string {
+	staticText, dynamicText := BuildAnalysisPromptSplit(items, activeTask, sessionEvents...)
+	return staticText + dynamicText
 }
 
 // AnalysisResponseSchema returns the OpenAPI-subset responseSchema for a JSON array

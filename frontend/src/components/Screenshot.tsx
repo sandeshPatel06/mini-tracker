@@ -24,6 +24,33 @@ const MAX_CACHE_SIZE = 100;
 const thumbMemoryCache = new Map<string, string>();
 const pendingThumbRequests = new Map<string, Promise<string | null>>();
 
+// The JS bridge delivers binding calls one after another, so a page with many
+// rows would otherwise queue dozens of full-size image reads and freeze the
+// UI. Previews are therefore requested through a small queue that keeps only
+// a couple of requests in flight.
+const MAX_CONCURRENT_THUMBS = 3;
+let activeThumbRequests = 0;
+const thumbQueue: Array<() => void> = [];
+
+function acquireThumbSlot(): Promise<void> {
+  if (activeThumbRequests < MAX_CONCURRENT_THUMBS) {
+    activeThumbRequests += 1;
+    return Promise.resolve();
+  }
+  return new Promise<void>((resolve) => {
+    thumbQueue.push(() => {
+      activeThumbRequests += 1;
+      resolve();
+    });
+  });
+}
+
+function releaseThumbSlot() {
+  activeThumbRequests = Math.max(0, activeThumbRequests - 1);
+  const next = thumbQueue.shift();
+  if (next) next();
+}
+
 function cacheImage(path: string, dataUrl: string) {
   if (imageMemoryCache.size >= MAX_CACHE_SIZE) {
     const firstKey = imageMemoryCache.keys().next().value;
@@ -99,10 +126,15 @@ function fetchThumbData(imagePath: string): Promise<string | null> {
     try {
       const goApp = (window as any).go?.main?.App;
       if (goApp?.GetThumbnailBase64) {
-        const res = await goApp.GetThumbnailBase64(imagePath);
-        if (res) {
-          cacheThumb(imagePath, res);
-          return res;
+        await acquireThumbSlot();
+        try {
+          const res = await goApp.GetThumbnailBase64(imagePath);
+          if (res) {
+            cacheThumb(imagePath, res);
+            return res;
+          }
+        } finally {
+          releaseThumbSlot();
         }
       }
       if (!goApp) {
@@ -132,11 +164,34 @@ interface ThumbProps {
 }
 
 export function ScreenshotThumb({ imagePath, onClick, className }: ThumbProps) {
+  const [node, setNode] = useState<HTMLElement | null>(null);
+  const [inView, setInView] = useState(false);
   const [src, setSrc] = useState<string | null>(() => {
     return imagePath && thumbMemoryCache.has(imagePath) ? thumbMemoryCache.get(imagePath)! : null;
   });
   const [loading, setLoading] = useState(false);
   const [failed, setFailed] = useState(false);
+
+  // Previews are only requested once the row is (nearly) visible, so a long
+  // list never floods the bridge with image requests.
+  useEffect(() => {
+    if (!node || inView) return;
+    if (typeof IntersectionObserver === 'undefined') {
+      setInView(true);
+      return;
+    }
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) {
+          setInView(true);
+          observer.disconnect();
+        }
+      },
+      { rootMargin: '300px 0px' }
+    );
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [node, inView]);
 
   useEffect(() => {
     if (!imagePath) {
@@ -153,6 +208,12 @@ export function ScreenshotThumb({ imagePath, onClick, className }: ThumbProps) {
       return;
     }
 
+    if (!inView) {
+      setSrc(null);
+      setLoading(false);
+      return;
+    }
+
     let isMounted = true;
     setLoading(true);
     setFailed(false);
@@ -166,11 +227,11 @@ export function ScreenshotThumb({ imagePath, onClick, className }: ThumbProps) {
     });
 
     return () => { isMounted = false; };
-  }, [imagePath]);
+  }, [imagePath, inView]);
 
   if (loading && !src) {
     return (
-      <div className="timeline-thumb-placeholder skeleton">
+      <div ref={setNode} className="timeline-thumb-placeholder skeleton">
         <Icon name="desktop" size={16} color="var(--text-muted)" />
       </div>
     );
@@ -179,6 +240,7 @@ export function ScreenshotThumb({ imagePath, onClick, className }: ThumbProps) {
   if (!src) {
     return (
       <div
+        ref={setNode}
         className="timeline-thumb-placeholder"
         title={failed ? 'Failed to load screenshot' : 'No screenshot captured'}
       >
@@ -191,6 +253,7 @@ export function ScreenshotThumb({ imagePath, onClick, className }: ThumbProps) {
 
   return (
     <button
+      ref={setNode}
       type="button"
       onClick={onClick}
       className={thumbClassName}
@@ -342,6 +405,10 @@ export function ImageModal({ imagePath, onClose }: ImageModalProps) {
     </div>
   ) : null;
 
+  // At 100% the screenshot is scaled down to fit the viewer, so no scrollbar
+  // is needed. Scrolling only kicks in once the image is zoomed in.
+  const zoomed = zoomScale > 1;
+
   return (
     <Modal
       isOpen={Boolean(imagePath)}
@@ -364,7 +431,19 @@ export function ImageModal({ imagePath, onClose }: ImageModalProps) {
         </div>
       }
     >
-      <div style={{ overflow: 'auto', maxHeight: '78vh', borderRadius: 'var(--radius-md)', background: 'var(--bg-base)', padding: 12, display: 'flex', alignItems: 'center' }}>
+      <div
+        style={{
+          overflow: zoomed ? 'auto' : 'hidden',
+          height: 'clamp(160px, calc(100vh - 260px), 78vh)',
+          maxHeight: '78vh',
+          borderRadius: 'var(--radius-md)',
+          background: 'var(--bg-base)',
+          padding: 12,
+          display: 'flex',
+          alignItems: zoomed ? 'flex-start' : 'center',
+          justifyContent: 'center',
+        }}
+      >
         {loading ? (
           <div style={{ margin: 'auto', padding: '60px 100px', color: 'var(--text-muted)', fontSize: 13, textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10 }}>
             <Icon name="refresh" size={24} className="spin" color="var(--accent-primary)" />
@@ -376,9 +455,11 @@ export function ImageModal({ imagePath, onClose }: ImageModalProps) {
             alt="Desktop Screenshot Inspection"
             style={{
               margin: 'auto',
-              width: `${zoomScale * 100}%`,
-              maxWidth: 'none',
+              width: zoomed ? `${zoomScale * 100}%` : 'auto',
               height: 'auto',
+              maxWidth: zoomed ? 'none' : '100%',
+              maxHeight: zoomed ? 'none' : '100%',
+              objectFit: 'contain',
               borderRadius: 'var(--radius-sm)',
               display: 'block',
               border: '1px solid var(--border-subtle)',

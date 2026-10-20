@@ -708,6 +708,7 @@ func buildPromptItems(items []BatchAnalysisItem) []PromptItem {
 			LogID:        item.LogID,
 			WindowTitle:  item.WindowTitle,
 			EntropyScore: item.EntropyScore,
+			TotalKeys:    item.TotalKeys,
 			TotalClicks:  item.TotalClicks,
 			AppName:      item.AppName,
 			Timestamp:    item.Timestamp,

@@ -299,3 +299,33 @@ func TestGetTodayUsageSummary(t *testing.T) {
 		t.Fatalf("tokens = %d/%d/%d, want 150/30/180", summary.PromptTokens, summary.CandidateTokens, summary.TotalTokens)
 	}
 }
+
+func TestGetAppEventsBetween(t *testing.T) {
+	database, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	base := time.Date(2026, 10, 20, 10, 0, 0, 0, time.UTC)
+	events := []AppEvent{
+		{Timestamp: base.Add(-2 * time.Minute), Kind: "focus", AppName: "Before", WindowTitle: "outside"},
+		{Timestamp: base.Add(1 * time.Minute), Kind: "focus", AppName: "Chrome", WindowTitle: "docs"},
+		{Timestamp: base.Add(2 * time.Minute), Kind: "open", AppName: "Code", WindowTitle: "main.go"},
+		{Timestamp: base.Add(5 * time.Minute), Kind: "close", AppName: "After", WindowTitle: "outside"},
+	}
+	for _, ev := range events {
+		ev := ev
+		if _, err := database.InsertAppEvent(&ev); err != nil {
+			t.Fatalf("InsertAppEvent: %v", err)
+		}
+	}
+
+	got, err := database.GetAppEventsBetween(base, base.Add(5*time.Minute), 40)
+	if err != nil {
+		t.Fatalf("GetAppEventsBetween: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("got %d events, want 2", len(got))
+	}
+	if got[0].AppName != "Chrome" || got[1].AppName != "Code" {
+		t.Fatalf("unexpected order: %s, %s", got[0].AppName, got[1].AppName)
+	}
+}

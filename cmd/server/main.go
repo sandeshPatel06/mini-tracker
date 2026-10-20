@@ -1908,7 +1908,7 @@ func groupCompletedBundles(entries []db.LogEntry, now time.Time) []aiBundle {
 		if !start.Add(aiBundleWindow).Before(now) {
 			break
 		}
-		key := start.Format(time.RFC3339)
+		key := fmt.Sprintf("%s|%d|%d", start.Format(time.RFC3339), entry.OrgID, entry.UserID)
 		pos, ok := index[key]
 		if !ok {
 			pos = len(bundles)
@@ -1959,7 +1959,6 @@ bundleLoop:
 				log.Printf("[server] bundle run budget reached (%d requests) — remaining bundles stay pending", requests)
 				break bundleLoop
 			}
-			requests++
 
 			batchItems := make([]ai.BatchAnalysisItem, 0, len(chunk))
 			for _, entry := range chunk {
@@ -1968,12 +1967,24 @@ bundleLoop:
 					WindowTitle:  entry.WindowTitle,
 					EntropyScore: entry.EntropyScore,
 					ImagePath:    entry.ImagePath,
+					TotalKeys:    entry.TotalKeys,
 					TotalClicks:  entry.TotalClicks,
 					AppName:      entry.AppName,
 					Timestamp:    entry.Timestamp,
 				})
 			}
 
+			if ai.IsClearlyIdleBundle(batchItems) {
+				for _, entry := range chunk {
+					if err := database.UpdateLogAnalysis(entry.ID, "Idle", "", "Idle", entry.WindowTitle, 0, "", false, 5, 0.9, "no active window content"); err == nil {
+						processed++
+					}
+				}
+				log.Printf("[server] bundle skipped (clearly idle): %s, %d logs scored locally", bundleWindowLabel(bundle.start), len(chunk))
+				continue
+			}
+
+			requests++
 			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 			result, usage, bundleErr := gemini.AnalyzeSessionBundle(ctx, batchItems, bundleWindowLabel(bundle.start))
 			cancel()
@@ -1986,6 +1997,7 @@ bundleLoop:
 				continue
 			}
 
+			ai.ApplyBundleActivityGuard(result, batchItems, nil)
 			for _, entry := range chunk {
 				if err := database.UpdateLogAnalysis(entry.ID, result.Category, result.AppName, result.AppCategory, entry.WindowTitle, 0, "", result.Score >= 50, result.Score, result.Confidence, result.Reason); err == nil {
 					processed++

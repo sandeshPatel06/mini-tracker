@@ -33,7 +33,7 @@ func bundleInstructions(itemCount int, activeTask string) string {
 	var b strings.Builder
 	b.WriteString("You are a desktop activity analyst. Score ONE work-session bundle: consecutive captures of a single 5-minute window.\n\n")
 	fmt.Fprintf(&b, "JSON OUTPUT CONTRACT (STRICT):\n1. Exactly one JSON object covering all %d items, no per-item output.\n2. First char '{' and last char '}'.\n3. Compact single-line JSON. No markdown, fences, prose, comments, trailing commas, or text outside the object. Never stop mid-object; shorten the reason instead.\n4. Keys: \"score\" (0-100 for the whole window), \"category\" (one of: %s), \"app_name\" (dominant app in the window), \"app_category\", \"confidence\" 0.0-1.0, \"reason\" max 12 words.\n\n", itemCount, strings.Join(AnalysisCategories, ", "))
-	b.WriteString("SCORING RUBRIC: focused on-task work 70-100; related docs/research 45-70; neutral browsing/messaging 25-50; leisure/idle 0-25. Rapid app toggling between work and chat lowers the score; sustained work in one app raises it. Entropy and click counts are weak signals only. Never default to 100.\n\n")
+	b.WriteString("SCORING RUBRIC:\n- Focused on-task work (coding, writing, design, active docs): 70-100.\n- Reading/studying a continuously visible document, article, PDF, code review, or docs: 50-75 and productive, even with zero keyboard/mouse input.\n- Educational/work video or lecture: 50-70; entertainment video, social feeds, shopping, games: 0-25.\n- Neutral browsing/messaging: 25-50.\n- Idle only when the screen shows a lock screen/desktop or no meaningful content: 0-25.\n- Browsers (Chrome/Chromium/Firefox/Edge/Brave) are neutral containers: never judge by the browser name; judge the visible page content.\n- Zero input is NOT idle by itself. However, if the whole window has no keyboard/mouse input and no focus changes, never score above 75.\n- Rapid toggling between work and chat lowers the score; sustained focused reading or interactive work raises it. Entropy and click counts are weak signals only. Never default to 100.\n\n")
 	b.WriteString("SCREENSHOTS: each img=true item is followed by \"IMAGE <i>\" in input order. img=false = window unchanged since the previous item — reuse its screenshot; never claim new visual details for it.\n\n")
 	b.WriteString(taskLine)
 	return b.String()
@@ -47,10 +47,63 @@ func BuildBundlePromptSplit(items []PromptItem, activeTask, windowLabel string, 
 	if label := strings.TrimSpace(windowLabel); label != "" {
 		fmt.Fprintf(&b, "WINDOW: %s\n\n", label)
 	}
+	b.WriteString(bundleActivitySummary(items, sessionEvents))
 	b.WriteString(sessionContextText(sessionEvents))
 	b.WriteString("ITEMS: ")
 	b.WriteString(encodePromptItems(items))
 	return staticText, b.String()
+}
+
+// IsClearlyIdleBundle reports whether every capture in the window is empty: no
+// app name and no window title. Such windows are idle even if stale pixels
+// produced an image, so they can skip the AI call entirely.
+func IsClearlyIdleBundle(items []BatchAnalysisItem) bool {
+	if len(items) == 0 {
+		return false
+	}
+	for _, item := range items {
+		if strings.TrimSpace(item.AppName) != "" || strings.TrimSpace(item.WindowTitle) != "" {
+			return false
+		}
+	}
+	return true
+}
+
+// ApplyBundleActivityGuard caps a completely static window (no keyboard, mouse
+// or focus activity) at 75. Reading a visible document can still be productive,
+// so the score stays above the productive threshold instead of being forced to
+// Idle. Clearly empty windows are normalized to Idle as a defensive fallback.
+func ApplyBundleActivityGuard(result *SessionBundleResult, items []BatchAnalysisItem, sessionEvents []SessionEvent) {
+	if result == nil {
+		return
+	}
+	if IsClearlyIdleBundle(items) {
+		result.Score = 5
+		result.Category = "Idle"
+		result.AppName = ""
+		result.AppCategory = "Idle"
+		result.Confidence = 0.9
+		result.Reason = "no active window content"
+		return
+	}
+	if len(items) == 0 {
+		return
+	}
+
+	keys, clicks := 0, 0
+	for _, item := range items {
+		keys += item.TotalKeys
+		clicks += item.TotalClicks
+	}
+	if keys > 0 || clicks > 0 || len(sessionEvents) > 0 {
+		return
+	}
+	if result.Score > 75 {
+		result.Score = 75
+	}
+	if result.Confidence > 0.8 {
+		result.Confidence = 0.8
+	}
 }
 
 // BundleResponseSchema returns the responseSchema for one bundle score object.

@@ -1,4 +1,5 @@
 import type { WorkSession } from './types';
+import { canonicalAppName } from './lib/appNames';
 
 export function localISODate(d: Date = new Date()): string {
   const y = d.getFullYear();
@@ -65,7 +66,7 @@ export function buildLocalWorkSessions(logs: SessionSourceLog[]): WorkSession[] 
       last.last = ts;
     }
     const current = drafts[drafts.length - 1];
-    const appKey = log.app_name || log.ai_category || 'Unknown';
+    const appKey = canonicalAppName(log.app_name) || log.ai_category || 'Unknown';
     current.apps.set(appKey, (current.apps.get(appKey) || 0) + 1);
   }
 

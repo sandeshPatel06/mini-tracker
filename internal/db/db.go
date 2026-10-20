@@ -14,6 +14,7 @@ import (
 
 	"entgo.io/ent/dialect"
 	entsql "entgo.io/ent/dialect/sql"
+	"github.com/reak/get-hike/internal/appname"
 	_ "github.com/lib/pq"
 	_ "github.com/mattn/go-sqlite3"
 )
@@ -880,9 +881,10 @@ func (db *DB) DeleteOldAppEvents(cutoff time.Time) (int64, error) {
 
 // InsertLog stores a new log entry using Ent SQL Builder.
 func (db *DB) InsertLog(e *LogEntry) (int64, error) {
+	appName := appname.Canonical(e.AppName)
 	builder := entsql.Dialect(db.dialect).Insert("logs").
 		Columns("org_id", "user_id", "timestamp", "image_path", "total_keys", "unique_keys", "entropy_score", "total_clicks", "mouse_distance", "app_name", "window_title").
-		Values(e.OrgID, e.UserID, e.Timestamp.UTC().Format(time.RFC3339), e.ImagePath, e.TotalKeys, e.UniqueKeys, e.EntropyScore, e.TotalClicks, e.MouseDistance, e.AppName, e.WindowTitle)
+		Values(e.OrgID, e.UserID, e.Timestamp.UTC().Format(time.RFC3339), e.ImagePath, e.TotalKeys, e.UniqueKeys, e.EntropyScore, e.TotalClicks, e.MouseDistance, appName, e.WindowTitle)
 	if db.dialect == dialect.Postgres {
 		builder.Returning("id")
 		query, args := builder.Query()
@@ -933,9 +935,13 @@ func (db *DB) UpdateLogAnalysis(id int64, category, appName, appCategory, window
 		productiveInt = 1
 	}
 
+	// The AI answers with a human readable app name. Fold it into the
+	// canonical identity and keep the stored name when the AI returned
+	// something that is not an application name at all.
+	canonicalApp := appname.Canonical(appName)
+
 	builder := entsql.Dialect(db.dialect).Update("logs").
 		Set("ai_category", category).
-		Set("app_name", appName).
 		Set("app_category", appCategory).
 		Set("window_title", windowTitle).
 		Set("session_id", sessionID).
@@ -945,6 +951,9 @@ func (db *DB) UpdateLogAnalysis(id int64, category, appName, appCategory, window
 		Set("ai_confidence", confidence).
 		Set("ai_reason", reason).
 		Where(entsql.EQ("id", id))
+	if canonicalApp != "" {
+		builder.Set("app_name", canonicalApp)
+	}
 
 	query, args := builder.Query()
 	_, err := db.rawDB.Exec(query, args...)
@@ -1327,8 +1336,10 @@ func buildWorkSession(cluster []LogEntry) WorkSession {
 		if l.IsProductive {
 			productiveCount++
 		}
-		if l.AppName != "" {
-			appCounts[l.AppName]++
+		// Fold legacy spellings together so a session never reports the same
+		// application twice.
+		if app := appname.Canonical(l.AppName); app != "" {
+			appCounts[app]++
 		}
 		if l.AICategory != "" {
 			catCounts[l.AICategory]++
@@ -1951,9 +1962,70 @@ func (db *DB) CountLogsBySyncStatus(status string) (int, error) {
 	return count, nil
 }
 
+// appNamePredicate matches an app name in both its canonical and its legacy
+// spelling so that rows stored before the canonicalisation are still found.
+func appNamePredicate(appName string) *entsql.Predicate {
+	values := []string{appName}
+	if canonical := appname.Canonical(appName); canonical != "" && canonical != appName {
+		values = append(values, canonical)
+	}
+	predicates := make([]*entsql.Predicate, 0, len(values))
+	for _, value := range values {
+		predicates = append(predicates, entsql.EQ("app_name", value))
+	}
+	return entsql.Or(predicates...)
+}
+
+// NormalizeAppNames rewrites legacy application names to their canonical
+// identity so the stored data matches what the UI and the API report. It
+// returns the number of rewritten rows.
+func (db *DB) NormalizeAppNames() (int, error) {
+	rows, err := db.rawDB.Query(`SELECT app_name FROM logs WHERE app_name <> '' GROUP BY app_name`)
+	if err != nil {
+		return 0, err
+	}
+	names := []string{}
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			rows.Close()
+			return 0, err
+		}
+		names = append(names, name)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return 0, err
+	}
+
+	setPlaceholder := "?"
+	wherePlaceholder := "?"
+	if db.dialect == dialect.Postgres {
+		setPlaceholder = "$1"
+		wherePlaceholder = "$2"
+	}
+
+	updated := 0
+	for _, name := range names {
+		canonical := appname.Canonical(name)
+		if canonical == "" || canonical == name {
+			continue
+		}
+		query := fmt.Sprintf(`UPDATE logs SET app_name = %s WHERE app_name = %s`, setPlaceholder, wherePlaceholder)
+		result, err := db.rawDB.Exec(query, canonical, name)
+		if err != nil {
+			return updated, err
+		}
+		if affected, err := result.RowsAffected(); err == nil {
+			updated += int(affected)
+		}
+	}
+	return updated, nil
+}
+
 // CountLogsByAppName returns the number of logs recorded for the given app name.
 func (db *DB) CountLogsByAppName(appName string) (int, error) {
-	builder := entsql.Dialect(db.dialect).Select(entsql.Count("*")).From(entsql.Table("logs")).Where(entsql.EQ("app_name", appName))
+	builder := entsql.Dialect(db.dialect).Select(entsql.Count("*")).From(entsql.Table("logs")).Where(appNamePredicate(appName))
 	query, args := builder.Query()
 	var count int
 	if err := db.rawDB.QueryRow(query, args...).Scan(&count); err != nil {
@@ -1964,7 +2036,7 @@ func (db *DB) CountLogsByAppName(appName string) (int, error) {
 
 // DeleteLogsByAppName removes all logs for an app and returns the deleted row count.
 func (db *DB) DeleteLogsByAppName(appName string) (int, error) {
-	builder := entsql.Dialect(db.dialect).Delete("logs").Where(entsql.EQ("app_name", appName))
+	builder := entsql.Dialect(db.dialect).Delete("logs").Where(appNamePredicate(appName))
 	query, args := builder.Query()
 	res, err := db.rawDB.Exec(query, args...)
 	if err != nil {

@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/reak/get-hike/internal/appname"
 	"github.com/reak/get-hike/internal/db"
 )
 
@@ -92,7 +93,7 @@ func (s *SyncEngine) PushTelemetry(ctx context.Context) (int, error) {
 			"unique_keys":   entry.UniqueKeys,
 			"entropy_score": entry.EntropyScore,
 			"total_clicks":  entry.TotalClicks,
-			"app_name":      entry.AppName,
+			"app_name":      appname.Canonical(entry.AppName),
 			"window_title":  entry.WindowTitle,
 		}
 

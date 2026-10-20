@@ -114,6 +114,11 @@ func (a *App) startup(ctx context.Context) {
 		log.Printf("[app] db error: %v", err)
 	} else {
 		a.database = dbConn
+		if updated, err := dbConn.NormalizeAppNames(); err != nil {
+			log.Printf("[app] app name normalisation error: %v", err)
+		} else if updated > 0 {
+			log.Printf("[app] normalised %d legacy app name rows", updated)
+		}
 	}
 
 	// Gemini client (used for Guest Mode or direct client-side requests)

@@ -1,10 +1,11 @@
+//go:build linux
+
 package tracker
 
 import (
 	"log"
 	"time"
 
-	"github.com/holoplot/go-evdev"
 	"github.com/jezek/xgb"
 	"github.com/jezek/xgb/xproto"
 )
@@ -20,7 +21,7 @@ const x11KeyPollInterval = 50 * time.Millisecond
 // client connection) and forwards rising edges (key pushes) into the same event
 // channel the evdev readers feed, so entropy accounting stays uniform. X keycodes
 // are offset by 8 maps to evdev codes, but only uniqueness matters for scoring.
-func pollX11Keymap(eventCh chan<- evdev.EvCode, stopCh <-chan struct{}) error {
+func pollX11Keymap(eventCh chan<- int, stopCh <-chan struct{}) error {
 	conn, err := xgb.NewConn()
 	if err != nil {
 		return err
@@ -56,7 +57,7 @@ func pollX11Keymap(eventCh chan<- evdev.EvCode, stopCh <-chan struct{}) error {
 					continue
 				}
 				select {
-				case eventCh <- evdev.EvCode(i*8 + bit + 8):
+				case eventCh <- i*8 + bit + 8:
 				default:
 				}
 			}

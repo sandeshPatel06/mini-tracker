@@ -833,6 +833,39 @@ func (db *DB) GetRecentAppEvents(since time.Time, limit int) ([]AppEvent, error)
 	return events, rows.Err()
 }
 
+// GetAppEventsBetween returns app lifecycle events in [start, end), oldest
+// first. It gives AI prompts the focus/open/close context of one bundle window
+// instead of only the most recent events.
+func (db *DB) GetAppEventsBetween(start, end time.Time, limit int) ([]AppEvent, error) {
+	if limit <= 0 {
+		limit = 40
+	}
+	builder := entsql.Dialect(db.dialect).Select("id", "timestamp", "kind", "app_name", "window_title").
+		From(entsql.Table("app_events")).
+		Where(entsql.GTE("timestamp", start.UTC().Format(time.RFC3339))).
+		Where(entsql.LT("timestamp", end.UTC().Format(time.RFC3339))).
+		OrderBy(entsql.Asc("timestamp")).Limit(limit)
+
+	query, args := builder.Query()
+	rows, err := db.rawDB.Query(query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var events []AppEvent
+	for rows.Next() {
+		var ev AppEvent
+		var ts interface{}
+		if err := rows.Scan(&ev.ID, &ts, &ev.Kind, &ev.AppName, &ev.WindowTitle); err != nil {
+			continue
+		}
+		ev.Timestamp = parseFlexibleTime(ts)
+		events = append(events, ev)
+	}
+	return events, rows.Err()
+}
+
 // DeleteOldAppEvents removes app lifecycle events older than the cutoff so the
 // table stays small on long-running machines.
 func (db *DB) DeleteOldAppEvents(cutoff time.Time) (int64, error) {

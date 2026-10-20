@@ -19,7 +19,7 @@ get-Hike is free and open-source software released under the [MIT License](#-lic
 ## 🌟 Key Features
 
 - ⏱️ **Work Session Tracking & Live Clock**: User-controlled session toggle with real-time timer directly embedded in the dashboard sidebar and standalone floating desktop widget.
-- 🤖 **Automated Gemini AI Batch Analysis**: Intelligent batch analysis powered by Google Gemini API (e.g. `gemini-3.5-flash-lite`, `gemini-flash-lite-latest`) with automatic model failover, rate-limit resilience, and configurable periodic cron processing.
+- 🤖 **Automated Gemini AI Batch Analysis**: Intelligent batch analysis powered by Google Gemini API (e.g. `gemini-3.5-flash-lite`, `gemini-flash-lite-latest`) with automatic model failover, rate-limit resilience, and configurable periodic cron processing. Each completed 5-minute window is scored as one bundle using its screenshots, key/click counts and app-switch events, so focused reading counts as productive while clearly idle windows skip the API entirely.
 - 🔐 **OAuth 2.0 & Multi-Tenant Organization Engine**: Corporate team management supporting Google OAuth 2.0, Azure AD / Microsoft OAuth 2.0, Email/Password login, Role-Based Access Control (Owner, Admin, Member), and time-sensitive secure invitation token links.
 - 📊 **Multi-User Analytics & Date Range Filtering**: Inspect productivity timelines, category distributions, and AI ratings across team members with multi-user dropdown filters and date range selection (`start_date`, `end_date`, `user_id`).
 - 🪟 **Floating OS Desk Widget (`/wizard`)**: Launch a lightweight, floating desktop widget window for session control and quick activity metrics without needing a full browser tab open.

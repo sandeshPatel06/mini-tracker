@@ -1201,14 +1201,12 @@ bundleLoop:
 					log.Printf("[app] update bundle score for #%d error: %v", entry.ID, updateErr)
 					continue
 				}
-				if usage.TotalTokenCount > 0 {
-					_ = a.database.RecordAPIUsage(entry.OrgID, entry.UserID, "guest", usage.PromptTokenCount, usage.CandidatesTokenCount, usage.TotalTokenCount, a.gemini.GetModel())
-				}
 				processed++
 			}
 
-			// Surface this bundle's API call to the UI (Settings usage counter etc.)
-			if usage.TotalTokenCount > 0 {
+			// One API request scored the whole chunk: record usage once, not per log.
+			if usage.TotalTokenCount > 0 && len(chunk) > 0 {
+				_ = a.database.RecordAPIUsage(chunk[0].OrgID, chunk[0].UserID, "guest", usage.PromptTokenCount, usage.CandidatesTokenCount, usage.TotalTokenCount, a.gemini.GetModel())
 				a.emitAIUsageEvent(usage.PromptTokenCount, usage.CandidatesTokenCount, usage.TotalTokenCount)
 			}
 

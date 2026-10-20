@@ -14,6 +14,8 @@ export function GetAIUsageSummary():Promise<db.APIUsageSummary>;
 
 export function GetActiveTask():Promise<string>;
 
+export function GetAppIcon(arg1:string):Promise<string>;
+
 export function GetAppLogs(arg1:string,arg2:number):Promise<string>;
 
 export function GetConfig():Promise<Record<string, any>>;

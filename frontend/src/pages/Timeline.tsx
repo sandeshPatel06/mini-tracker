@@ -4,6 +4,9 @@ import { format } from 'date-fns';
 import { CategoryBadge } from '../components/CategoryBadge';
 import { ScreenshotThumb, ImageModal } from '../components/Screenshot';
 import { Icon } from '../components/Icon';
+import { AppIcon } from '../components/AppIcon';
+import { AppFilterSelect } from '../components/AppFilterSelect';
+import { CustomSelect } from '../components/CustomSelect';
 import { localISODate, isPendingLog, FOCUS_OK } from '../utils';
 
 interface Props {
@@ -137,37 +140,32 @@ export default function Timeline({ logs, loading, today, onDateChange, loadError
               </div>
             </div>
 
-            <select
-              className="form-select"
-              aria-label="Filter by application"
+            <AppFilterSelect
+              apps={uniqueApps}
               value={selectedApp}
-              onChange={(e) => {
-                setSelectedApp(e.target.value);
+              onChange={(value) => {
+                setSelectedApp(value);
                 setCurrentPage(1);
               }}
-              style={{ width: 'auto', height: 34, fontSize: 13, minWidth: 150 }}
-            >
-              <option value="ALL">All Applications ({uniqueApps.length})</option>
-              {uniqueApps.map((app) => (
-                <option key={app} value={app}>💻 {app}</option>
-              ))}
-            </select>
+            />
 
-            <select
-              className="form-select"
-              aria-label="Filter by category"
+            <CustomSelect
               value={selectedCategory}
-              onChange={(e) => {
-                setSelectedCategory(e.target.value);
+              onChange={(value) => {
+                setSelectedCategory(value);
                 setCurrentPage(1);
               }}
-              style={{ width: 'auto', height: 34, fontSize: 13, minWidth: 130 }}
-            >
-              <option value="ALL">All Categories</option>
-              {uniqueCategories.map((cat) => (
-                <option key={cat} value={cat}>{cat}</option>
-              ))}
-            </select>
+              ariaLabel="Filter by category"
+              triggerStyle={{ minWidth: 140 }}
+              options={[
+                {
+                  value: 'ALL',
+                  label: 'All Categories',
+                  leading: <Icon name="filter" size={14} />,
+                },
+                ...uniqueCategories.map((cat) => ({ value: cat, label: cat })),
+              ]}
+            />
           </div>
 
           <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 10, marginTop: 10, fontSize: 12, color: 'var(--text-muted)', fontVariantNumeric: 'tabular-nums' }}>
@@ -267,6 +265,9 @@ export default function Timeline({ logs, loading, today, onDateChange, loadError
                           <span
                             title={log.app_name}
                             style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: 5,
                               fontSize: 11,
                               fontWeight: 600,
                               padding: '1px 7px',
@@ -276,11 +277,13 @@ export default function Timeline({ logs, loading, today, onDateChange, loadError
                               border: '1px solid var(--border-subtle)',
                               maxWidth: 180,
                               overflow: 'hidden',
-                              textOverflow: 'ellipsis',
                               whiteSpace: 'nowrap',
                             }}
                           >
-                            💻 {log.app_name}
+                            <AppIcon name={log.app_name} size={14} />
+                            <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                              {log.app_name}
+                            </span>
                           </span>
                         )}
                         {log.app_category && (
@@ -347,22 +350,21 @@ export default function Timeline({ logs, loading, today, onDateChange, loadError
           <div style={{ padding: '10px 16px', borderTop: '1px solid var(--border-subtle)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               <label htmlFor="timeline-page-size" style={{ fontSize: 12, color: 'var(--text-muted)' }}>Per page</label>
-              <select
+              <CustomSelect
                 id="timeline-page-size"
-                aria-label="Rows per page"
-                value={pageSize}
-                onChange={(e) => {
-                  setPageSize(Number(e.target.value));
+                ariaLabel="Rows per page"
+                compact
+                value={String(pageSize)}
+                onChange={(value) => {
+                  setPageSize(Number(value));
                   setCurrentPage(1);
                 }}
-                className="form-select"
-                style={{ width: 'auto', height: 30, fontSize: 12, padding: '2px 30px 2px 10px' }}
-              >
-                <option value={15}>15</option>
-                <option value={25}>25</option>
-                <option value={50}>50</option>
-                <option value={100}>100</option>
-              </select>
+                triggerStyle={{ minWidth: 64 }}
+                options={[15, 25, 50, 100].map((size) => ({
+                  value: String(size),
+                  label: String(size),
+                }))}
+              />
             </div>
 
             <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>

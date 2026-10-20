@@ -7,6 +7,7 @@ import { Icon } from '../components/Icon';
 import { AppIcon } from '../components/AppIcon';
 import { AppFilterSelect } from '../components/AppFilterSelect';
 import { CustomSelect } from '../components/CustomSelect';
+import { canonicalAppName } from '../lib/appNames';
 import { localISODate, isPendingLog, FOCUS_OK } from '../utils';
 
 interface Props {
@@ -31,7 +32,8 @@ export default function Timeline({ logs, loading, today, onDateChange, loadError
   const uniqueApps = useMemo(() => {
     const apps = new Set<string>();
     logs.forEach((l) => {
-      if (l.app_name) apps.add(l.app_name);
+      const app = canonicalAppName(l.app_name);
+      if (app) apps.add(app);
     });
     return Array.from(apps).sort();
   }, [logs]);
@@ -48,7 +50,7 @@ export default function Timeline({ logs, loading, today, onDateChange, loadError
   const filteredLogs = useMemo(() => {
     return logs
       .filter((log) => {
-        if (selectedApp !== 'ALL' && log.app_name !== selectedApp) return false;
+        if (selectedApp !== 'ALL' && canonicalAppName(log.app_name) !== selectedApp) return false;
         if (selectedCategory !== 'ALL' && log.ai_category !== selectedCategory) return false;
         if (searchQuery.trim()) {
           const q = searchQuery.toLowerCase();
@@ -261,9 +263,9 @@ export default function Timeline({ logs, loading, today, onDateChange, loadError
                     <div className="timeline-info">
                       <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
                         <CategoryBadge category={log.ai_category} />
-                        {log.app_name && (
+                        {canonicalAppName(log.app_name) && (
                           <span
-                            title={log.app_name}
+                            title={canonicalAppName(log.app_name)}
                             style={{
                               display: 'inline-flex',
                               alignItems: 'center',
@@ -280,9 +282,9 @@ export default function Timeline({ logs, loading, today, onDateChange, loadError
                               whiteSpace: 'nowrap',
                             }}
                           >
-                            <AppIcon name={log.app_name} size={14} />
+                            <AppIcon name={canonicalAppName(log.app_name)} size={14} />
                             <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                              {log.app_name}
+                              {canonicalAppName(log.app_name)}
                             </span>
                           </span>
                         )}

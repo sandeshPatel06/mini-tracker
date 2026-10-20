@@ -7,6 +7,7 @@ import { CategoryBadge } from '../components/CategoryBadge';
 import { ScreenshotThumb, ImageModal } from '../components/Screenshot';
 import { Icon } from '../components/Icon';
 import { AppIcon } from '../components/AppIcon';
+import { canonicalAppName } from '../lib/appNames';
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, Cell } from 'recharts';
 import { localISODate, isPendingLog, buildLocalWorkSessions, FOCUS_GOOD, FOCUS_OK } from '../utils';
 
@@ -146,7 +147,7 @@ export default function Dashboard({ logs, stats, config, loading, today, onRefre
   // App Usage Breakdown calculation
   const appCounts: Record<string, { count: number; category: string; totalScore: number }> = {};
   logs.forEach((l) => {
-    const app = l.app_name || 'Other';
+    const app = canonicalAppName(l.app_name) || 'Other';
     if (!appCounts[app]) {
       appCounts[app] = { count: 0, category: l.app_category || 'Application', totalScore: 0 };
     }
@@ -466,7 +467,9 @@ export default function Dashboard({ logs, stats, config, loading, today, onRefre
               >
                 <div style={{ minWidth: 0, flex: 1 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
-                    {session.top_app_name && <AppIcon name={session.top_app_name} size={16} />}
+                    {canonicalAppName(session.top_app_name) && (
+                      <AppIcon name={canonicalAppName(session.top_app_name)} size={16} />
+                    )}
                     <span title={session.title} style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                       {session.title}
                     </span>
@@ -533,9 +536,9 @@ export default function Dashboard({ logs, stats, config, loading, today, onRefre
                     <div className="timeline-info">
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                         <CategoryBadge category={log.ai_category} />
-                        {log.app_name && (
+                        {canonicalAppName(log.app_name) && (
                           <span
-                            title={log.app_name}
+                            title={canonicalAppName(log.app_name)}
                             style={{
                               display: 'inline-flex',
                               alignItems: 'center',
@@ -552,9 +555,9 @@ export default function Dashboard({ logs, stats, config, loading, today, onRefre
                               whiteSpace: 'nowrap',
                             }}
                           >
-                            <AppIcon name={log.app_name} size={14} />
+                            <AppIcon name={canonicalAppName(log.app_name)} size={14} />
                             <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                              {log.app_name}
+                              {canonicalAppName(log.app_name)}
                             </span>
                           </span>
                         )}

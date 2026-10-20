@@ -1976,6 +1976,53 @@ func appNamePredicate(appName string) *entsql.Predicate {
 	return entsql.Or(predicates...)
 }
 
+// NormalizeAppNames rewrites legacy application names to their canonical
+// identity so the stored data matches what the UI and the API report. It
+// returns the number of rewritten rows.
+func (db *DB) NormalizeAppNames() (int, error) {
+	rows, err := db.rawDB.Query(`SELECT app_name FROM logs WHERE app_name <> '' GROUP BY app_name`)
+	if err != nil {
+		return 0, err
+	}
+	names := []string{}
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			rows.Close()
+			return 0, err
+		}
+		names = append(names, name)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return 0, err
+	}
+
+	setPlaceholder := "?"
+	wherePlaceholder := "?"
+	if db.dialect == dialect.Postgres {
+		setPlaceholder = "$1"
+		wherePlaceholder = "$2"
+	}
+
+	updated := 0
+	for _, name := range names {
+		canonical := appname.Canonical(name)
+		if canonical == "" || canonical == name {
+			continue
+		}
+		query := fmt.Sprintf(`UPDATE logs SET app_name = %s WHERE app_name = %s`, setPlaceholder, wherePlaceholder)
+		result, err := db.rawDB.Exec(query, canonical, name)
+		if err != nil {
+			return updated, err
+		}
+		if affected, err := result.RowsAffected(); err == nil {
+			updated += int(affected)
+		}
+	}
+	return updated, nil
+}
+
 // CountLogsByAppName returns the number of logs recorded for the given app name.
 func (db *DB) CountLogsByAppName(appName string) (int, error) {
 	builder := entsql.Dialect(db.dialect).Select(entsql.Count("*")).From(entsql.Table("logs")).Where(appNamePredicate(appName))

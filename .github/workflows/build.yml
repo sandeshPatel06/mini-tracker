@@ -1,4 +1,4 @@
-name: Build and Release Binary
+name: Build and Release Binaries
 
 on:
   push:
@@ -8,15 +8,92 @@ on:
     branches:
       - main
 
-# Least privilege by default: the build job never receives secrets or write
+# Least privilege by default: build jobs never receive secrets or write
 # access. Only the release job (trusted main pushes) may publish.
 permissions:
   contents: read
 
+env:
+  WAILS_VERSION: v2.12.0
+  NODE_VERSION: '20'
+
 jobs:
-  build:
-    name: Build & Publish Release Binary
+  frontend:
+    name: Build Frontend
     runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Build React App
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run build
+
+      - name: Upload frontend build
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-dist
+          path: frontend/dist
+          retention-days: 7
+
+  build:
+    name: Build ${{ matrix.name }}
+    needs: frontend
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Linux x64
+            os: ubuntu-latest
+            artifact: binaries-linux-amd64
+            platform: linux/amd64
+            tags: desktop,production,webkit2_41
+            desktop_asset: get-hike-linux-amd64
+            server_asset: get-hike-server-linux-amd64
+            legacy_aliases: true
+          - name: Linux ARM64
+            os: ubuntu-24.04-arm
+            artifact: binaries-linux-arm64
+            platform: linux/arm64
+            tags: desktop,production,webkit2_41
+            desktop_asset: get-hike-linux-arm64
+            server_asset: get-hike-server-linux-arm64
+            legacy_aliases: false
+          - name: Windows x64
+            os: windows-latest
+            artifact: binaries-windows-amd64
+            platform: windows/amd64
+            tags: desktop,production
+            desktop_asset: get-hike-windows-amd64.exe
+            server_asset: get-hike-server-windows-amd64.exe
+            legacy_aliases: false
+          - name: macOS Intel
+            os: macos-15-intel
+            artifact: binaries-macos-amd64
+            platform: darwin/amd64
+            tags: desktop,production
+            desktop_asset: get-hike-macos-amd64.app.zip
+            server_asset: get-hike-server-macos-amd64
+            legacy_aliases: false
+          - name: macOS Apple Silicon
+            os: macos-15
+            artifact: binaries-macos-arm64
+            platform: darwin/arm64
+            tags: desktop,production
+            desktop_asset: get-hike-macos-arm64.app.zip
+            server_asset: get-hike-server-macos-arm64
+            legacy_aliases: false
 
     steps:
       - name: Checkout repository
@@ -28,49 +105,80 @@ jobs:
           go-version-file: 'go.mod'
           cache: true
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - name: Download frontend build
+        uses: actions/download-artifact@v4
         with:
-          node-version: '20'
-          cache: 'npm'
-          cache-dependency-path: frontend/package-lock.json
+          name: frontend-dist
+          path: frontend/dist
 
       - name: Install Linux Build Dependencies
+        if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev pkg-config
 
-      - name: Build Frontend React App
+      - name: Install Wails CLI
+        shell: bash
         run: |
-          cd frontend
-          npm ci
-          npm run build
+          go install github.com/wailsapp/wails/v2/cmd/wails@${{ env.WAILS_VERSION }}
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
 
-      - name: Build Desktop & Server Binaries
+      - name: Build Desktop Application
+        shell: bash
         run: |
-          mkdir -p bin
-          log_info() { echo -e "\033[1;32m[BUILD]\033[0m $1"; }
+          wails build \
+            -platform "${{ matrix.platform }}" \
+            -tags "${{ matrix.tags }}" \
+            -ldflags "-s -w" \
+            -clean -s -m -skipbindings
 
-          log_info "Building Desktop Application Binary (get-hike)..."
-          go build -tags "desktop production webkit2_41" -ldflags="-s -w" -o bin/get-hike .
-          cp -f bin/get-hike bin/mini-tracker
+      - name: Build Server Binary
+        shell: bash
+        run: |
+          mkdir -p dist
+          go build -trimpath -ldflags="-s -w" -o "dist/${{ matrix.server_asset }}" ./cmd/server
 
-          log_info "Building Backend Server Binary (get-hike-server)..."
-          go build -ldflags="-s -w" -o bin/get-hike-server ./cmd/server
-          cp -f bin/get-hike-server bin/mini-tracker-server
+      - name: Package Linux Desktop
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          cp -f build/bin/get-hike "dist/${{ matrix.desktop_asset }}"
+          chmod +x "dist/${{ matrix.desktop_asset }}"
+          if [ "${{ matrix.legacy_aliases }}" = "true" ]; then
+            cp -f build/bin/get-hike dist/get-hike
+            cp -f build/bin/get-hike dist/mini-tracker
+            cp -f "dist/${{ matrix.server_asset }}" dist/get-hike-server
+            cp -f "dist/${{ matrix.server_asset }}" dist/mini-tracker-server
+          fi
 
-          log_info "Generating SHA-256 Checksums..."
-          (cd bin && sha256sum get-hike get-hike-server mini-tracker mini-tracker-server > checksums.txt)
+      - name: Package Windows Desktop
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          cp -f build/bin/get-hike.exe "dist/${{ matrix.desktop_asset }}"
+
+      - name: Package macOS Desktop
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          # Ad-hoc signing lets the unsigned build run without a paid Apple
+          # developer certificate. Gatekeeper may still ask for confirmation.
+          codesign --force --deep --sign - build/bin/get-hike.app
+          ditto -c -k --sequesterRsrc --keepParent build/bin/get-hike.app "dist/${{ matrix.desktop_asset }}"
 
       - name: Verify artifacts contain no embedded secrets
+        shell: bash
         run: |
           failure=0
-          for artifact in bin/get-hike bin/get-hike-server bin/mini-tracker bin/mini-tracker-server; do
+          while IFS= read -r -d '' artifact; do
+            case "$artifact" in
+              *.zip|*.png|*.txt) continue ;;
+            esac
             if grep -aEq 'AIza[0-9A-Za-z_-]{35}|AQ\.[A-Za-z0-9_.-]{25,}|-----BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY-----' "$artifact"; then
               echo "::error::Potential credential embedded in build artifact: $artifact"
               failure=1
             fi
-          done
+          done < <(find dist -type f -print0)
           if [ "$failure" -ne 0 ]; then
             echo "Refusing to publish artifacts containing credential-like strings."
             exit 1
@@ -80,18 +188,32 @@ jobs:
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: get-hike-binaries
-          path: |
-            bin/get-hike
-            bin/get-hike-server
-            bin/mini-tracker
-            bin/mini-tracker-server
-            bin/checksums.txt
+          name: ${{ matrix.artifact }}
+          path: dist/*
+          if-no-files-found: error
           retention-days: 7
+
+  build-gate:
+    name: Build & Publish Release Binary
+    needs:
+      - frontend
+      - build
+    if: always()
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Verify all builds succeeded
+        run: |
+          echo "Frontend: ${{ needs.frontend.result }}"
+          echo "Build matrix: ${{ needs.build.result }}"
+          if [ "${{ needs.frontend.result }}" != "success" ] || [ "${{ needs.build.result }}" != "success" ]; then
+            echo "One or more build jobs failed."
+            exit 1
+          fi
 
   release:
     name: Publish Release
-    needs: build
+    needs: build-gate
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
     permissions:
@@ -101,19 +223,28 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Download build artifacts
+      - name: Download all build artifacts
         uses: actions/download-artifact@v4
         with:
-          name: get-hike-binaries
-          path: bin
+          pattern: binaries-*
+          path: dist
+          merge-multiple: true
+
+      - name: Attach logo and generate checksums
+        run: |
+          cp -f build/appicon.png dist/get-hike-logo.png
+          (cd dist && sha256sum * > checksums.txt)
+          ls -lh dist
 
       - name: Create Release Notes & Publish Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          TAG_NAME="v$(date +'%Y.%m.%d-%H%M')"
+          TAG_NAME="v$(date -u +'%Y.%m.%d-%H%M%S')"
           SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
           BUILD_DATE=$(date -u +"%Y-%m-%d %H:%M:%S UTC")
+          RELEASE_URL="${{ github.server_url }}/${{ github.repository }}/releases/download/${TAG_NAME}"
+          REPO_URL="${{ github.server_url }}/${{ github.repository }}"
 
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
@@ -121,22 +252,49 @@ jobs:
           git push origin "$TAG_NAME"
 
           cat << EOF > release_notes.md
-          # 📍 get-Hike Release \`${TAG_NAME}\`
+          <p align="center">
+            <img src="https://raw.githubusercontent.com/${{ github.repository }}/main/build/appicon.png" alt="get-Hike" width="150" />
+          </p>
 
-          Automated production build generated from commit [\`${SHORT_SHA}\`](${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }}).
+          # get-Hike Release \`${TAG_NAME}\`
 
-          ### 📦 Included Release Artifacts
-          | Binary / File | Description | Target Environment |
+          Free, open-source build generated from commit [\`${SHORT_SHA}\`](${REPO_URL}/commit/${{ github.sha }}).
+
+          ## Download for your platform
+
+          | Platform | Desktop App (includes UI) | Server Binary |
           | :--- | :--- | :--- |
-          | \`get-hike\` | Native Desktop Application | Client Desktop UI & 100% Offline Guest Mode |
-          | \`get-hike-server\` | HTTP API & Analytics Server | Corporate Multi-User Backend Server |
-          | \`checksums.txt\` | SHA-256 File Checksums | Security & Integrity Audit |
+          | Linux x64 | [\`get-hike-linux-amd64\`](${RELEASE_URL}/get-hike-linux-amd64) | [\`get-hike-server-linux-amd64\`](${RELEASE_URL}/get-hike-server-linux-amd64) |
+          | Linux ARM64 | [\`get-hike-linux-arm64\`](${RELEASE_URL}/get-hike-linux-arm64) | [\`get-hike-server-linux-arm64\`](${RELEASE_URL}/get-hike-server-linux-arm64) |
+          | Windows x64 | [\`get-hike-windows-amd64.exe\`](${RELEASE_URL}/get-hike-windows-amd64.exe) | [\`get-hike-server-windows-amd64.exe\`](${RELEASE_URL}/get-hike-server-windows-amd64.exe) |
+          | macOS Intel | [\`get-hike-macos-amd64.app.zip\`](${RELEASE_URL}/get-hike-macos-amd64.app.zip) | [\`get-hike-server-macos-amd64\`](${RELEASE_URL}/get-hike-server-macos-amd64) |
+          | macOS Apple Silicon | [\`get-hike-macos-arm64.app.zip\`](${RELEASE_URL}/get-hike-macos-arm64.app.zip) | [\`get-hike-server-macos-arm64\`](${RELEASE_URL}/get-hike-server-macos-arm64) |
 
-          ### ⚡ Quick Desktop Installation
-          Run the one-line automated Linux installer:
+          All downloads are free and require no account or license key.
+
+          ## Linux one-line installer
+
           \`\`\`bash
-          curl -sSL https://raw.githubusercontent.com/${{ github.repository }}/main/install.sh | bash
+          curl -sSL ${REPO_URL}/raw/main/install.sh | bash
           \`\`\`
+
+          The release keeps the legacy Linux asset names \`get-hike\`, \`mini-tracker\`, \`get-hike-server\` and \`mini-tracker-server\` so existing scripts continue to work.
+
+          ## Notes
+
+          - Desktop apps include the complete UI. Server binaries are for advanced self-hosted setups and serve \`frontend/dist\` when run from a source checkout.
+          - macOS builds are ad-hoc signed. If Gatekeeper blocks the first launch, right-click the app and choose **Open**, or run \`xattr -dr com.apple.quarantine get-hike.app\`.
+          - Windows builds are portable \`.exe\` files; no installer is required.
+          - Verify downloads against \`checksums.txt\` (SHA-256).
+
+          ## Included Files
+
+          | File | Description |
+          | :--- | :--- |
+          | \`get-hike-*\` | Native desktop application for each platform |
+          | \`get-hike-server-*\` | HTTP API and analytics server |
+          | \`get-hike-logo.png\` | get-Hike logo |
+          | \`checksums.txt\` | SHA-256 checksums for every release asset |
 
           ---
           **Commit SHA**: \`${{ github.sha }}\`
@@ -145,10 +303,6 @@ jobs:
           EOF
 
           gh release create "$TAG_NAME" \
-            bin/get-hike \
-            bin/get-hike-server \
-            bin/mini-tracker \
-            bin/mini-tracker-server \
-            bin/checksums.txt \
+            dist/* \
             --title "get-Hike $TAG_NAME ($SHORT_SHA)" \
             --notes-file release_notes.md

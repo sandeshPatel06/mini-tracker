@@ -387,6 +387,31 @@ func (a *App) recentSessionEvents(n int) []ai.SessionEvent {
 	return out
 }
 
+// bundleSessionEvents returns the app focus/open/close events that belong to one
+// completed 5-minute bundle, with a small lead-in for focus changes that happened
+// just before the first capture. Server-side scoring has no local events, so this
+// context is desktop-only.
+func (a *App) bundleSessionEvents(start time.Time) []ai.SessionEvent {
+	if a.database == nil {
+		return nil
+	}
+	appEvents, err := a.database.GetAppEventsBetween(start.Add(-2*time.Minute), start.Add(aiBundleWindow), 40)
+	if err != nil {
+		log.Printf("[app] bundle session events error: %v", err)
+		return nil
+	}
+	out := make([]ai.SessionEvent, 0, len(appEvents))
+	for _, ev := range appEvents {
+		out = append(out, ai.SessionEvent{
+			Time:  ev.Timestamp.Format("15:04"),
+			Kind:  ev.Kind,
+			App:   ev.AppName,
+			Title: ev.WindowTitle,
+		})
+	}
+	return out
+}
+
 // collect captures a screenshot + uses latest keystroke/mouse stats, persists the
 // entry, then fires async Gemini analysis (in Guest mode) or queues for backend sync (in Auth mode).
 func (a *App) collect() {
@@ -986,7 +1011,7 @@ func groupCompletedBundles(entries []db.LogEntry, now time.Time) []aiBundle {
 			// a future window, which must not be scored before it is complete.
 			break
 		}
-		key := start.Format(time.RFC3339)
+		key := fmt.Sprintf("%s|%d|%d", start.Format(time.RFC3339), entry.OrgID, entry.UserID)
 		pos, ok := index[key]
 		if !ok {
 			pos = len(bundles)
@@ -1153,7 +1178,6 @@ bundleLoop:
 				log.Printf("[app] AI bundle run budget reached (%d requests) — remaining bundles stay pending", requests)
 				break bundleLoop
 			}
-			requests++
 
 			items := make([]ai.BatchAnalysisItem, 0, len(chunk))
 			for _, entry := range chunk {
@@ -1175,10 +1199,26 @@ bundleLoop:
 				windowLabel = fmt.Sprintf("%s part %d/%d", windowLabel, part+1, len(chunks))
 			}
 
+			if ai.IsClearlyIdleBundle(items) {
+				for _, entry := range chunk {
+					updateErr := a.database.UpdateLogAnalysis(entry.ID, "Idle", "", "Idle", entry.WindowTitle, 0, "", false, 5, 0.9, "no active window content")
+					if updateErr != nil {
+						log.Printf("[app] update idle bundle score for #%d error: %v", entry.ID, updateErr)
+						continue
+					}
+					processed++
+				}
+				log.Printf("[app] AI bundle skipped (clearly idle): %s, %d logs scored locally", windowLabel, len(chunk))
+				continue
+			}
+
+			requests++
+			sessionEvents := a.bundleSessionEvents(bundle.start)
+
 			// 3 minutes gives one stalling model enough room to time out and still
 			// leaves budget for the failover candidate to complete.
 			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
-			result, usage, bundleErr := a.gemini.AnalyzeSessionBundle(ctx, items, windowLabel, a.recentSessionEvents(12)...)
+			result, usage, bundleErr := a.gemini.AnalyzeSessionBundle(ctx, items, windowLabel, sessionEvents...)
 			cancel()
 
 			if bundleErr != nil {
@@ -1195,6 +1235,7 @@ bundleLoop:
 				continue
 			}
 
+			ai.ApplyBundleActivityGuard(result, items, sessionEvents)
 			for _, entry := range chunk {
 				updateErr := a.database.UpdateLogAnalysis(entry.ID, result.Category, result.AppName, result.AppCategory, entry.WindowTitle, 0, "", result.Score >= 50, result.Score, result.Confidence, result.Reason)
 				if updateErr != nil {

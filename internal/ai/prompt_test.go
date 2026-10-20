@@ -110,8 +110,8 @@ func TestBuildAnalysisPromptInstructionWordLimit(t *testing.T) {
 		if idx == -1 {
 			t.Fatalf("prompt missing ITEMS: marker")
 		}
-		if words := len(strings.Fields(prompt[:idx])); words > 180 {
-			t.Errorf("instruction section has %d words, want <= 180 (task %q)", words, task)
+		if words := len(strings.Fields(prompt[:idx])); words > 250 {
+			t.Errorf("instruction section has %d words, want <= 250 (task %q)", words, task)
 		}
 	}
 }

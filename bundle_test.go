@@ -60,3 +60,22 @@ func TestBundleWindowLabel(t *testing.T) {
 		t.Fatalf("bundleWindowLabel = %q, want %q", got, want)
 	}
 }
+
+func TestGroupCompletedBundlesSeparatesOrgsAndUsers(t *testing.T) {
+	now := time.Date(2026, 10, 19, 10, 20, 0, 0, time.Local)
+	logs := []db.LogEntry{
+		{ID: 1, OrgID: 1, UserID: 10, Timestamp: time.Date(2026, 10, 19, 10, 0, 5, 0, time.Local)},
+		{ID: 2, OrgID: 1, UserID: 11, Timestamp: time.Date(2026, 10, 19, 10, 1, 5, 0, time.Local)},
+		{ID: 3, OrgID: 2, UserID: 10, Timestamp: time.Date(2026, 10, 19, 10, 2, 5, 0, time.Local)},
+	}
+
+	bundles := groupCompletedBundles(logs, now)
+	if len(bundles) != 3 {
+		t.Fatalf("expected 3 bundles (one per org/user), got %d", len(bundles))
+	}
+	for _, bundle := range bundles {
+		if len(bundle.logs) != 1 {
+			t.Fatalf("bundle for org=%d user=%d has %d logs, want 1", bundle.logs[0].OrgID, bundle.logs[0].UserID, len(bundle.logs))
+		}
+	}
+}

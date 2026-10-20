@@ -15,6 +15,7 @@ type PromptItem struct {
 	LogID        int64
 	WindowTitle  string
 	EntropyScore float64
+	TotalKeys    int
 	TotalClicks  int
 	AppName      string
 	Timestamp    time.Time
@@ -71,6 +72,7 @@ type promptItemJSON struct {
 	I   int         `json:"i"`
 	T   string      `json:"t"`
 	E   json.Number `json:"e"`
+	K   int         `json:"k"`
 	C   int         `json:"c"`
 	A   string      `json:"a"`
 	TS  string      `json:"ts"`
@@ -104,6 +106,7 @@ func encodePromptItems(items []PromptItem) string {
 			I:   i,
 			T:   SanitizeTitle(item.WindowTitle, 100),
 			E:   json.Number(strconv.FormatFloat(entropy, 'f', 1, 64)),
+			K:   item.TotalKeys,
 			C:   item.TotalClicks,
 			A:   item.AppName,
 			TS:  item.Timestamp.Format("15:04"),
@@ -128,16 +131,92 @@ func analysisInstructions(itemCount int, activeTask string) string {
 	var b strings.Builder
 	b.WriteString("You are a desktop activity analyst. Classify and score each item.\n\n")
 	fmt.Fprintf(&b, "JSON OUTPUT CONTRACT (STRICT):\n1. Exactly %d objects, one per item, exact input order.\n2. First char '[' and last char ']'.\n3. Compact single-line JSON. No markdown, fences, prose, comments, trailing commas, or text outside the array.\n4. Never stop mid-array; shorten reasons instead.\n5. Keys: \"i\" (input index), \"cat\" (one of: %s), \"a\", \"ac\", \"p\" 0-100, \"c\" 0.0-1.0, \"r\" max 10 words.\n\n", itemCount, strings.Join(AnalysisCategories, ", "))
-	b.WriteString("SCORING RUBRIC: on-task 70-100; related docs/research 45-70; neutral browsing/messaging 25-50; leisure/idle 0-25. Entropy e>20 adds 10; e<8 subtracts 10; clicks c>20 adds 5. Never default to 100.\n\n")
+	b.WriteString("SCORING RUBRIC: on-task 70-100; reading/studying a continuously visible document, article, PDF, code review, or docs 50-75 productive even with zero input; educational/work video 50-70; neutral browsing/messaging 25-50; leisure/entertainment/idle 0-25. Browsers (Chrome/Chromium/Firefox/Edge/Brave) are neutral containers: judge visible content, never the browser name. Zero input is not idle by itself. Entropy e>20 adds 10; e<8 subtracts 10; clicks c>20 adds 5. Never default to 100.\n\n")
 	b.WriteString("SCREENSHOTS: each img=true item is followed by \"IMAGE <i>\" in input order. img=false = window unchanged since the previous item — reuse its screenshot; never claim new visual details for it.\n\n")
 	b.WriteString(taskLine)
 	return b.String()
 }
 
+// bundleActivitySummary renders compact facts about one capture window so the
+// model can reason about duration, input volume and static vs active stretches.
+func bundleActivitySummary(items []PromptItem, sessionEvents []SessionEvent) string {
+	if len(items) == 0 {
+		return ""
+	}
+
+	var keys, clicks int
+	var lastInput time.Time
+	freshImages, unchangedImages := 0, 0
+	appCounts := make(map[string]int)
+	titleSet := make(map[string]bool)
+	for _, item := range items {
+		keys += item.TotalKeys
+		clicks += item.TotalClicks
+		if item.TotalKeys > 0 || item.TotalClicks > 0 {
+			if item.Timestamp.After(lastInput) {
+				lastInput = item.Timestamp
+			}
+		}
+		if item.HasImage {
+			freshImages++
+		} else {
+			unchangedImages++
+		}
+		if app := strings.TrimSpace(item.AppName); app != "" {
+			appCounts[app]++
+		}
+		if title := strings.TrimSpace(item.WindowTitle); title != "" {
+			titleSet[title] = true
+		}
+	}
+
+	dominantApp, dominantCount := "", 0
+	for app, count := range appCounts {
+		if count > dominantCount || (count == dominantCount && app < dominantApp) {
+			dominantApp, dominantCount = app, count
+		}
+	}
+	if dominantApp == "" {
+		dominantApp = "unknown"
+	}
+
+	duration := time.Duration(0)
+	if len(items) > 1 {
+		duration = items[len(items)-1].Timestamp.Sub(items[0].Timestamp)
+	}
+	if duration < 0 {
+		duration = 0
+	}
+
+	focusChanges, opens, closes := 0, 0, 0
+	for _, ev := range sessionEvents {
+		switch ev.Kind {
+		case "focus":
+			focusChanges++
+		case "open":
+			opens++
+		case "close":
+			closes++
+		}
+	}
+
+	lastInputText := "none"
+	if !lastInput.IsZero() {
+		lastInputText = lastInput.Format("15:04")
+	}
+
+	return fmt.Sprintf(
+		"WINDOW ACTIVITY: captures=%d duration=%s keys=%d clicks=%d last_input=%s dominant_app=%q (%d/%d) distinct_titles=%d focus_changes=%d opens=%d closes=%d fresh_images=%d unchanged_images=%d\n",
+		len(items), duration.String(), keys, clicks, lastInputText,
+		dominantApp, dominantCount, len(items), len(titleSet),
+		focusChanges, opens, closes, freshImages, unchangedImages,
+	)
+}
+
 // sessionContextText renders the chronological app-event narrative.
 func sessionContextText(sessionEvents []SessionEvent) string {
 	if len(sessionEvents) == 0 {
-		return ""
+		return "SESSION CONTEXT: no app focus/open/close events in this window (the same window stayed focused).\n\n"
 	}
 	var b strings.Builder
 	b.WriteString("SESSION CONTEXT (chronological app activity): ")
@@ -148,7 +227,7 @@ func sessionContextText(sessionEvents []SessionEvent) string {
 		}
 		b.WriteString("; ")
 	}
-	b.WriteString("judge app-switch cadence with it (rapid toggling between a work app and chat = notification checks; sustained single app = focused work; app opened right before a stretch = likely the main task).\n\n")
+	b.WriteString("judge app-switch cadence with it (rapid toggling between a work app and chat = notification checks; a sustained single app with a document visible = focused reading; an app opened right before a stretch = likely the main task).\n\n")
 	return b.String()
 }
 
@@ -157,12 +236,12 @@ func sessionContextText(sessionEvents []SessionEvent) string {
 // cached content and reused by every request with the same shape.
 func BuildAnalysisPromptSplit(items []PromptItem, activeTask string, sessionEvents ...SessionEvent) (staticText, dynamicText string) {
 	staticText = analysisInstructions(len(items), activeTask)
-	dynamicText = sessionContextText(sessionEvents) + "\n\nITEMS: " + encodePromptItems(items)
+	dynamicText = bundleActivitySummary(items, sessionEvents) + sessionContextText(sessionEvents) + "\nITEMS: " + encodePromptItems(items)
 	return staticText, dynamicText
 }
 
 // BuildAnalysisPrompt returns a compact prompt embedding items as a JSON array with
-// keys i,t,e,c,a,ts,img, the JSON output contract, screenshot ordering rules, and
+// keys i,t,e,k,c,a,ts,img, the JSON output contract, screenshot ordering rules, and
 // (optionally) a chronological SESSION CONTEXT of app lifecycle events.
 func BuildAnalysisPrompt(items []PromptItem, activeTask string, sessionEvents ...SessionEvent) string {
 	staticText, dynamicText := BuildAnalysisPromptSplit(items, activeTask, sessionEvents...)

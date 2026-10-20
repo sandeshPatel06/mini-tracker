@@ -25,6 +25,7 @@ import (
 	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 
 	"github.com/reak/get-hike/internal/ai"
+	"github.com/reak/get-hike/internal/appicon"
 	"github.com/reak/get-hike/internal/config"
 	"github.com/reak/get-hike/internal/db"
 	"github.com/reak/get-hike/internal/logger"
@@ -40,6 +41,7 @@ type App struct {
 	headless bool
 
 	cfg           *config.Config
+	appIcons      *appicon.Resolver
 	database      *db.DB
 	gemini        *ai.GeminiClient
 	keyTracker    *tracker.KeystrokeTracker
@@ -95,6 +97,8 @@ func (a *App) startup(ctx context.Context) {
 		cfg = &config.Config{ScreenshotInterval: 30 * time.Second, DataDir: "/tmp/get-hike"}
 	}
 	a.cfg = cfg
+	a.appIcons = appicon.NewResolver()
+	go a.appIcons.Warm()
 
 	// Initialize Desktop File Logger with automatic 7-day log retention
 	_ = logger.InitDesktopLogger(cfg.DataDir)
@@ -901,6 +905,18 @@ func (a *App) GetImageBase64(imagePath string) (string, error) {
 		mimeType = "image/png"
 	}
 	return fmt.Sprintf("data:%s;base64,%s", mimeType, base64.StdEncoding.EncodeToString(data)), nil
+}
+
+// GetAppIcon resolves an installed application's icon and returns it as a data URL.
+func (a *App) GetAppIcon(appName string) string {
+	if a.appIcons == nil {
+		return ""
+	}
+	icon, ok := a.appIcons.Lookup(appName)
+	if !ok {
+		return ""
+	}
+	return icon.DataURL()
 }
 
 // GetThumbnailBase64 serves a cached downscaled WebP thumbnail (512px) as a data

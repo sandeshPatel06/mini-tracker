@@ -1,6 +1,9 @@
 import { useState, useEffect, useCallback } from 'react';
 import { apiFetch } from '../api';
 import { getTodayUsageCount, bumpUsageCount, resetUsageCount } from '../utils';
+import { CustomSelect } from '../components/CustomSelect';
+import type { SelectOption } from '../components/CustomSelect';
+import { Icon } from '../components/Icon';
 
 interface AIModel {
   name: string;
@@ -212,14 +215,51 @@ export function SettingsPage({ theme = 'auto', onThemeChange, syncIntervalSecond
     }
   };
 
+  const fmtTokens = (n: number) => (n ? n.toLocaleString() : 'N/A');
   const selectedModelInfo = availableModels.find(m => m.name === model || m.name === `models/${model}`);
+  const modelOptions: SelectOption[] = availableModels.length > 0
+    ? availableModels.map((m) => ({
+        value: m.name,
+        label: m.displayName,
+        meta: `${fmtTokens(m.inputTokenLimit)} in`,
+        leading: <Icon name="sparkles" size={14} />,
+      }))
+    : [
+        {
+          value: 'models/gemini-3.5-flash-lite',
+          label: 'Gemini 3.5 Flash Lite',
+          triggerLabel: 'Gemini 3.5 Flash Lite (Fast & Recommended)',
+          meta: 'Fast & Recommended',
+          leading: <Icon name="sparkles" size={14} />,
+        },
+        {
+          value: 'models/gemini-3.8-flash',
+          label: 'Gemini 3.8 Flash',
+          triggerLabel: 'Gemini 3.8 Flash (Balanced)',
+          meta: 'Balanced',
+          leading: <Icon name="sparkles" size={14} />,
+        },
+        {
+          value: 'models/gemini-2.5-pro',
+          label: 'Gemini 2.5 Pro',
+          triggerLabel: 'Gemini 2.5 Pro (Deep Reasoning)',
+          meta: 'Deep Reasoning',
+          leading: <Icon name="sparkles" size={14} />,
+        },
+        {
+          value: 'models/gemma-4-31b-it',
+          label: 'Gemma 4 31B IT',
+          triggerLabel: 'Gemma 4 31B IT (Schema-free Fallback)',
+          meta: 'Schema-free',
+          leading: <Icon name="sparkles" size={14} />,
+        },
+      ];
   const modelFamily = (() => {
     const lower = model.toLowerCase();
     if (lower.includes('gemma')) return 'Gemma family';
     if (lower.includes('pro')) return 'Gemini Pro family';
     return 'Gemini Flash family';
   })();
-  const fmtTokens = (n: number) => (n ? n.toLocaleString() : 'N/A');
 
   return (
     <div className="fade-in-up">
@@ -295,26 +335,14 @@ export function SettingsPage({ theme = 'auto', onThemeChange, syncIntervalSecond
               <label className="form-label">
                 Model {availableModels.length > 0 && `(${availableModels.length} fetched)`}
               </label>
-              <select
+              <CustomSelect
+                fullWidth
+                ariaLabel="Model"
                 value={model}
-                onChange={(e) => setModel(e.target.value)}
-                className="form-select"
-              >
-                {availableModels.length > 0 ? (
-                  availableModels.map(m => (
-                    <option key={m.name} value={m.name}>
-                      {m.displayName} (Input Limit: {m.inputTokenLimit.toLocaleString()} tokens)
-                    </option>
-                  ))
-                ) : (
-                  <>
-                    <option value="models/gemini-3.5-flash-lite">Gemini 3.5 Flash Lite (Fast & Recommended)</option>
-                    <option value="models/gemini-3.8-flash">Gemini 3.8 Flash (Balanced)</option>
-                    <option value="models/gemini-2.5-pro">Gemini 2.5 Pro (Deep Reasoning)</option>
-                    <option value="models/gemma-4-31b-it">Gemma 4 31B IT (Schema-free Fallback)</option>
-                  </>
-                )}
-              </select>
+                onChange={setModel}
+                options={modelOptions}
+                triggerStyle={{ height: 38 }}
+              />
             </div>
 
             {selectedModelInfo && (
@@ -360,17 +388,20 @@ export function SettingsPage({ theme = 'auto', onThemeChange, syncIntervalSecond
 
               <div className="form-group" style={{ marginBottom: 0 }}>
                 <label className="form-label">Capture Interval</label>
-                <select
-                  value={screenshotInterval}
-                  onChange={(e) => setScreenshotInterval(parseInt(e.target.value, 10))}
-                  className="form-select"
-                >
-                  <option value={15}>15s — High frequency</option>
-                  <option value={30}>30s — Active tracking</option>
-                  <option value={60}>60s — Standard (default)</option>
-                  <option value={120}>2m — Low resource</option>
-                  <option value={300}>5m — Minimal</option>
-                </select>
+                <CustomSelect
+                  fullWidth
+                  ariaLabel="Capture Interval"
+                  value={String(screenshotInterval)}
+                  onChange={(value) => setScreenshotInterval(parseInt(value, 10))}
+                  options={[
+                    { value: '15', label: '15s — High frequency', leading: <Icon name="clock" size={14} /> },
+                    { value: '30', label: '30s — Active tracking', leading: <Icon name="clock" size={14} /> },
+                    { value: '60', label: '60s — Standard (default)', leading: <Icon name="clock" size={14} /> },
+                    { value: '120', label: '2m — Low resource', leading: <Icon name="clock" size={14} /> },
+                    { value: '300', label: '5m — Minimal', leading: <Icon name="clock" size={14} /> },
+                  ]}
+                  triggerStyle={{ height: 38 }}
+                />
               </div>
             </div>
             <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 12 }}>

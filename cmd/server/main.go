@@ -25,11 +25,25 @@ import (
 	"time"
 
 	"github.com/reak/get-hike/internal/ai"
+	"github.com/reak/get-hike/internal/appicon"
 	"github.com/reak/get-hike/internal/config"
 	"github.com/reak/get-hike/internal/db"
 	"github.com/reak/get-hike/internal/email"
 	"github.com/reak/get-hike/internal/tracker"
 )
+
+var (
+	appIconsOnce sync.Once
+	appIcons     *appicon.Resolver
+)
+
+func appIconResolver() *appicon.Resolver {
+	appIconsOnce.Do(func() {
+		appIcons = appicon.NewResolver()
+		appIcons.Warm()
+	})
+	return appIcons
+}
 
 func main() {
 	cfg, err := config.Load()
@@ -485,6 +499,33 @@ func main() {
 		w.Header().Set("Content-Type", "image/jpeg")
 		w.Header().Set("Cache-Control", "public, max-age=86400")
 		w.Write(data)
+	})
+
+	// GET /api/app-icon?name=...
+	mux.HandleFunc("/api/app-icon", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			w.Header().Set("Allow", http.MethodGet)
+			http.Error(w, "method not allowed", 405)
+			return
+		}
+		if getSessionUser(r, database) == nil && !isLoopbackRequest(r) {
+			http.Error(w, "unauthorized", 401)
+			return
+		}
+		name := strings.TrimSpace(r.URL.Query().Get("name"))
+		if name == "" || len(name) > 160 || strings.ContainsAny(name, "\x00\r\n") {
+			http.Error(w, "invalid name", 400)
+			return
+		}
+		icon, ok := appIconResolver().Lookup(name)
+		if !ok {
+			http.Error(w, "icon not found", 404)
+			return
+		}
+		w.Header().Set("Content-Type", icon.MIMEType)
+		w.Header().Set("Cache-Control", "private, max-age=86400")
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Write(icon.Data)
 	})
 
 	// GET or POST /api/config

@@ -5,11 +5,13 @@ go 1.26.0
 require (
 	entgo.io/ent v0.14.6
 	github.com/chai2010/webp v1.4.0
+	github.com/codelif/xdgicons v0.4.0
 	github.com/holoplot/go-evdev v0.0.0-20250804134636-ab1d56a1fe83
 	github.com/jezek/xgb v1.1.1
 	github.com/kbinani/screenshot v0.0.0-20250624051815-089614a94018
 	github.com/lib/pq v1.12.3
 	github.com/mattn/go-sqlite3 v1.14.42
+	github.com/rkoesters/xdg v0.0.1
 	github.com/sirupsen/logrus v1.9.4
 	github.com/spf13/viper v1.21.0
 	github.com/wailsapp/wails/v2 v2.12.0
@@ -58,6 +60,7 @@ require (
 	golang.org/x/net v0.35.0 // indirect
 	golang.org/x/text v0.42.0 // indirect
 	gopkg.in/check.v1 v1.0.0-20201130134442-10cb98267c6c // indirect
+	gopkg.in/ini.v1 v1.67.0 // indirect
 )
 
 // replace github.com/wailsapp/wails/v2 v2.12.0 => /home/reak/go/pkg/mod

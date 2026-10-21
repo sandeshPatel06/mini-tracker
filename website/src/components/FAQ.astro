@@ -1,0 +1,113 @@
+---
+interface FAQItem {
+  question: string;
+  answer: string;
+}
+
+const faqs: FAQItem[] = [
+  {
+    question: 'Is get-Hike free?',
+    answer: 'Yes! get-Hike is completely free and open source under the MIT license for personal use. You can inspect the source code, run it locally, and build it from scratch with zero telemetry or subscription paywalls.',
+  },
+  {
+    question: 'Does get-Hike keylog what I type?',
+    answer: 'Absolutely not. get-Hike intentionally measures keystroke entropy (rate and irregularity of input to estimate active focus) rather than capturing the actual characters or keys pressed. Passwords, messages, and code keystrokes are never recorded or logged.',
+  },
+  {
+    question: 'Do I need an account or sign-up?',
+    answer: 'No. get-Hike includes a zero-friction Guest mode. You can install it and start tracking productivity immediately without signing up, entering an email, or connecting any cloud account.',
+  },
+  {
+    question: 'Does get-Hike require root or sudo privileges to run?',
+    answer: 'No. get-Hike runs entirely in your user space as a standard Linux user application or systemd user service. Root privileges are never required during regular operation or tracking.',
+  },
+  {
+    question: 'Does it support Windows or macOS?',
+    answer: 'Yes! Automated builds for Windows (portable .exe) and macOS (.app.zip for Intel & Apple Silicon) are published with every GitHub release. The desktop client uses Wails and Go with an embedded React UI. Linux has the deepest native integration, including systemd user service management, desktop launcher shortcuts, and /dev/input zero-sudo hardware telemetry.',
+  },
+  {
+    question: 'How does the Gemini AI analysis work?',
+    answer: 'AI analysis is 100% optional. If you provide your own Google Gemini API key, get-Hike evaluates 5-minute activity bundles using gemini-3.5-flash-lite (with automatic failover to gemini-flash-lite-latest). It scores productivity (0-100%) and tags work categories (Coding, Review, Docs, Research) while idle periods skip the API entirely. No data is sent to AI endpoints unless you supply your key.',
+  },
+  {
+    question: 'Where is my data stored?',
+    answer: 'All captures, SQLite databases, and configuration stay directly on your local drive at ~/.local/share/get-hike/ (or %APPDATA%\\get-hike\\ on Windows). Screenshots are pruned automatically according to your retention settings (default 7 days) and never leave your workstation.',
+  },
+];
+---
+
+<div class="max-w-3xl mx-auto divide-y divide-emerald-500/15" id="faq-accordion">
+  {faqs.map((faq, index) => {
+    const questionId = `faq-q-${index}`;
+    const answerId = `faq-a-${index}`;
+
+    return (
+      <div class="py-5 group">
+        <button
+          type="button"
+          id={questionId}
+          aria-expanded="false"
+          aria-controls={answerId}
+          class="w-full flex items-center justify-between text-left gap-4 font-semibold text-base sm:text-lg text-slate-100 hover:text-emerald-400 transition-colors focus-visible:outline-2 focus-visible:outline-emerald-500 rounded-lg p-1 -m-1"
+        >
+          <span>{faq.question}</span>
+          <span class="w-8 h-8 rounded-full bg-slate-900 border border-emerald-500/20 flex items-center justify-center shrink-0 text-emerald-400 group-hover:border-emerald-400 transition-all duration-200">
+            <svg
+              class="w-4 h-4 transform transition-transform duration-200 faq-icon"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+            </svg>
+          </span>
+        </button>
+        <div
+          id={answerId}
+          role="region"
+          aria-labelledby={questionId}
+          class="hidden pt-3 text-sm sm:text-base text-slate-400 leading-relaxed"
+        >
+          <p>{faq.answer}</p>
+        </div>
+      </div>
+    );
+  })}
+</div>
+
+<script>
+  const accordion = document.getElementById('faq-accordion');
+  if (accordion) {
+    const buttons = accordion.querySelectorAll('button[aria-controls]');
+    buttons.forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const isExpanded = btn.getAttribute('aria-expanded') === 'true';
+        const panelId = btn.getAttribute('aria-controls');
+        const panel = panelId ? document.getElementById(panelId) : null;
+        const icon = btn.querySelector('.faq-icon');
+
+        if (isExpanded) {
+          btn.setAttribute('aria-expanded', 'false');
+          panel?.classList.add('hidden');
+          icon?.classList.remove('rotate-180');
+        } else {
+          // Close other panels for clean accordion experience
+          buttons.forEach((otherBtn) => {
+            if (otherBtn !== btn) {
+              otherBtn.setAttribute('aria-expanded', 'false');
+              const otherPanelId = otherBtn.getAttribute('aria-controls');
+              const otherPanel = otherPanelId ? document.getElementById(otherPanelId) : null;
+              const otherIcon = otherBtn.querySelector('.faq-icon');
+              otherPanel?.classList.add('hidden');
+              otherIcon?.classList.remove('rotate-180');
+            }
+          });
+
+          btn.setAttribute('aria-expanded', 'true');
+          panel?.classList.remove('hidden');
+          icon?.classList.add('rotate-180');
+        }
+      });
+    });
+  }
+</script>

@@ -1,0 +1,29 @@
+{
+  "name": "get-hike-website",
+  "version": "1.0.0",
+  "description": "Marketing website for get-Hike, privacy-first Linux productivity tracker",
+  "type": "module",
+  "scripts": {
+    "dev": "astro dev",
+    "start": "astro dev",
+    "build": "astro build",
+    "preview": "astro preview"
+  },
+  "keywords": [
+    "productivity",
+    "linux",
+    "privacy",
+    "time-tracker",
+    "gemini-ai"
+  ],
+  "author": "REAK INFOTECH LLP",
+  "license": "MIT",
+  "dependencies": {
+    "@astrojs/sitemap": "^3.7.4",
+    "@tailwindcss/vite": "^4.3.3",
+    "@types/node": "^26.6.5",
+    "astro": "^5.18.2",
+    "tailwindcss": "^4.3.3",
+    "typescript": "^5.9.3"
+  }
+}

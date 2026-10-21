@@ -1,0 +1,72 @@
+---
+interface Props {
+  href?: string;
+  variant?: 'primary' | 'outline' | 'ghost' | 'emerald-subtle';
+  size?: 'sm' | 'md' | 'lg';
+  class?: string;
+  target?: string;
+  rel?: string;
+  id?: string;
+  type?: 'button' | 'submit' | 'reset';
+  'aria-label'?: string;
+}
+
+const {
+  href,
+  variant = 'primary',
+  size = 'md',
+  class: className = '',
+  target,
+  rel,
+  id,
+  type = 'button',
+  'aria-label': ariaLabel,
+  ...rest
+} = Astro.props;
+
+const baseStyles = 'inline-flex items-center justify-center font-medium rounded-lg transition-all duration-200 cursor-pointer min-h-[44px] min-w-[44px] focus-visible:outline-2 focus-visible:outline-emerald-500 focus-visible:outline-offset-2 select-none';
+
+const variants = {
+  primary: 'bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-semibold shadow-lg shadow-emerald-500/20 hover:shadow-emerald-500/35 hover:-translate-y-0.5 active:translate-y-0 active:bg-emerald-600',
+  outline: 'border border-emerald-500/40 hover:border-emerald-400 bg-emerald-950/20 hover:bg-emerald-950/40 text-emerald-300 hover:text-emerald-200 hover:-translate-y-0.5 active:translate-y-0',
+  ghost: 'text-slate-300 hover:text-white hover:bg-white/5 active:bg-white/10',
+  'emerald-subtle': 'bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-300 border border-emerald-500/20 hover:border-emerald-500/40',
+};
+
+const sizes = {
+  sm: 'px-3 py-1.5 text-sm gap-1.5',
+  md: 'px-5 py-2.5 text-base gap-2',
+  lg: 'px-6 py-3 text-lg gap-2.5 font-semibold',
+};
+
+const computedClass = `${baseStyles} ${variants[variant]} ${sizes[size]} ${className}`;
+const resolvedRel = target === '_blank'
+  ? Array.from(new Set(['noopener', 'noreferrer', ...(rel ? rel.split(' ') : [])])).join(' ')
+  : rel;
+---
+
+{
+  href ? (
+    <a
+      href={href}
+      class={computedClass}
+      target={target}
+      rel={resolvedRel}
+      id={id}
+      aria-label={ariaLabel}
+      {...rest}
+    >
+      <slot />
+    </a>
+  ) : (
+    <button
+      type={type}
+      class={computedClass}
+      id={id}
+      aria-label={ariaLabel}
+      {...rest}
+    >
+      <slot />
+    </button>
+  )
+}

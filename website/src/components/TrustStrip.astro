@@ -1,0 +1,68 @@
+---
+const trustItems = [
+  {
+    icon: 'linux',
+    label: 'Native Linux',
+    detail: 'X11 & Wayland ready',
+  },
+  {
+    icon: 'shield',
+    label: 'No Keylogging',
+    detail: 'Entropy scoring only',
+  },
+  {
+    icon: 'hard-drive',
+    label: 'Local-First',
+    detail: '~/.local/share/get-hike/',
+  },
+  {
+    icon: 'code',
+    label: 'Open Source',
+    detail: 'MIT License (REAK INFOTECH)',
+  },
+];
+---
+
+<div class="w-full border-y border-emerald-500/15 bg-slate-950/60 backdrop-blur-sm py-4 sm:py-6">
+  <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 lg:gap-6">
+      {trustItems.map((item) => (
+        <div class="flex items-center gap-3 p-2.5 rounded-xl bg-slate-900/40 border border-slate-800/60 min-w-0">
+          <div class="w-10 h-10 rounded-lg bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center shrink-0 text-emerald-400">
+            {item.icon === 'linux' && (
+              <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="4" y="4" width="16" height="16" rx="2" />
+                <path d="M9 9h6v6H9z" />
+                <path d="M9 1v3M15 1v3M9 20v3M15 20v3M20 9h3M20 14h3M1 9h3M1 14h3" />
+              </svg>
+            )}
+            {item.icon === 'shield' && (
+              <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+                <path d="M9 12l2 2 4-4" />
+              </svg>
+            )}
+            {item.icon === 'hard-drive' && (
+              <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M4 6h16M4 12h16M4 18h16" />
+                <circle cx="8" cy="6" r="1" fill="currentColor" />
+                <circle cx="8" cy="12" r="1" fill="currentColor" />
+                <circle cx="8" cy="18" r="1" fill="currentColor" />
+              </svg>
+            )}
+            {item.icon === 'code' && (
+              <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polyline points="16 18 22 12 16 6" />
+                <polyline points="8 6 2 12 8 18" />
+              </svg>
+            )}
+          </div>
+          <div class="min-w-0 flex-1">
+            <div class="text-sm font-semibold text-white tracking-tight truncate">{item.label}</div>
+            <div class="text-xs text-slate-400 font-mono truncate">{item.detail}</div>
+          </div>
+        </div>
+      ))}
+    </div>
+  </div>
+</div>

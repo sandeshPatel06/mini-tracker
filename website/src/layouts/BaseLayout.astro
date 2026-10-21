@@ -1,0 +1,49 @@
+---
+import BaseHead from '../components/BaseHead.astro';
+import Header from '../components/Header.astro';
+import Footer from '../components/Footer.astro';
+import '../styles/global.css';
+
+interface Props {
+  title: string;
+  description: string;
+  image?: string;
+  canonicalURL?: string | URL;
+  jsonLd?: Record<string, any>;
+}
+
+const { title, description, image, canonicalURL, jsonLd } = Astro.props;
+---
+
+<!doctype html>
+<html lang="en" class="scroll-smooth overflow-x-hidden">
+  <head>
+    <BaseHead
+      title={title}
+      description={description}
+      image={image}
+      canonicalURL={canonicalURL}
+      jsonLd={jsonLd}
+    />
+  </head>
+  <body class="bg-[#080e11] text-slate-100 min-h-screen flex flex-col antialiased selection:bg-emerald-500/30 selection:text-white overflow-x-hidden w-full">
+    <!-- Skip to Content Link for Accessibility -->
+    <a
+      href="#main-content"
+      class="sr-only focus:not-sr-only focus:fixed focus:top-4 focus:left-4 z-[100] px-4 py-2 bg-emerald-400 text-slate-950 font-bold rounded-lg shadow-xl focus:outline-none focus:ring-2 focus:ring-white"
+    >
+      Skip to content
+    </a>
+
+    <!-- Header Navigation -->
+    <Header />
+
+    <!-- Main Content Area -->
+    <main id="main-content" class="flex-grow flex flex-col">
+      <slot />
+    </main>
+
+    <!-- Footer -->
+    <Footer />
+  </body>
+</html>

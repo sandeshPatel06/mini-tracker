@@ -1,0 +1,112 @@
+---
+const currentYear = new Date().getFullYear();
+const githubUrl = 'https://github.com/sandeshPatel06/mini-tracker';
+---
+
+<footer class="border-t border-emerald-500/15 bg-slate-950/90 text-slate-400 text-sm mt-auto">
+  <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12 lg:py-16">
+    <div class="grid grid-cols-1 md:grid-cols-4 gap-8 lg:gap-12 mb-12">
+      
+      <!-- Brand & Mission Column -->
+      <div class="md:col-span-2 space-y-4">
+        <div class="flex items-center gap-3">
+          <div class="w-9 h-9 rounded-xl bg-slate-900 border border-emerald-500/30 flex items-center justify-center p-1">
+            <img
+              src="/app-logo.png"
+              alt="get-Hike App Logo"
+              class="w-7 h-7 object-contain"
+              width="28"
+              height="28"
+            />
+          </div>
+          <span class="text-lg font-bold tracking-tight text-white">get-Hike</span>
+          <span class="text-xs px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">v1.0</span>
+        </div>
+        <p class="text-slate-400 max-w-sm leading-relaxed">
+          Privacy-first productivity tracking for Linux. Entropy telemetry, optional Gemini AI analysis, and local-first SQLite persistence.
+        </p>
+        <div class="p-3 rounded-lg bg-emerald-950/20 border border-emerald-500/20 text-xs text-emerald-300 inline-block font-mono">
+          🔒 Open source. Data stays on your machine.
+        </div>
+      </div>
+
+      <!-- Navigation Column -->
+      <div>
+        <h3 class="text-white font-semibold mb-3 tracking-wide text-xs uppercase text-slate-200">Product</h3>
+        <ul class="space-y-2">
+          <li>
+            <a href="/download" class="text-emerald-400 font-semibold hover:text-emerald-300 transition-colors">Download Binaries</a>
+          </li>
+          <li>
+            <a href="/features" class="hover:text-emerald-400 transition-colors">Features</a>
+          </li>
+          <li>
+            <a href="/get-started" class="hover:text-emerald-400 transition-colors">Get started</a>
+          </li>
+          <li>
+            <a href="/changelog" class="hover:text-emerald-400 transition-colors">Changelog</a>
+          </li>
+          <li>
+            <a href="/privacy" class="hover:text-emerald-400 transition-colors">Privacy policy</a>
+          </li>
+        </ul>
+      </div>
+
+      <!-- Community & Legal Column -->
+      <div>
+        <h3 class="text-white font-semibold mb-3 tracking-wide text-xs uppercase text-slate-200">Open Source</h3>
+        <ul class="space-y-2">
+          <li>
+            <a
+              href={githubUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              class="hover:text-emerald-400 transition-colors inline-flex items-center gap-1.5"
+            >
+              GitHub Repository
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>
+            </a>
+          </li>
+          <li>
+            <a
+              href={`${githubUrl}/issues`}
+              target="_blank"
+              rel="noopener noreferrer"
+              class="hover:text-emerald-400 transition-colors inline-flex items-center gap-1.5"
+            >
+              Report an Issue
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>
+            </a>
+          </li>
+          <li>
+            <a
+              href={`${githubUrl}/blob/main/LICENSE`}
+              target="_blank"
+              rel="noopener noreferrer"
+              class="hover:text-emerald-400 transition-colors inline-flex items-center gap-1.5"
+            >
+              MIT License
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>
+            </a>
+          </li>
+          <li>
+            <span class="text-slate-500">Built for Linux (X11 / Wayland)</span>
+          </li>
+        </ul>
+      </div>
+
+    </div>
+
+    <!-- Bottom copyright -->
+    <div class="pt-8 border-t border-slate-800/80 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-slate-500">
+      <div>
+        © {currentYear} <a href="https://reakinfotech.com" target="_blank" rel="noopener noreferrer" class="text-slate-400 hover:text-emerald-400">REAK INFOTECH LLP</a>. All rights reserved.
+      </div>
+      <div class="flex items-center gap-4">
+        <span>Licensed under MIT</span>
+        <span>•</span>
+        <a href="/privacy" class="text-slate-400 hover:text-emerald-400">Privacy Policy</a>
+      </div>
+    </div>
+  </div>
+</footer>

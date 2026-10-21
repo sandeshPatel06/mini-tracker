@@ -1,0 +1,255 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+import Button from '../components/Button.astro';
+import CodeBlock from '../components/CodeBlock.astro';
+
+const repoUrl = 'https://github.com/sandeshPatel06/mini-tracker';
+const releasesUrl = `${repoUrl}/releases`;
+const actionsUrl = `${repoUrl}/actions`;
+const latestReleaseUrl = `${releasesUrl}/latest`;
+
+const downloads = [
+  {
+    platform: 'Linux x64 (AMD64)',
+    type: 'Desktop App (GUI + Daemon)',
+    filename: 'get-hike-linux-amd64',
+    extUrl: `${latestReleaseUrl}/download/get-hike-linux-amd64`,
+    badge: 'Recommended for Linux',
+    desc: 'Self-contained executable for Ubuntu, Debian, Fedora, Arch, and derivatives. Includes embedded UI and systemd integration.',
+  },
+  {
+    platform: 'Linux ARM64 (aarch64)',
+    type: 'Desktop App (GUI + Daemon)',
+    filename: 'get-hike-linux-arm64',
+    extUrl: `${latestReleaseUrl}/download/get-hike-linux-arm64`,
+    badge: 'ARM Workstations',
+    desc: 'Optimized build for ARM64 Linux laptops, Raspberry Pi 5, and server boards.',
+  },
+  {
+    platform: 'Windows x64',
+    type: 'Portable Desktop App (.exe)',
+    filename: 'get-hike-windows-amd64.exe',
+    extUrl: `${latestReleaseUrl}/download/get-hike-windows-amd64.exe`,
+    badge: 'Portable',
+    desc: 'Standalone Windows executable with embedded webview. No installation or admin rights required.',
+  },
+  {
+    platform: 'macOS Apple Silicon (M1/M2/M3/M4)',
+    type: 'Desktop Application (.app.zip)',
+    filename: 'get-hike-macos-arm64.app.zip',
+    extUrl: `${latestReleaseUrl}/download/get-hike-macos-arm64.app.zip`,
+    badge: 'Apple Silicon',
+    desc: 'Native macOS ARM64 build. Unzip and drag to Applications.',
+  },
+  {
+    platform: 'macOS Intel (x86_64)',
+    type: 'Desktop Application (.app.zip)',
+    filename: 'get-hike-macos-amd64.app.zip',
+    extUrl: `${latestReleaseUrl}/download/get-hike-macos-amd64.app.zip`,
+    badge: 'Intel Mac',
+    desc: 'Native macOS x86_64 build for Intel-powered Mac computers.',
+  },
+  {
+    platform: 'Linux Server (Headless)',
+    type: 'Team & API Daemon',
+    filename: 'get-hike-server-linux-amd64',
+    extUrl: `${latestReleaseUrl}/download/get-hike-server-linux-amd64`,
+    badge: 'Self-Hosted Server',
+    desc: 'Headless backend server binary for Docker, cloud VPS, or team multi-tenant deployments on port 8080.',
+  },
+];
+
+const downloadJsonLd = {
+  '@context': 'https://schema.org',
+  '@type': 'SoftwareApplication',
+  name: 'get-Hike',
+  description: 'Download official get-Hike desktop binaries for Linux, Windows, and macOS.',
+  operatingSystem: ['Linux', 'Windows', 'macOS'],
+  applicationCategory: 'ProductivityApplication',
+  license: 'https://opensource.org/licenses/MIT',
+  url: 'https://get-hike.reakinfotech.com/download',
+  downloadUrl: 'https://github.com/sandeshPatel06/mini-tracker/releases',
+  offers: {
+    '@type': 'Offer',
+    price: '0',
+    priceCurrency: 'USD',
+  },
+};
+---
+
+<BaseLayout
+  title="Download get-Hike — Official Binaries & GitHub Releases"
+  description="Download official get-Hike desktop binaries for Linux, Windows, and macOS, or install via one-line terminal script. 100% Free and MIT open source."
+  jsonLd={downloadJsonLd}
+>
+  <div class="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-8 sm:py-16">
+    
+    <!-- Top Header -->
+    <div class="text-center max-w-3xl mx-auto mb-8 sm:mb-14">
+      <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs sm:text-sm font-medium mb-3 sm:mb-4 max-w-full truncate">
+        <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse shrink-0"></span>
+        <span>Free &amp; Open Source • No Account Required</span>
+      </div>
+
+      <h1 class="text-3xl sm:text-5xl font-extrabold text-white tracking-tight mb-3 sm:mb-4">
+        Download get-Hike
+      </h1>
+      <p class="text-sm sm:text-lg text-slate-300 leading-relaxed">
+        Choose your platform below or use the one-line terminal installer. Every release is built transparently by GitHub Actions with verified SHA-256 checksums.
+      </p>
+
+      <!-- Quick Action Buttons -->
+      <div class="flex flex-col sm:flex-row items-stretch sm:items-center justify-center gap-2.5 sm:gap-3 mt-6 w-full sm:w-auto">
+        <Button href={releasesUrl} variant="primary" size="md" target="_blank" rel="noopener noreferrer" class="w-full sm:w-auto min-h-[46px]">
+          <svg class="w-4 h-4 mr-1.5 fill-current" viewBox="0 0 24 24">
+            <path fill-rule="evenodd" clip-rule="evenodd" d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.53 1.032 1.53 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z" />
+          </svg>
+          Open GitHub Releases Page
+        </Button>
+        <Button href={actionsUrl} variant="outline" size="md" target="_blank" rel="noopener noreferrer" class="w-full sm:w-auto min-h-[46px]">
+          View CI Build Runs
+        </Button>
+      </div>
+    </div>
+
+    <!-- Linux Fast One-Line Installer Box -->
+    <div class="mb-10 sm:mb-14 rounded-xl sm:rounded-2xl glass-card p-4 sm:p-8 border border-emerald-500/30">
+      <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-3 sm:mb-4">
+        <div>
+          <span class="text-xs font-mono font-semibold text-emerald-400 uppercase tracking-wider">Fast Linux Install</span>
+          <h2 class="text-lg sm:text-2xl font-bold text-white mt-1">
+            Install with a single command
+          </h2>
+          <p class="text-xs sm:text-sm text-slate-400 mt-1">
+            Downloads latest GitHub release binary, configures desktop launcher icon, and enables autostart.
+          </p>
+        </div>
+      </div>
+
+      <CodeBlock
+        code="curl -sSL https://raw.githubusercontent.com/sandeshPatel06/mini-tracker/main/install.sh | bash"
+        label="Linux Automated Installer"
+      />
+    </div>
+
+    <!-- Official Binaries Grid -->
+    <div class="mb-12 sm:mb-16">
+      <div class="flex items-center justify-between mb-4 sm:mb-6">
+        <div>
+          <h2 class="text-xl sm:text-2xl font-bold text-white tracking-tight">
+            Release Binaries
+          </h2>
+          <p class="text-xs sm:text-sm text-slate-400">
+            Direct download links to latest automated build artifacts on GitHub
+          </p>
+        </div>
+        <a
+          href={releasesUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          class="text-xs font-mono text-emerald-400 hover:text-emerald-300 hidden sm:inline-flex items-center gap-1"
+        >
+          View all release tags
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>
+        </a>
+      </div>
+
+      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
+        {downloads.map((item) => (
+          <div class="glass-card rounded-xl sm:rounded-2xl p-4 sm:p-6 flex flex-col justify-between group hover:border-emerald-500/40 transition-all">
+            <div>
+              <div class="flex items-center justify-between gap-2 mb-2 sm:mb-3">
+                <span class="text-[10px] sm:text-[11px] font-mono px-2 py-0.5 rounded-full bg-slate-800 text-emerald-400 border border-emerald-500/20">
+                  {item.badge}
+                </span>
+                <span class="text-xs text-slate-500 font-mono">MIT</span>
+              </div>
+
+              <h3 class="text-base sm:text-lg font-bold text-white group-hover:text-emerald-300 transition-colors">
+                {item.platform}
+              </h3>
+              <div class="text-xs font-medium text-emerald-400/90 mb-1.5 sm:mb-2">
+                {item.type}
+              </div>
+              <p class="text-xs text-slate-400 leading-relaxed mb-3 sm:mb-4">
+                {item.desc}
+              </p>
+            </div>
+
+            <div class="pt-3 sm:pt-4 border-t border-slate-800/80 space-y-2">
+              <div class="text-[10px] sm:text-[11px] font-mono text-slate-400 truncate" title={item.filename}>
+                📁 {item.filename}
+              </div>
+              <a
+                href={item.extUrl}
+                class="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg text-xs sm:text-sm font-semibold bg-emerald-500/15 hover:bg-emerald-500 text-emerald-300 hover:text-slate-950 border border-emerald-500/30 hover:border-emerald-400 transition-all min-h-[44px]"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                </svg>
+                Download Binary
+              </a>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+
+    <!-- Quick Running Instructions -->
+    <div class="rounded-xl sm:rounded-2xl glass-panel p-4 sm:p-8 border border-slate-800">
+      <h2 class="text-lg sm:text-xl font-bold text-white mb-3 sm:mb-4">
+        Quick Run Guide After Downloading
+      </h2>
+
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-4 sm:gap-6 text-sm text-slate-300">
+        <div class="space-y-2">
+          <div class="font-bold text-emerald-400 font-mono text-xs sm:text-sm">🐧 Linux Desktop</div>
+          <p class="text-xs text-slate-400 leading-relaxed">
+            Make executable and run. The app embeds the frontend and automatically sets up local storage:
+          </p>
+          <pre class="bg-slate-950 p-2.5 rounded border border-slate-800 text-xs font-mono text-emerald-300 overflow-x-auto">chmod +x get-hike-linux-amd64
+./get-hike-linux-amd64</pre>
+        </div>
+
+        <div class="space-y-2">
+          <div class="font-bold text-emerald-400 font-mono text-xs sm:text-sm">🪟 Windows Desktop</div>
+          <p class="text-xs text-slate-400 leading-relaxed">
+            Portable executable with zero dependencies:
+          </p>
+          <pre class="bg-slate-950 p-2.5 rounded border border-slate-800 text-xs font-mono text-emerald-300 overflow-x-auto"># Double-click or run:
+.\get-hike-windows-amd64.exe</pre>
+        </div>
+
+        <div class="space-y-2">
+          <div class="font-bold text-emerald-400 font-mono text-xs sm:text-sm">🍏 macOS Desktop</div>
+          <p class="text-xs text-slate-400 leading-relaxed">
+            Unzip the app bundle. If Gatekeeper flags the ad-hoc signature:
+          </p>
+          <pre class="bg-slate-950 p-2.5 rounded border border-slate-800 text-xs font-mono text-emerald-300 overflow-x-auto">xattr -dr com.apple.quarantine get-hike.app</pre>
+        </div>
+      </div>
+
+      <!-- SHA Verification Note -->
+      <div class="mt-4 sm:mt-6 pt-4 sm:pt-6 border-t border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 text-xs text-slate-400">
+        <div class="flex items-center gap-2">
+          <span class="text-emerald-400 font-bold shrink-0">🔒 Integrity:</span>
+          <span class="break-words">Check release checksums via <code class="text-emerald-300 font-mono">checksums.txt</code> on GitHub.</span>
+        </div>
+        <a
+          href={releasesUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          class="text-emerald-400 hover:text-emerald-300 font-mono underline shrink-0 mt-1 sm:mt-0"
+        >
+          View checksums.txt on GitHub →
+        </a>
+      </div>
+    </div>
+
+  </div>
+</BaseLayout>
+
+  </div>
+</BaseLayout>

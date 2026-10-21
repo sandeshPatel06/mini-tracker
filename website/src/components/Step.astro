@@ -1,0 +1,29 @@
+---
+interface Props {
+  number: string;
+  title: string;
+  description: string;
+  badge?: string;
+}
+
+const { number, title, description, badge } = Astro.props;
+---
+
+<div class="relative flex flex-col p-4 sm:p-6 rounded-xl sm:rounded-2xl glass-card group">
+  <div class="flex items-center justify-between mb-3 sm:mb-4">
+    <div class="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center font-mono font-bold text-emerald-400 text-base sm:text-lg">
+      {number}
+    </div>
+    {badge && (
+      <span class="text-[11px] sm:text-xs font-medium px-2 py-0.5 rounded bg-slate-800 text-emerald-400 border border-emerald-500/20 font-mono">
+        {badge}
+      </span>
+    )}
+  </div>
+  <h3 class="text-base sm:text-lg font-bold text-white mb-1.5 sm:mb-2 group-hover:text-emerald-300 transition-colors">
+    {title}
+  </h3>
+  <p class="text-slate-400 text-xs sm:text-sm leading-relaxed">
+    {description}
+  </p>
+</div>

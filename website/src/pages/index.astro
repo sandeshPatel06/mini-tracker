@@ -1,0 +1,487 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+import Button from '../components/Button.astro';
+import TrustStrip from '../components/TrustStrip.astro';
+import FeatureCard from '../components/FeatureCard.astro';
+import Step from '../components/Step.astro';
+import FAQ from '../components/FAQ.astro';
+import CTASection from '../components/CTASection.astro';
+import CodeBlock from '../components/CodeBlock.astro';
+
+const jsonLd = {
+  '@context': 'https://schema.org',
+  '@graph': [
+    {
+      '@type': 'SoftwareApplication',
+      '@id': 'https://get-hike.reakinfotech.com/#software',
+      name: 'get-Hike',
+      description: 'Privacy-first productivity tracking for Linux, Windows & macOS — open source, AI-assisted, optional teams.',
+      operatingSystem: ['Linux', 'Windows', 'macOS'],
+      applicationCategory: 'ProductivityApplication',
+      license: 'https://opensource.org/licenses/MIT',
+      url: 'https://get-hike.reakinfotech.com',
+      downloadUrl: 'https://github.com/sandeshPatel06/mini-tracker/releases',
+      softwareVersion: '1.0.0',
+      offers: {
+        '@type': 'Offer',
+        price: '0',
+        priceCurrency: 'USD',
+      },
+      author: {
+        '@type': 'Organization',
+        name: 'REAK INFOTECH LLP',
+        url: 'https://reakinfotech.com',
+      },
+    },
+    {
+      '@type': 'Organization',
+      '@id': 'https://reakinfotech.com/#organization',
+      name: 'REAK INFOTECH LLP',
+      url: 'https://reakinfotech.com',
+    },
+    {
+      '@type': 'FAQPage',
+      '@id': 'https://get-hike.reakinfotech.com/#faq',
+      mainEntity: [
+        {
+          '@type': 'Question',
+          name: 'Is get-Hike free?',
+          acceptedAnswer: {
+            '@type': 'Answer',
+            text: 'Yes! get-Hike is completely free and open source under the MIT license for personal use. You can inspect the source code, run it locally, and build it from scratch with zero telemetry or subscription paywalls.',
+          },
+        },
+        {
+          '@type': 'Question',
+          name: 'Does get-Hike keylog what I type?',
+          acceptedAnswer: {
+            '@type': 'Answer',
+            text: 'Absolutely not. get-Hike intentionally measures keystroke entropy (rate and irregularity of input to estimate active focus) rather than capturing the actual characters or keys pressed. Passwords, messages, and code keystrokes are never recorded or logged.',
+          },
+        },
+        {
+          '@type': 'Question',
+          name: 'Do I need an account or sign-up?',
+          acceptedAnswer: {
+            '@type': 'Answer',
+            text: 'No. get-Hike includes a zero-friction Guest mode. You can install it and start tracking productivity immediately without signing up, entering an email, or connecting any cloud account.',
+          },
+        },
+        {
+          '@type': 'Question',
+          name: 'Does it support Windows or macOS?',
+          acceptedAnswer: {
+            '@type': 'Answer',
+            text: 'Yes! Automated builds for Windows (portable .exe) and macOS (.app.zip for Intel & Apple Silicon) are published with every GitHub release.',
+          },
+        },
+        {
+          '@type': 'Question',
+          name: 'How does the Gemini AI analysis work?',
+          acceptedAnswer: {
+            '@type': 'Answer',
+            text: 'AI analysis is 100% optional. If you provide your own Google Gemini API key, get-Hike evaluates 5-minute activity bundles using gemini-3.5-flash-lite.',
+          },
+        },
+        {
+          '@type': 'Question',
+          name: 'Where is my data stored?',
+          acceptedAnswer: {
+            '@type': 'Answer',
+            text: 'All captures, SQLite databases, and configuration stay directly on your local drive at ~/.local/share/get-hike/ (or %APPDATA%\\get-hike\\ on Windows).',
+          },
+        },
+      ],
+    },
+  ],
+};
+
+const githubUrl = 'https://github.com/sandeshPatel06/mini-tracker';
+---
+
+<BaseLayout
+  title="get-Hike — Privacy-first Linux productivity tracker"
+  description="Track focus with screenshots and entropy (not keylogging), optional Gemini AI scores, runs locally. Free & open source for Linux."
+  jsonLd={jsonLd}
+>
+  <!-- Hero Section -->
+  <section class="relative pt-8 pb-12 sm:pt-20 sm:pb-24 overflow-hidden" aria-labelledby="hero-title">
+    <!-- Ambient emerald light -->
+    <div class="absolute top-0 left-1/2 -translate-x-1/2 w-[700px] max-w-full h-[350px] bg-emerald-500/10 blur-[120px] pointer-events-none rounded-full"></div>
+
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative z-10">
+      <div class="text-center max-w-3xl mx-auto">
+        
+        <!-- Top Pill -->
+        <div class="inline-flex items-center gap-1.5 sm:gap-2 px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs font-medium mb-4 sm:mb-6 max-w-full">
+          <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse shrink-0"></span>
+          <span class="truncate">Open Source Tracker</span>
+          <span class="text-emerald-500/60">•</span>
+          <span class="text-slate-300 truncate">Linux, Win &amp; Mac</span>
+        </div>
+
+        <!-- Main Heading -->
+        <h1
+          id="hero-title"
+          class="text-3xl sm:text-5xl lg:text-6xl font-extrabold text-white tracking-tight leading-[1.15] mb-4 sm:mb-6"
+        >
+          Own your focus.<br />
+          <span class="text-transparent bg-clip-text bg-gradient-to-r from-emerald-400 via-teal-300 to-emerald-200">
+            Keep your data.
+          </span>
+        </h1>
+
+        <!-- One-liner Subtitle -->
+        <p class="text-sm sm:text-lg lg:text-xl text-slate-300 leading-relaxed mb-6 sm:mb-8 max-w-2xl mx-auto">
+          Track focus with screenshots and keystroke <strong class="text-white font-medium">entropy</strong> (never keylogging), optional Gemini AI categorization, and local-first SQLite persistence.
+        </p>
+
+        <!-- CTAs -->
+        <div class="flex flex-col sm:flex-row items-stretch sm:items-center justify-center gap-2.5 sm:gap-4 mb-8 sm:mb-10 w-full sm:w-auto">
+          <Button href="/download" variant="primary" size="lg" class="w-full sm:w-auto min-h-[48px]">
+            <svg class="w-5 h-5 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+            </svg>
+            Download free
+          </Button>
+
+          <Button
+            href={githubUrl}
+            variant="outline"
+            size="lg"
+            class="w-full sm:w-auto min-h-[48px]"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            <svg class="w-5 h-5 fill-current" viewBox="0 0 24 24">
+              <path fill-rule="evenodd" clip-rule="evenodd" d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.53 1.032 1.53 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z" />
+            </svg>
+            GitHub Releases
+          </Button>
+        </div>
+
+        <!-- Quick Terminal Command -->
+        <div class="max-w-xl mx-auto text-left w-full">
+          <CodeBlock
+            code="curl -sSL https://raw.githubusercontent.com/sandeshPatel06/mini-tracker/main/install.sh | bash"
+            label="Linux one-line install"
+          />
+        </div>
+
+      </div>
+
+      <!-- App Interface Mockup Preview -->
+      <div class="mt-8 sm:mt-16 max-w-4xl mx-auto">
+        <div class="rounded-xl sm:rounded-2xl border border-emerald-500/25 bg-slate-950 shadow-2xl overflow-hidden">
+          
+          <!-- Mockup Header -->
+          <div class="flex items-center justify-between px-3 sm:px-4 py-2.5 sm:py-3 bg-slate-900/90 border-b border-emerald-500/15 text-xs text-slate-400">
+            <div class="flex items-center gap-2">
+              <span class="w-2.5 h-2.5 rounded-full bg-red-500/70"></span>
+              <span class="w-2.5 h-2.5 rounded-full bg-amber-500/70"></span>
+              <span class="w-2.5 h-2.5 rounded-full bg-emerald-500/70"></span>
+              <img src="/app-logo.png" alt="get-Hike Desktop Icon" class="w-4 h-4 object-contain ml-1" width="16" height="16" />
+              <span class="font-mono text-slate-300 font-semibold text-[11px] sm:text-xs">get-Hike Desktop</span>
+            </div>
+            <!-- Real App Tabs -->
+            <div class="hidden sm:flex items-center gap-1 font-mono text-[11px]">
+              <span class="px-2.5 py-1 rounded bg-emerald-500/15 text-emerald-300 font-semibold">Dashboard</span>
+              <span class="px-2.5 py-1 rounded text-slate-400 hover:text-slate-200">Timeline</span>
+              <span class="px-2.5 py-1 rounded text-slate-400 hover:text-slate-200">Analytics</span>
+              <span class="px-2.5 py-1 rounded text-slate-400 hover:text-slate-200">Organization</span>
+              <span class="px-2.5 py-1 rounded text-slate-400 hover:text-slate-200">Settings</span>
+            </div>
+            <div class="flex items-center gap-2">
+              <span class="inline-flex items-center px-2 py-0.5 rounded text-[10px] sm:text-[11px] font-mono bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                ● LIVE
+              </span>
+              <span class="font-mono text-slate-400 text-[11px] hidden md:inline">Guest Mode</span>
+            </div>
+          </div>
+
+          <!-- Mockup Content Grid -->
+          <div class="p-3 sm:p-6 grid grid-cols-1 md:grid-cols-3 gap-3 sm:gap-4 bg-gradient-to-b from-slate-900/60 to-slate-950">
+            
+            <!-- Metric 1: Session Timer & Active Window -->
+            <div class="p-3.5 sm:p-4 rounded-xl bg-slate-900/70 border border-slate-800 flex flex-col justify-between">
+              <div>
+                <div class="flex items-center justify-between text-[11px] sm:text-xs text-slate-400 font-mono">
+                  <span>WORK SESSION</span>
+                  <span class="text-emerald-400 text-[10px]">Active</span>
+                </div>
+                <div class="text-2xl sm:text-3xl font-extrabold text-white font-mono mt-1">02:44:18</div>
+                <div class="text-xs text-slate-300 font-mono mt-1 truncate" title="Visual Studio Code — app.go">
+                  💻 VS Code — app.go
+                </div>
+              </div>
+              <div class="mt-3 text-xs text-emerald-400 flex items-center justify-between font-mono pt-2 border-t border-slate-800/60">
+                <span class="flex items-center gap-1">
+                  <span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span> Widget (/wizard)
+                </span>
+                <span class="text-slate-500 text-[11px]">Daemon active</span>
+              </div>
+            </div>
+
+            <!-- Metric 2: Telemetry Entropy -->
+            <div class="p-3.5 sm:p-4 rounded-xl bg-slate-900/70 border border-slate-800 flex flex-col justify-between">
+              <div>
+                <div class="flex items-center justify-between">
+                  <span class="text-[11px] sm:text-xs uppercase tracking-wider text-slate-400 font-mono">Focus Entropy</span>
+                  <span class="text-[10px] px-1.5 py-0.5 rounded bg-emerald-950 text-emerald-300 border border-emerald-500/30 font-mono">NO KEYLOGGER</span>
+                </div>
+                <div class="text-2xl sm:text-3xl font-extrabold text-emerald-400 font-mono mt-1">8.7 / 10</div>
+                <div class="text-xs text-slate-400 font-mono mt-1">
+                  Typing Cadence: High Focus
+                </div>
+              </div>
+              <div class="mt-3 text-xs text-slate-400 font-mono pt-2 border-t border-slate-800/60 flex items-center justify-between text-[11px]">
+                <span>412 clicks</span>
+                <span>1,280m distance</span>
+              </div>
+            </div>
+
+            <!-- Metric 3: AI Classification -->
+            <div class="p-3.5 sm:p-4 rounded-xl bg-slate-900/70 border border-slate-800 flex flex-col justify-between">
+              <div>
+                <div class="flex items-center justify-between">
+                  <span class="text-[11px] sm:text-xs uppercase tracking-wider text-slate-400 font-mono">Gemini AI Model</span>
+                  <span class="text-[10px] px-1.5 py-0.5 rounded bg-emerald-950/60 text-emerald-300 border border-emerald-500/30 font-mono">3.5-FLASH-LITE</span>
+                </div>
+                <div class="text-xl sm:text-2xl font-bold text-white font-mono mt-1">Coding &amp; Review</div>
+                <div class="text-xs text-emerald-400 font-mono mt-1">
+                  Productivity Score: 94%
+                </div>
+              </div>
+              <div class="mt-3 text-xs text-slate-400 font-mono pt-2 border-t border-slate-800/60 text-[11px]">
+                5-min evaluation • BYOK
+              </div>
+            </div>
+
+            <!-- Timeline Mockup Bar (Full Width with horizontal swipe on mobile) -->
+            <div class="md:col-span-3 p-3.5 sm:p-4 rounded-xl bg-slate-900/50 border border-slate-800/80 overflow-hidden">
+              <div class="flex items-center justify-between text-[11px] sm:text-xs text-slate-400 font-mono mb-2">
+                <span class="text-slate-300 font-semibold truncate">5-Min Activity Bundles</span>
+                <span class="text-emerald-400/80 text-[10px] sm:text-xs truncate ml-2">~/.local/share/get-hike/</span>
+              </div>
+              <div class="flex sm:grid sm:grid-cols-6 gap-2 overflow-x-auto pb-1 scrollbar-thin">
+                <div class="min-w-[110px] sm:min-w-0 flex-shrink-0 p-2 rounded bg-emerald-500/15 border border-emerald-500/30 text-center font-mono">
+                  <div class="text-[10px] text-slate-400">10:00 - 10:05</div>
+                  <div class="text-xs font-bold text-emerald-300">Coding (92%)</div>
+                </div>
+                <div class="min-w-[110px] sm:min-w-0 flex-shrink-0 p-2 rounded bg-emerald-500/20 border border-emerald-500/35 text-center font-mono">
+                  <div class="text-[10px] text-slate-400">10:05 - 10:10</div>
+                  <div class="text-xs font-bold text-emerald-300">Dev (96%)</div>
+                </div>
+                <div class="min-w-[110px] sm:min-w-0 flex-shrink-0 p-2 rounded bg-emerald-500/20 border border-emerald-500/35 text-center font-mono">
+                  <div class="text-[10px] text-slate-400">10:10 - 10:15</div>
+                  <div class="text-xs font-bold text-emerald-300">Review (94%)</div>
+                </div>
+                <div class="min-w-[110px] sm:min-w-0 flex-shrink-0 p-2 rounded bg-teal-500/15 border border-teal-500/30 text-center font-mono">
+                  <div class="text-[10px] text-slate-400">10:15 - 10:20</div>
+                  <div class="text-xs font-bold text-teal-300">Docs (88%)</div>
+                </div>
+                <div class="min-w-[110px] sm:min-w-0 flex-shrink-0 p-2 rounded bg-emerald-500/15 border border-emerald-500/30 text-center font-mono">
+                  <div class="text-[10px] text-slate-400">10:20 - 10:25</div>
+                  <div class="text-xs font-bold text-emerald-300">Coding (90%)</div>
+                </div>
+                <div class="min-w-[110px] sm:min-w-0 flex-shrink-0 p-2 rounded bg-emerald-500/30 border border-emerald-500/50 text-center font-mono shadow-sm shadow-emerald-500/20">
+                  <div class="text-[10px] text-emerald-400 font-semibold">Current</div>
+                  <div class="text-xs font-bold text-white">Active (95%)</div>
+                </div>
+              </div>
+            </div>
+
+          </div>
+
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- Trust Strip -->
+  <TrustStrip />
+
+  <!-- Social Proof / Positioning Statement -->
+  <section class="py-10 sm:py-16 bg-slate-950/40" aria-label="Product positioning">
+    <div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
+      <blockquote class="text-xl sm:text-2xl lg:text-3xl font-medium text-slate-200 tracking-tight leading-snug">
+        “Built for people who won’t ship their screen to the cloud.”
+      </blockquote>
+      <p class="mt-3 sm:mt-4 text-xs sm:text-base text-slate-400 max-w-2xl mx-auto leading-relaxed">
+        Most productivity trackers are invasive spyware that upload keystrokes and unencrypted videos to corporate cloud silos. get-Hike runs entirely on your local machine, writes to your own SQLite database, and never keylogs typed text.
+      </p>
+    </div>
+  </section>
+
+  <!-- Features Grid -->
+  <section class="py-12 sm:py-20 lg:py-24" id="features" aria-labelledby="features-heading">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+      <div class="text-center max-w-2xl mx-auto mb-8 sm:mb-16">
+        <span class="text-xs uppercase tracking-wider font-semibold text-emerald-400 font-mono">Product Features</span>
+        <h2 id="features-heading" class="text-2xl sm:text-4xl font-extrabold text-white tracking-tight mt-1.5 sm:mt-2 mb-3 sm:mb-4">
+          Engineered for Linux developers
+        </h2>
+        <p class="text-slate-400 text-xs sm:text-base leading-relaxed">
+          Everything you need to analyze your deep work cycles without compromising your privacy or system performance.
+        </p>
+      </div>
+
+      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
+        <FeatureCard
+          iconName="timer"
+          title="Work session timer & widget"
+          description="Lightweight floating desktop companion that stays unobtrusively on top. Start, pause, or switch sessions with a single click."
+          tag="Desktop UX"
+        />
+        <FeatureCard
+          iconName="sparkles"
+          title="Automated Gemini AI analysis"
+          description="Optionally connect your Google Gemini API key to batch-score captures and categorize work (coding, docs, research, idling) automatically."
+          tag="Optional AI"
+        />
+        <FeatureCard
+          iconName="timeline"
+          title="Filterable capture timeline"
+          description="Browse screenshots, active window titles, and productivity stats in an interactive timeline with rich time-window filtering."
+          tag="Local SQLite"
+        />
+        <FeatureCard
+          iconName="lock"
+          title="Entropy-based telemetry"
+          description="Zero character keylogging. We measure typing cadence entropy, mouse distance, and click counts to gauge focus without reading your secrets."
+          tag="Zero Keylogger"
+        />
+        <FeatureCard
+          iconName="users"
+          title="Optional team organizations"
+          description="Self-host or configure optional team features with Google & Azure OAuth, role-based access control, and workspace invites."
+          tag="Optional Multi-tenant"
+        />
+        <FeatureCard
+          iconName="terminal"
+          title="One-line install & systemd"
+          description="Quick setup with ./install.sh and seamless background persistence via standard systemd user units. Easy to inspect and remove."
+          tag="Native Linux"
+        />
+      </div>
+
+      <div class="text-center mt-8 sm:mt-10">
+        <a
+          href="/features"
+          class="inline-flex items-center gap-1.5 text-xs sm:text-sm font-semibold text-emerald-400 hover:text-emerald-300 transition-colors"
+        >
+          Explore deep architecture &amp; technical specs
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
+          </svg>
+        </a>
+      </div>
+    </div>
+  </section>
+
+  <!-- How It Works Section -->
+  <section class="py-12 sm:py-20 lg:py-24 bg-slate-950/60 border-t border-emerald-500/15" aria-labelledby="how-it-works-heading">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+      <div class="text-center max-w-2xl mx-auto mb-8 sm:mb-16">
+        <span class="text-xs uppercase tracking-wider font-semibold text-emerald-400 font-mono">Simple Workflow</span>
+        <h2 id="how-it-works-heading" class="text-2xl sm:text-4xl font-extrabold text-white tracking-tight mt-1.5 sm:mt-2 mb-3 sm:mb-4">
+          How get-Hike works
+        </h2>
+        <p class="text-slate-400 text-xs sm:text-base leading-relaxed">
+          From first clone to productive focus in four straightforward steps.
+        </p>
+      </div>
+
+      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6">
+        <Step
+          number="01"
+          title="Run the installer"
+          description="Execute the one-line curl command or clone the repo. The script sets up the desktop launcher and systemd autostart."
+          badge="curl | bash"
+        />
+        <Step
+          number="02"
+          title="Start a work session"
+          description="Launch get-Hike in Guest mode. The compact floating widget lets you start and stop sessions without logging into any third party."
+          badge="Zero Friction"
+        />
+        <Step
+          number="03"
+          title="Capture & entropy score"
+          description="Local captures run quietly in the background, computing mouse distance and typing entropy while pruning old data on your schedule."
+          badge="Local-First"
+        />
+        <Step
+          number="04"
+          title="Review local timeline"
+          description="Open your local dashboard to view time breakdowns, categories, and optional Gemini AI productivity ratings."
+          badge="Your Data"
+        />
+      </div>
+    </div>
+  </section>
+
+  <!-- Privacy Teaser Section -->
+  <section class="py-12 sm:py-20 lg:py-24" aria-labelledby="privacy-heading">
+    <div class="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8">
+      <div class="rounded-2xl sm:rounded-3xl border border-emerald-500/25 bg-gradient-to-br from-slate-900 via-slate-950 to-emerald-950/20 p-5 sm:p-10 lg:p-12 relative overflow-hidden">
+        <div class="max-w-3xl">
+          <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-xs font-mono font-semibold mb-4 sm:mb-6">
+            PRIVACY PROMISE
+          </div>
+          <h2 id="privacy-heading" class="text-2xl sm:text-3xl lg:text-4xl font-extrabold text-white tracking-tight mb-3 sm:mb-4">
+            Zero character logging. No secret telemetry.
+          </h2>
+          <p class="text-slate-300 text-xs sm:text-base lg:text-lg leading-relaxed mb-6">
+            We built get-Hike for engineers who refuse to compromise their digital sovereignty. Every byte stays on your workstation at <code class="text-emerald-300 bg-emerald-950/50 px-1.5 sm:px-2 py-0.5 rounded text-xs sm:text-sm font-mono break-all">~/.local/share/get-hike/</code>.
+          </p>
+
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4 text-xs sm:text-sm text-slate-300 mb-6 sm:mb-8 font-mono">
+            <div class="flex items-center gap-2">
+              <span class="text-emerald-400 font-bold">✓</span> No character keystroke logging
+            </div>
+            <div class="flex items-center gap-2">
+              <span class="text-emerald-400 font-bold">✓</span> No default cloud uploads
+            </div>
+            <div class="flex items-center gap-2">
+              <span class="text-emerald-400 font-bold">✓</span> Offline Guest mode included
+            </div>
+            <div class="flex items-center gap-2">
+              <span class="text-emerald-400 font-bold">✓</span> Bring your own Gemini API key
+            </div>
+          </div>
+
+          <div class="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+            <Button href="/privacy" variant="primary" size="md" class="w-full sm:w-auto min-h-[46px]">
+              Read full privacy policy
+            </Button>
+            <Button href="/download" variant="outline" size="md" class="w-full sm:w-auto min-h-[46px]">
+              Download binaries
+            </Button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- FAQ Section -->
+  <section class="py-12 sm:py-20 lg:py-24 bg-slate-950/60 border-t border-emerald-500/15" id="faq" aria-labelledby="faq-heading">
+    <div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
+      <div class="text-center max-w-2xl mx-auto mb-8 sm:mb-12">
+        <span class="text-xs uppercase tracking-wider font-semibold text-emerald-400 font-mono">Frequently Asked Questions</span>
+        <h2 id="faq-heading" class="text-2xl sm:text-4xl font-extrabold text-white tracking-tight mt-1.5 sm:mt-2 mb-3 sm:mb-4">
+          Questions &amp; answers
+        </h2>
+        <p class="text-slate-400 text-xs sm:text-base">
+          Honest answers about get-Hike architecture, cross-platform support, and privacy boundaries.
+        </p>
+      </div>
+
+      <FAQ />
+    </div>
+  </section>
+
+  <!-- Final CTA Section -->
+  <CTASection />
+</BaseLayout>

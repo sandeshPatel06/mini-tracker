@@ -1,0 +1,177 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+import Button from '../components/Button.astro';
+
+const lastUpdated = 'October 20, 2026';
+const githubIssuesUrl = 'https://github.com/sandeshPatel06/mini-tracker/issues';
+---
+
+<BaseLayout
+  title="Privacy Policy — get-Hike"
+  description="Transparent privacy policy for get-Hike: local storage in ~/.local/share/get-hike/, zero keystroke logging, entropy telemetry, and optional Gemini AI."
+>
+  <div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-8 sm:py-16">
+    
+    <!-- Header -->
+    <div class="border-b border-emerald-500/15 pb-6 sm:pb-8 mb-6 sm:mb-10">
+      <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-xs font-mono font-semibold mb-3 sm:mb-4">
+        TRANSPARENT PRIVACY POLICY
+      </div>
+      <h1 class="text-3xl sm:text-4xl lg:text-5xl font-extrabold text-white tracking-tight mb-3 sm:mb-4">
+        Privacy Policy
+      </h1>
+      <p class="text-slate-400 text-xs sm:text-sm">
+        Last updated: {lastUpdated} • Maintained by REAK INFOTECH LLP
+      </p>
+    </div>
+
+    <!-- Core Commitment Banner -->
+    <div class="p-4 sm:p-8 rounded-xl sm:rounded-2xl bg-emerald-950/20 border border-emerald-500/30 mb-8 sm:mb-12">
+      <h2 class="text-base sm:text-lg font-bold text-white mb-2 flex items-center gap-2">
+        <svg class="w-5 h-5 text-emerald-400 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+          <path d="M9 12l2 2 4-4" />
+        </svg>
+        Our Core Philosophy: Local-First &amp; Zero Character Keylogging
+      </h2>
+      <p class="text-xs sm:text-base text-slate-300 leading-relaxed">
+        get-Hike was founded on the belief that personal productivity tracking should never require surrendering your privacy, passwords, or confidential work to third-party cloud servers. By default, get-Hike operates 100% locally on your machine.
+      </p>
+    </div>
+
+    <!-- Detailed Policy Sections -->
+    <div class="space-y-8 sm:space-y-12 text-slate-300 text-xs sm:text-base leading-relaxed">
+      
+      <!-- 1. What We Collect Locally -->
+      <section>
+        <h2 class="text-lg sm:text-xl font-bold text-white mb-2.5 sm:mb-3">1. What get-Hike Collects Locally</h2>
+        <p class="mb-3 sm:mb-4 text-slate-400">
+          When an active focus session is initiated, get-Hike records telemetry strictly to your workstation's local storage:
+        </p>
+        <ul class="list-disc list-inside space-y-2 text-slate-300 ml-2">
+          <li>
+            <strong class="text-white">Screenshots (Periodic Captures):</strong> Visual snapshots taken at user-configured intervals (e.g., every 5 to 15 minutes) to help you reconstruct what was on screen during focus blocks.
+          </li>
+          <li>
+            <strong class="text-white">Keystroke Entropy Metrics:</strong> Statistical variance and timing intervals between keypresses to calculate activity presence and focus depth.
+          </li>
+          <li>
+            <strong class="text-white">Mouse Activity Metrics:</strong> Total pixel distance traveled and aggregated mouse button clicks during a capture cycle.
+          </li>
+          <li>
+            <strong class="text-white">Active Window Metadata:</strong> Window titles and active process names when provided by your desktop window manager or desktop portal.
+          </li>
+        </ul>
+      </section>
+
+      <!-- 2. What We Explicitly DO NOT Collect -->
+      <section>
+        <h2 class="text-xl font-bold text-white mb-3">2. What get-Hike Explicitly NEVER Collects</h2>
+        <p class="mb-4 text-slate-400">
+          To protect user security and prevent credential leakage, get-Hike is architecturally barred from capturing:
+        </p>
+        <div class="p-4 sm:p-5 rounded-xl bg-slate-900/80 border border-slate-800 space-y-3">
+          <div class="flex items-start gap-2.5 text-xs sm:text-sm">
+            <span class="font-bold text-red-400 mt-0.5 shrink-0">✗</span>
+            <div>
+              <span class="text-white font-semibold">No Keylogger: </span>
+              <span class="text-slate-300">We never capture, buffer, or record actual characters, strings, passwords, or keys pressed.</span>
+            </div>
+          </div>
+          <div class="flex items-start gap-2.5 text-xs sm:text-sm">
+            <span class="font-bold text-red-400 mt-0.5 shrink-0">✗</span>
+            <div>
+              <span class="text-white font-semibold">No Audio or Microphone: </span>
+              <span class="text-slate-300">get-Hike has zero microphone listening hooks.</span>
+            </div>
+          </div>
+          <div class="flex items-start gap-2.5 text-xs sm:text-sm">
+            <span class="font-bold text-red-400 mt-0.5 shrink-0">✗</span>
+            <div>
+              <span class="text-white font-semibold">No Webcam Feeds: </span>
+              <span class="text-slate-300">We never access or activate camera hardware.</span>
+            </div>
+          </div>
+          <div class="flex items-start gap-2.5 text-xs sm:text-sm">
+            <span class="font-bold text-red-400 mt-0.5 shrink-0">✗</span>
+            <div>
+              <span class="text-white font-semibold">No Default Cloud Telemetry: </span>
+              <span class="text-slate-300">No telemetry pings, tracking beacons, or analytics servers are contacted by the desktop app.</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 3. Local Storage Location -->
+      <section>
+        <h2 class="text-xl font-bold text-white mb-3">3. Local Storage Location &amp; Data Control</h2>
+        <p class="mb-3">
+          All data generated by get-Hike is stored strictly on your local disk:
+        </p>
+        <div class="space-y-2 mb-3">
+          <div class="font-mono text-sm bg-slate-950 p-3 rounded-lg border border-emerald-500/20 text-emerald-300">
+            <span class="text-slate-400 font-sans text-xs block mb-1">Linux &amp; macOS:</span>
+            ~/.local/share/get-hike/
+          </div>
+          <div class="font-mono text-sm bg-slate-950 p-3 rounded-lg border border-slate-800 text-slate-300">
+            <span class="text-slate-400 font-sans text-xs block mb-1">Windows:</span>
+            %APPDATA%\get-hike\
+          </div>
+        </div>
+        <p class="text-slate-400">
+          Inside this directory, SQLite stores your session logs in <code class="text-emerald-300 font-mono">tracker.db</code>, and screenshots are organized into local subfolders. You can delete, backup, inspect, or move this directory at any time using standard file utilities.
+        </p>
+      </section>
+
+      <!-- 4. Retention & Pruning -->
+      <section>
+        <h2 class="text-xl font-bold text-white mb-3">4. Data Retention &amp; Automatic Pruning</h2>
+        <p>
+          Screenshots consume disk space and represent sensitive work records. get-Hike includes automated pruning mechanisms. After analysis and after your configured retention window expires, old capture files are permanently purged from your disk.
+        </p>
+      </section>
+
+      <!-- 5. Third-Party Integrations -->
+      <section>
+        <h2 class="text-xl font-bold text-white mb-3">5. Third-Party Integrations &amp; AI Processing</h2>
+        <p class="mb-3 text-slate-400">
+          get-Hike connects to external services only when you explicitly opt-in:
+        </p>
+        <ul class="list-disc list-inside space-y-2 text-slate-300 ml-2">
+          <li>
+            <strong class="text-white">Google Gemini API:</strong> If you provide your own Google Gemini API key in settings, get-Hike transmits capture frames directly to Google's Gemini API endpoints to receive task classifications and productivity scores. No intermediary proxy server inspects this transmission.
+          </li>
+          <li>
+            <strong class="text-white">Google / Azure OAuth (Optional Team Server):</strong> If your organization chooses to deploy the optional multi-tenant server, OAuth endpoints are used solely to verify user identity for workspace access.
+          </li>
+        </ul>
+      </section>
+
+      <!-- 6. Website Privacy & Cookies -->
+      <section>
+        <h2 class="text-xl font-bold text-white mb-3">6. Marketing Website Privacy</h2>
+        <p>
+          This public marketing website does not set tracking cookies, does not load Google Analytics, does not display commercial advertisements, and does not sell user data.
+        </p>
+      </section>
+
+      <!-- 7. Contact & Questions -->
+      <section>
+        <h2 class="text-xl font-bold text-white mb-3">7. Inquiries &amp; Vulnerability Disclosure</h2>
+        <p class="mb-4">
+          Because get-Hike is open source, anyone can audit our codebase for compliance with this policy. If you find any discrepancies, security vulnerabilities, or have questions:
+        </p>
+        <div class="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full sm:w-auto">
+          <Button href={githubIssuesUrl} variant="primary" size="md" target="_blank" rel="noopener noreferrer" class="w-full sm:w-auto min-h-[46px]">
+            Open an issue on GitHub
+          </Button>
+          <Button href="mailto:privacy@reakinfotech.com" variant="outline" size="md" class="w-full sm:w-auto min-h-[46px]">
+            Contact Security Team
+          </Button>
+        </div>
+      </section>
+
+    </div>
+
+  </div>
+</BaseLayout>

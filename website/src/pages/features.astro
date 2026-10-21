@@ -1,0 +1,215 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+import Button from '../components/Button.astro';
+import CTASection from '../components/CTASection.astro';
+import CodeBlock from '../components/CodeBlock.astro';
+
+const features = [
+  {
+    id: 'floating-widget',
+    title: 'Work Session Timer & Floating Widget',
+    badge: 'Desktop Experience',
+    lead: 'Minimalist desktop companion that stays cleanly out of your way while keeping you focused.',
+    description: 'Built with Go and Wails, the floating widget docks smoothly on your Linux desktop. Start, pause, or switch sessions with minimal friction. Its unobtrusive footprint means you stay immersed in your IDE or terminal without losing track of your active time.',
+    points: [
+      'Pin or float anywhere on multi-monitor workspaces',
+      'Instant session switching and status visualization',
+      'Zero heavy Electron memory bloat — lightweight native webview',
+      'Configurable hotkeys and notification triggers',
+    ],
+  },
+  {
+    id: 'gemini-ai',
+    title: 'Automated Gemini AI Batch Analysis',
+    badge: 'Optional AI Intelligence',
+    lead: 'Smart productivity scoring without sending raw data to a third-party tracking SaaS.',
+    description: 'get-Hike periodically evaluates 5-minute capture batches using your personal Google Gemini API key. Defaults to gemini-3.5-flash-lite with automated failover (gemini-flash-lite-latest, gemini-2.0-flash), explicit context caching, and intelligent idle-detection that skips unnecessary API calls.',
+    points: [
+      'Bring Your Own Key (BYOK) — direct calls to Gemini API, zero proxy middleman',
+      'Batch evaluation every 5 minutes evaluates screenshots, active window & input',
+      'Tasks categorized automatically (Coding, Review, Docs, System, Research)',
+      '100% optional: runs fully offline as a private local tracker without a key',
+    ],
+  },
+  {
+    id: 'capture-timeline',
+    title: 'Interactive Capture Timeline & Analytics',
+    badge: 'Local Visualization',
+    lead: 'Comprehensive history of your work sessions, stored locally in SQLite.',
+    description: 'Review your day through an interactive timeline dashboard. Filter captures by application name, productivity score, or time window. Inspect active window titles and capture screenshots to verify where your focus actually went.',
+    points: [
+      'Fast client dashboard with smooth timeline zooming and filters',
+      'Visual breakdown of productive vs idling intervals',
+      'Full retention control with automatic screenshot pruning',
+      'Export session summaries to CSV or JSON for personal logs',
+    ],
+  },
+  {
+    id: 'entropy-telemetry',
+    title: 'Entropy-Based Focus Telemetry',
+    badge: 'Privacy Architecture',
+    lead: 'Real focus telemetry without invasive character keylogging or audio recording.',
+    description: 'Conventional employee surveillance software records every key typed, exposing credentials, confidential chats, and private code. get-Hike calculates Shannon entropy and input frequency from keyboard timings, coupled with mouse distance and click volume. You get realistic focus metrics without compromising a single password.',
+    points: [
+      'Calculates input cadence and irregularity score',
+      'Zero keystroke recording — typed characters never touch disk or memory buffers',
+      'Mouse displacement and click metrics for activity confirmation',
+      'Fully open source: inspect the Go input listener anytime',
+    ],
+  },
+  {
+    id: 'teams-orgs',
+    title: 'Optional Multi-Tenant Organizations',
+    badge: 'Teams & Workspaces',
+    lead: 'Collaborate with teams on your own terms with self-hosted team infrastructure.',
+    description: 'While get-Hike runs flawlessly for solo developers in Guest mode, teams can host their own get-Hike server with PostgreSQL. Secure team features include Google and Microsoft Azure OAuth, organization workspaces, seat invites, and role-based access control (RBAC).',
+    points: [
+      'Google & Azure OAuth 2.0 authentication',
+      'Granular roles: Owner, Admin, Member, Guest',
+      'Secure signed JWT authentication tokens',
+      'Self-hostable backend with Docker & PostgreSQL',
+    ],
+  },
+  {
+    id: 'linux-systemd',
+    title: 'One-Line Install & systemd Integration',
+    badge: 'Linux First',
+    lead: 'Native integration with modern Linux distros (Ubuntu, Fedora, Arch, Debian).',
+    description: 'Deploy get-Hike via a single shell script. The installer builds and installs the desktop binary, creates desktop application entries, and configures a systemd user service for background capture management.',
+    points: [
+      'Automated dependency verification (Go, Node, libayatana-appindicator)',
+      'systemd user service lifecycle management',
+      'Clean uninstaller script (./uninstall.sh) that leaves no ghost files',
+      'Compatible with X11 and Wayland compositors',
+    ],
+  },
+];
+---
+
+<BaseLayout
+  title="Features — get-Hike Linux Productivity Tracker"
+  description="Explore get-Hike features: floating session widget, optional Gemini AI analysis, capture timeline, entropy telemetry, and systemd integration."
+>
+  <!-- Page Header -->
+  <section class="relative pt-8 pb-12 sm:pt-20 sm:pb-24 border-b border-emerald-500/15 overflow-hidden">
+    <div class="absolute top-0 right-1/4 w-[500px] max-w-full h-[300px] bg-emerald-500/10 blur-[120px] pointer-events-none rounded-full"></div>
+
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative z-10">
+      <div class="max-w-3xl">
+        <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-xs font-mono font-semibold mb-4 sm:mb-6">
+          DEEP ARCHITECTURE
+        </div>
+        <h1 class="text-3xl sm:text-5xl font-extrabold text-white tracking-tight mb-4 sm:mb-6 leading-tight">
+          Powerful productivity tools.<br />
+          <span class="text-transparent bg-clip-text bg-gradient-to-r from-emerald-400 to-teal-200">
+            Zero privacy compromises.
+          </span>
+        </h1>
+        <p class="text-sm sm:text-lg text-slate-300 leading-relaxed mb-6 sm:mb-8">
+          Discover how get-Hike balances deep work insights, automated AI classification, and strict local-first privacy for modern Linux workstations.
+        </p>
+
+        <div class="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full sm:w-auto">
+          <Button href="/download" variant="primary" size="md" class="w-full sm:w-auto min-h-[46px]">
+            Download get-Hike
+          </Button>
+          <Button href="/get-started" variant="outline" size="md" class="w-full sm:w-auto min-h-[46px]">
+            Installation Guide
+          </Button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Feature List Detailed Sections -->
+  <section class="py-10 sm:py-20 lg:py-24">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-8 sm:space-y-16 lg:space-y-20">
+      {features.map((feature, idx) => (
+        <div
+          id={feature.id}
+          class="scroll-mt-24 rounded-2xl sm:rounded-3xl border border-emerald-500/20 bg-slate-950/70 p-4 sm:p-10 lg:p-12 relative overflow-hidden"
+        >
+          <div class="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+            
+            <div class="lg:col-span-7 space-y-4">
+              <div class="flex items-center gap-3">
+                <span class="text-xs font-mono font-semibold px-2.5 py-1 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                  {feature.badge}
+                </span>
+                <span class="text-xs font-mono text-slate-500">0{idx + 1} / 06</span>
+              </div>
+
+              <h2 class="text-2xl sm:text-3xl font-extrabold text-white tracking-tight">
+                {feature.title}
+              </h2>
+
+              <p class="text-base sm:text-lg text-emerald-300 font-medium leading-relaxed">
+                {feature.lead}
+              </p>
+
+              <p class="text-sm sm:text-base text-slate-400 leading-relaxed">
+                {feature.description}
+              </p>
+
+              <div class="pt-4 border-t border-slate-800/80">
+                <h3 class="text-xs font-mono font-semibold uppercase tracking-wider text-slate-300 mb-3">
+                  Technical Highlights
+                </h3>
+                <ul class="grid grid-cols-1 sm:grid-cols-2 gap-2.5 text-sm text-slate-300">
+                  {feature.points.map((pt) => (
+                    <li class="flex items-start gap-2">
+                      <span class="text-emerald-400 font-bold">✓</span>
+                      <span>{pt}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </div>
+
+            <!-- Visual / Code side -->
+            <div class="lg:col-span-5 w-full bg-slate-900/80 border border-slate-800 rounded-2xl p-4 sm:p-5 font-mono text-xs text-slate-300 space-y-3 overflow-x-auto">
+              <div class="flex items-center justify-between pb-3 border-b border-slate-800 text-slate-400">
+                <span>module: {feature.id}</span>
+                <span class="text-emerald-400">active</span>
+              </div>
+
+              {feature.id === 'entropy-telemetry' ? (
+                <div class="space-y-2 py-2 break-all sm:break-normal">
+                  <div class="text-slate-400">// Telemetry Calculation</div>
+                  <div class="text-emerald-400">func CalcEntropy(intervals []float64) float64 &#123;</div>
+                  <div class="pl-4 text-slate-300">var entropy float64</div>
+                  <div class="pl-4 text-slate-400">// measures timing variance, zero key capture</div>
+                  <div class="pl-4 text-emerald-300">return -math.Sum(p * math.Log2(p))</div>
+                  <div class="text-emerald-400">&#125;</div>
+                </div>
+              ) : feature.id === 'linux-systemd' ? (
+                <div class="space-y-2 py-2 break-all sm:break-normal">
+                  <div class="text-slate-400"># systemd user service</div>
+                  <div class="text-emerald-300">[Unit]</div>
+                  <div class="text-slate-300">Description=get-Hike Productivity Tracker</div>
+                  <div class="text-emerald-300">[Service]</div>
+                  <div class="text-slate-300">ExecStart=%h/.local/bin/get-hike</div>
+                  <div class="text-slate-300">Restart=on-failure</div>
+                  <div class="text-emerald-400">systemctl --user enable --now get-hike</div>
+                </div>
+              ) : (
+                <div class="space-y-2 py-2 break-all sm:break-normal">
+                  <div class="text-slate-400">// Local SQLite storage path</div>
+                  <div class="text-emerald-300">storage_dir = "~/.local/share/get-hike"</div>
+                  <div class="text-slate-300">database    = "tracker.db"</div>
+                  <div class="text-slate-300">captures    = "captures/*.jpg"</div>
+                  <div class="text-slate-400">// Zero upload telemetry</div>
+                  <div class="text-emerald-400">cloud_sync  = false (offline by default)</div>
+                </div>
+              )}
+            </div>
+
+          </div>
+        </div>
+      ))}
+    </div>
+  </section>
+
+  <!-- CTA Section -->
+  <CTASection />
+</BaseLayout>

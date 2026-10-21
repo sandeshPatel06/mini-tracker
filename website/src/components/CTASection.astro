@@ -1,0 +1,62 @@
+---
+import Button from './Button.astro';
+import CodeBlock from './CodeBlock.astro';
+
+interface Props {
+  title?: string;
+  subtitle?: string;
+}
+
+const {
+  title = 'Ready to own your productivity data?',
+  subtitle = 'Install get-Hike on your Linux desktop in less than two minutes. Open source, privacy-first, and completely free.',
+} = Astro.props;
+
+const githubUrl = 'https://github.com/sandeshPatel06/mini-tracker';
+---
+
+<section class="py-10 sm:py-20 lg:py-24 relative overflow-hidden" aria-labelledby="cta-heading">
+  <!-- Background Glow & Grid -->
+  <div class="absolute inset-0 bg-gradient-to-b from-transparent via-emerald-950/20 to-slate-950/80 pointer-events-none"></div>
+  <div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] max-w-full h-[300px] bg-emerald-500/10 blur-[100px] pointer-events-none rounded-full"></div>
+
+  <div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 relative z-10 text-center">
+    <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-xs font-semibold mb-4 sm:mb-6">
+      <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+      Desktop App • Free &amp; Open Source
+    </div>
+
+    <h2 id="cta-heading" class="text-2xl sm:text-4xl lg:text-5xl font-extrabold text-white tracking-tight mb-3 sm:mb-4">
+      {title}
+    </h2>
+    <p class="text-xs sm:text-base lg:text-lg text-slate-400 max-w-2xl mx-auto mb-6 sm:mb-8 leading-relaxed">
+      {subtitle}
+    </p>
+
+    <!-- Quick Install Block -->
+    <div class="max-w-xl mx-auto mb-6 sm:mb-8 text-left w-full">
+      <CodeBlock
+        code="curl -sSL https://raw.githubusercontent.com/sandeshPatel06/mini-tracker/main/install.sh | bash"
+        label="One-line install (Linux)"
+      />
+    </div>
+
+    <!-- Dual Actions -->
+    <div class="flex flex-col sm:flex-row items-stretch sm:items-center justify-center gap-3 sm:gap-4 w-full sm:w-auto">
+      <Button href="/download" variant="primary" size="lg" class="w-full sm:w-auto min-h-[48px]">
+        <svg class="w-5 h-5 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+        </svg>
+        Download release binaries
+      </Button>
+      <Button href="/get-started" variant="outline" size="lg" class="w-full sm:w-auto min-h-[48px]">
+        Setup &amp; build guide
+      </Button>
+    </div>
+
+    <!-- Reassurance note -->
+    <p class="text-[11px] sm:text-xs text-slate-500 mt-5 sm:mt-6">
+      No credit card required. No telemetry tracking your web visits. MIT Licensed.
+    </p>
+  </div>
+</section>

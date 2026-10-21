@@ -223,6 +223,7 @@ export default function Dashboard({ logs, stats, config, loading, today, onRefre
           {onRefresh && (
             <button
               onClick={onRefresh}
+              disabled={loading}
               className="btn btn-secondary"
               title="Refresh dashboard data"
               style={{
@@ -235,8 +236,8 @@ export default function Dashboard({ logs, stats, config, loading, today, onRefre
                 whiteSpace: 'nowrap',
               }}
             >
-              <Icon name="refresh" size={14} />
-              <span>Refresh</span>
+              <Icon name="refresh" size={14} className={loading ? 'spin' : ''} />
+              <span>{loading ? 'Refreshing…' : 'Refresh'}</span>
             </button>
           )}
           {pendingCount > 0 && (

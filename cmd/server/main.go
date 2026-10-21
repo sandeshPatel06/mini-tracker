@@ -6,7 +6,6 @@ package main
 import (
 	"compress/gzip"
 	"context"
-	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
@@ -24,6 +23,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/reak/get-hike/internal/ai"
 	"github.com/reak/get-hike/internal/appicon"
 	"github.com/reak/get-hike/internal/config"
@@ -413,6 +413,198 @@ func main() {
 			return
 		}
 		jsonResp(w, map[string]interface{}{"success": true})
+	})
+
+	// POST /api/ai/analyze-batch — Server-side AI analysis proxy (avoids exposing Gemini API key to browsers)
+	mux.HandleFunc("/api/ai/analyze-batch", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		userID, orgID, status, errMsg := getAuthContext(r, database)
+		if status != http.StatusOK {
+			jsonError(w, errMsg, status)
+			return
+		}
+
+		var req struct {
+			LogIDs   []int64 `json:"log_ids"`
+			UserTask string  `json:"user_task"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil || len(req.LogIDs) == 0 {
+			jsonError(w, "Invalid request or empty log_ids", http.StatusBadRequest)
+			return
+		}
+
+		effKey, effModel, keySource, err := database.ResolveEffectiveGeminiKey(userID, orgID, cfg.GeminiAPIKey, cfg.GeminiModel)
+		if err != nil || effKey == "" {
+			jsonError(w, "No Gemini API key configured on server", http.StatusBadRequest)
+			return
+		}
+
+		batchItems := make([]ai.BatchAnalysisItem, 0, len(req.LogIDs))
+		for _, id := range req.LogIDs {
+			entry, err := database.GetLogByID(id)
+			if err != nil || entry == nil {
+				continue
+			}
+			if userID > 0 && (entry.UserID != userID || (orgID > 0 && entry.OrgID != orgID)) {
+				continue
+			}
+			batchItems = append(batchItems, ai.BatchAnalysisItem{
+				LogID:        entry.ID,
+				WindowTitle:  entry.WindowTitle,
+				EntropyScore: entry.EntropyScore,
+				ImagePath:    entry.ImagePath,
+				TotalKeys:    entry.TotalKeys,
+				TotalClicks:  entry.TotalClicks,
+				AppName:      entry.AppName,
+				Timestamp:    entry.Timestamp,
+			})
+		}
+
+		if len(batchItems) == 0 {
+			jsonError(w, "No accessible logs found for analysis", http.StatusBadRequest)
+			return
+		}
+
+		ctx, cancel := context.WithTimeout(r.Context(), 90*time.Second)
+		defer cancel()
+
+		client := ai.NewGeminiClient(effKey, effModel)
+		results, err := client.AnalyzeBatch(ctx, batchItems)
+		if err != nil {
+			log.Printf("[server] AI proxy AnalyzeBatch error: %v", err)
+			jsonError(w, fmt.Sprintf("AI analysis failed: %v", err), http.StatusBadGateway)
+			return
+		}
+
+		var totalTokens int
+		for _, res := range results {
+			_ = database.UpdateLogAnalysis(res.LogID, res.Category, res.AppName, res.AppCategory, res.WindowTitle, 0, "", res.Productive, res.ProductiveScore, res.Confidence, res.Reason)
+			totalTokens += res.Usage.TotalTokenCount
+			if res.Usage.TotalTokenCount > 0 {
+				_ = database.RecordAPIUsage(orgID, userID, keySource, res.Usage.PromptTokenCount, res.Usage.CandidatesTokenCount, res.Usage.TotalTokenCount, effModel)
+			}
+		}
+
+		jsonResp(w, map[string]interface{}{
+			"success":      true,
+			"results":      results,
+			"key_source":   keySource,
+			"model":        effModel,
+			"total_tokens": totalTokens,
+		})
+	})
+
+	// GET /api/ai/models — Server-side model listing using configured effective key
+	mux.HandleFunc("/api/ai/models", func(w http.ResponseWriter, r *http.Request) {
+		userID, orgID, status, errMsg := getAuthContext(r, database)
+		if status != http.StatusOK {
+			jsonError(w, errMsg, status)
+			return
+		}
+
+		effKey, effModel, _, err := database.ResolveEffectiveGeminiKey(userID, orgID, cfg.GeminiAPIKey, cfg.GeminiModel)
+		if err != nil || effKey == "" {
+			jsonError(w, "No Gemini API key configured on server", http.StatusBadRequest)
+			return
+		}
+
+		ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+		defer cancel()
+
+		client := ai.NewGeminiClient(effKey, effModel)
+		models, err := client.FetchAvailableModels(ctx)
+		if err != nil {
+			jsonError(w, fmt.Sprintf("Failed to fetch models: %v", err), http.StatusBadGateway)
+			return
+		}
+
+		type ModelItem struct {
+			Name        string `json:"name"`
+			DisplayName string `json:"displayName"`
+		}
+		resList := make([]ModelItem, 0, len(models))
+		for _, m := range models {
+			clean := strings.TrimPrefix(m, "models/")
+			resList = append(resList, ModelItem{
+				Name:        m,
+				DisplayName: clean,
+			})
+		}
+
+		jsonResp(w, map[string]interface{}{
+			"success": true,
+			"models":  resList,
+		})
+	})
+
+	// POST /api/ai/test — Test Gemini key / connection securely server-side
+	mux.HandleFunc("/api/ai/test", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		userID, orgID, status, errMsg := getAuthContext(r, database)
+		if status != http.StatusOK {
+			jsonError(w, errMsg, status)
+			return
+		}
+
+		var req struct {
+			APIKey string `json:"api_key"`
+			Model  string `json:"model"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&req)
+
+		testKey := strings.TrimSpace(req.APIKey)
+		testModel := strings.TrimSpace(req.Model)
+
+		if testKey == "" {
+			effKey, effModel, _, err := database.ResolveEffectiveGeminiKey(userID, orgID, cfg.GeminiAPIKey, cfg.GeminiModel)
+			if err != nil || effKey == "" {
+				jsonError(w, "No API key provided or configured on server", http.StatusBadRequest)
+				return
+			}
+			testKey = effKey
+			if testModel == "" {
+				testModel = effModel
+			}
+		}
+
+		if testModel == "" {
+			testModel = "models/gemini-3.5-flash-lite"
+		}
+
+		ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+		defer cancel()
+
+		client := ai.NewGeminiClient(testKey, testModel)
+		models, err := client.FetchAvailableModels(ctx)
+		if err != nil {
+			jsonError(w, fmt.Sprintf("API test failed: %v", err), http.StatusBadRequest)
+			return
+		}
+
+		type ModelItem struct {
+			Name        string `json:"name"`
+			DisplayName string `json:"displayName"`
+		}
+		resList := make([]ModelItem, 0, len(models))
+		for _, m := range models {
+			clean := strings.TrimPrefix(m, "models/")
+			resList = append(resList, ModelItem{
+				Name:        m,
+				DisplayName: clean,
+			})
+		}
+
+		jsonResp(w, map[string]interface{}{
+			"success": true,
+			"message": "Connection verified successfully",
+			"models":  resList,
+		})
 	})
 
 	// GET /api/stats?date=YYYY-MM-DD&start_date=...&end_date=...&user_id=...
@@ -1210,9 +1402,23 @@ func main() {
 		}
 
 		user, err := database.GetUserByEmail(req.Email)
-		if err != nil || user == nil || user.PasswordHash != hashPassword(req.Password) {
+		if err != nil || user == nil {
 			jsonError(w, "Invalid email or password", http.StatusUnauthorized)
 			return
+		}
+
+		matched, needsRehash := db.CheckPassword(user.PasswordHash, req.Password)
+		if !matched {
+			jsonError(w, "Invalid email or password", http.StatusUnauthorized)
+			return
+		}
+
+		// Transparently upgrade legacy SHA-256 hashes to bcrypt on successful login
+		if needsRehash {
+			newHash := db.HashPassword(req.Password)
+			_ = database.UpdateUserPassword(user.ID, newHash)
+			user.PasswordHash = newHash
+			log.Printf("[server] upgraded legacy password hash for user #%d to bcrypt", user.ID)
 		}
 
 		token := setJWTTokenCookie(w, user)
@@ -2087,54 +2293,46 @@ type JWTClaims struct {
 	Email  string `json:"email"`
 	Role   string `json:"role"`
 	OrgID  int64  `json:"org_id"`
-	Exp    int64  `json:"exp"`
+	jwt.RegisteredClaims
 }
 
 func generateJWT(user *db.User) string {
-	header := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"HS256","typ":"JWT"}`))
+	now := time.Now()
 	claims := JWTClaims{
 		UserID: user.ID,
 		Email:  user.Email,
 		Role:   user.Role,
 		OrgID:  user.OrgID,
-		Exp:    time.Now().Add(7 * 24 * time.Hour).Unix(),
+		RegisteredClaims: jwt.RegisteredClaims{
+			ExpiresAt: jwt.NewNumericDate(now.Add(7 * 24 * time.Hour)),
+			IssuedAt:  jwt.NewNumericDate(now),
+			NotBefore: jwt.NewNumericDate(now),
+			Subject:   strconv.FormatInt(user.ID, 10),
+			Issuer:    "get-hike-tracker",
+		},
 	}
-	claimsBytes, _ := json.Marshal(claims)
-	payload := base64.RawURLEncoding.EncodeToString(claimsBytes)
-	signatureInput := header + "." + payload
-
-	h := hmac.New(sha256.New, jwtSecret)
-	h.Write([]byte(signatureInput))
-	signature := base64.RawURLEncoding.EncodeToString(h.Sum(nil))
-
-	return signatureInput + "." + signature
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	tokenStr, err := token.SignedString(jwtSecret)
+	if err != nil {
+		log.Printf("[server] error signing JWT: %v", err)
+		return ""
+	}
+	return tokenStr
 }
 
 func parseJWT(tokenStr string) *JWTClaims {
-	parts := strings.Split(tokenStr, ".")
-	if len(parts) != 3 {
+	if strings.TrimSpace(tokenStr) == "" {
 		return nil
 	}
-	signatureInput := parts[0] + "." + parts[1]
-	h := hmac.New(sha256.New, jwtSecret)
-	h.Write([]byte(signatureInput))
-	expectedSig := base64.RawURLEncoding.EncodeToString(h.Sum(nil))
-
-	if !hmac.Equal([]byte(parts[2]), []byte(expectedSig)) {
-		return nil
-	}
-
-	payloadBytes, err := base64.RawURLEncoding.DecodeString(parts[1])
-	if err != nil {
-		return nil
-	}
-
 	var claims JWTClaims
-	if err := json.Unmarshal(payloadBytes, &claims); err != nil {
-		return nil
-	}
+	token, err := jwt.ParseWithClaims(tokenStr, &claims, func(t *jwt.Token) (interface{}, error) {
+		if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
+			return nil, fmt.Errorf("unexpected signing method: %v", t.Header["alg"])
+		}
+		return jwtSecret, nil
+	}, jwt.WithLeeway(5*time.Second))
 
-	if time.Now().Unix() > claims.Exp {
+	if err != nil || !token.Valid {
 		return nil
 	}
 

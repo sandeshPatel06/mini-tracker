@@ -83,7 +83,6 @@ export function apiFetch(path: string, options: RequestInit = {}): Promise<Respo
         if (parsed?.token) {
           headers.set('Authorization', `Bearer ${parsed.token}`);
         } else if (parsed?.id) {
-          headers.set('Authorization', `Bearer ${parsed.id}`);
           headers.set('X-Session-User-ID', `${parsed.id}`);
         }
       }

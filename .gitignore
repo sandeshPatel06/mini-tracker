@@ -15,7 +15,7 @@ secrets/
 
 # Binaries & build artifacts
 bin/
-build/
+build/bin/
 frontend/dist/
 dist/
 server
@@ -38,6 +38,7 @@ scratch/
 *.jpg
 *.jpeg
 !frontend/src/assets/logo.png
+!build/appicon.png
 
 # Logs & temporary files
 *.log

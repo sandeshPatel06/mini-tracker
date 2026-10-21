@@ -98,3 +98,10 @@
 .glow-emerald {
   text-shadow: 0 0 20px rgba(16, 185, 129, 0.4);
 }
+
+/* Thin scrollbars for oversized code/table areas */
+.scrollbar-thin {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(16, 185, 129, 0.35) transparent;
+}
+

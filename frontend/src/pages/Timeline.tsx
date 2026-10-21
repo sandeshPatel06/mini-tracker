@@ -7,6 +7,7 @@ import { Icon } from '../components/Icon';
 import { AppIcon } from '../components/AppIcon';
 import { AppFilterSelect } from '../components/AppFilterSelect';
 import { CustomSelect } from '../components/CustomSelect';
+import { DateNavigator } from '../components/DateNavigator';
 import { EmptyState } from '../components/EmptyState';
 import { Alert } from '../components/Alert';
 import { canonicalAppName } from '../lib/appNames';
@@ -116,17 +117,10 @@ export default function Timeline({ logs, loading, today, onDateChange, loadError
       <div className="card" style={{ marginBottom: 16 }}>
         <div className="card-body" style={{ padding: '12px 16px' }}>
           <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 10 }}>
-            <label htmlFor="timeline-date-picker" style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.6px', color: 'var(--text-secondary)' }}>
-              Date
-            </label>
-            <input
-              id="timeline-date-picker"
-              type="date"
-              className="date-input"
-              value={today}
-              max={localISODate()}
-              onChange={(e) => onDateChange(e.target.value)}
-              style={{ height: 34, padding: '0 10px', fontSize: 13 }}
+            <DateNavigator
+              currentDate={today}
+              maxDate={localISODate()}
+              onDateChange={onDateChange}
             />
 
             <div style={{ position: 'relative', flex: '1 1 200px', minWidth: 170 }}>

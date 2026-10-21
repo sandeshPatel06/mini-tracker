@@ -2,9 +2,45 @@
 import BaseLayout from '../layouts/BaseLayout.astro';
 import Button from '../components/Button.astro';
 
-const repoUrl = 'https://github.com/sandeshPatel06/mini-tracker';
-const releasesUrl = `${repoUrl}/releases`;
-const apiReleasesUrl = `${repoUrl}`.replace('github.com', 'api.github.com') + '/releases?per_page=50';
+const releases = [
+  {
+    version: 'v1.0.0-rc1',
+    date: 'October 18, 2026',
+    title: 'Background Daemon, Developer Panel & Telemetry Enhancements',
+    badge: 'Latest',
+    highlights: [
+      'Detached background daemon continues screenshot capture, mouse metrics, and AI analysis even if GUI window is closed',
+      'PID lifecycle management with duplicate-daemon guards and clean SIGTERM handling',
+      'Integrated Developer & Diagnostics panel with live log tailing, database metrics, and masked secret inspection',
+      'Server-side persistence for web guest AI results via loopback API',
+      'Formal MIT License by REAK INFOTECH LLP',
+    ],
+  },
+  {
+    version: 'v0.9.0',
+    date: 'August 2026',
+    title: 'Gemini AI Batch Evaluation & Floating Companion',
+    highlights: [
+      'Automated batch evaluation with Google Gemini API models',
+      'Dynamic productivity scoring and task classification (Coding, Review, Docs, Research)',
+      'Compact floating desktop companion widget for Linux desktops',
+      'Interactive timeline capture viewer with application filtering',
+    ],
+  },
+  {
+    version: 'v0.8.0',
+    date: 'April 2026',
+    title: 'Linux Input Telemetry & Entropy Scoring',
+    highlights: [
+      'Replaced intrusive key capture with Shannon keystroke entropy calculation',
+      'Native Linux mouse displacement tracking and click accumulator',
+      'X11 and Wayland screen capture pipeline with local storage pruning',
+      'Local SQLite embedded storage under ~/.local/share/get-hike/',
+    ],
+  },
+];
+
+const githubReleasesUrl = 'https://github.com/sandeshPatel06/mini-tracker/releases';
 ---
 
 <BaseLayout
@@ -12,7 +48,7 @@ const apiReleasesUrl = `${repoUrl}`.replace('github.com', 'api.github.com') + '/
   description="All notable releases and updates to get-Hike: background tracking daemon, Gemini AI batch scoring, and Linux desktop integration."
 >
   <div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-8 sm:py-16">
-
+    
     <!-- Header -->
     <div class="border-b border-emerald-500/15 pb-6 sm:pb-8 mb-8 sm:mb-12">
       <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-xs font-mono font-semibold mb-3 sm:mb-4">
@@ -21,30 +57,41 @@ const apiReleasesUrl = `${repoUrl}`.replace('github.com', 'api.github.com') + '/
       <h1 class="text-3xl sm:text-4xl lg:text-5xl font-extrabold text-white tracking-tight mb-3 sm:mb-4">
         Product Changelog
       </h1>
-      <p class="text-sm sm:text-lg text-slate-300 leading-relaxed max-w-2xl mb-3">
-        Live release history fetched straight from
-        <a href={releasesUrl} target="_blank" rel="noopener noreferrer" class="text-emerald-400 hover:text-emerald-300 underline decoration-dotted underline-offset-2">GitHub Releases</a> — no manual updates needed.
+      <p class="text-sm sm:text-lg text-slate-300 leading-relaxed max-w-2xl">
+        Track progress, updates, and architectural enhancements shipped in get-Hike.
       </p>
-      <p class="text-xs text-slate-400 font-mono" id="changelog_updated"></p>
     </div>
 
-    <!-- Release List (client-rendered from GitHub) -->
-    <div>
-      <div id="changelog-list" aria-busy="true" aria-live="polite">
-        <div class="p-5 sm:p-8 rounded-xl sm:rounded-2xl glass-card text-center">
-          <span class="inline-block w-5 h-5 border-2 border-emerald-400 border-r-transparent rounded-full animate-spin"></span>
-          <p class="text-sm text-slate-300 mt-3">Fetching releases from GitHub…</p>
-        </div>
-      </div>
+    <!-- Release List -->
+    <div class="space-y-6 sm:space-y-12">
+      {releases.map((rel) => (
+        <article class="p-4 sm:p-8 rounded-xl sm:rounded-2xl glass-card relative">
+          <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-3 sm:mb-4">
+            <div class="flex items-center gap-2.5 sm:gap-3">
+              <span class="text-lg sm:text-xl font-bold font-mono text-emerald-400 break-all sm:break-normal">{rel.version}</span>
+              {rel.badge && (
+                <span class="text-[10px] sm:text-xs px-2 sm:px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 font-semibold border border-emerald-500/30">
+                  {rel.badge}
+                </span>
+              )}
+            </div>
+            <time class="text-xs font-mono text-slate-400 break-words">{rel.date}</time>
+          </div>
 
-      <noscript>
-        <div class="p-5 sm:p-8 rounded-xl sm:rounded-2xl glass-card text-center">
-          <p class="text-sm text-slate-300 mb-4">
-            Changelog needs JavaScript to load live release notes. You can view the complete history directly on GitHub:
-          </p>
-          <a class="text-emerald-400 hover:text-emerald-300 underline" href={releasesUrl} target="_blank" rel="noopener noreferrer">{releasesUrl}</a>
-        </div>
-      </noscript>
+          <h2 class="text-base sm:text-xl font-bold text-white mb-2.5 sm:mb-3">
+            {rel.title}
+          </h2>
+
+          <ul class="space-y-2 text-xs sm:text-sm text-slate-300 mb-4 sm:mb-6">
+            {rel.highlights.map((item) => (
+              <li class="flex items-start gap-2.5">
+                <span class="text-emerald-400 font-bold mt-0.5 shrink-0">●</span>
+                <span>{item}</span>
+              </li>
+            ))}
+          </ul>
+        </article>
+      ))}
     </div>
 
     <!-- GitHub Releases CTA -->
@@ -53,91 +100,10 @@ const apiReleasesUrl = `${repoUrl}`.replace('github.com', 'api.github.com') + '/
       <p class="text-xs sm:text-sm text-slate-400 mb-5 sm:mb-6 max-w-md mx-auto">
         Every line of code and release tag is available publicly on our GitHub repository.
       </p>
-      <Button href={releasesUrl} variant="primary" size="md" target="_blank" rel="noopener noreferrer" class="w-full sm:w-auto">
+      <Button href={githubReleasesUrl} variant="primary" size="md" target="_blank" rel="noopener noreferrer" class="w-full sm:w-auto">
         View Releases on GitHub
       </Button>
     </div>
 
   </div>
 </BaseLayout>
-
-<script>
-  import { marked } from 'marked';
-
-  const api = 'https://api.github.com/repos/sandeshPatel06/mini-tracker/releases?per_page=50';
-  const page = 'https://github.com/sandeshPatel06/mini-tracker/releases';
-  const CACHE_KEY = 'gh-changelog-cache-v1';
-  const TTL = 60 * 60 * 1000;
-
-  const list = document.getElementById('changelog-list');
-  const stamp = document.getElementById('changelog_updated');
-
-  function esc(s: string) {
-    return s.replace(/[&<>"']/g, (c) =>
-      ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] as string);
-  }
-
-  function fmtDate(iso: string) {
-    return new Date(iso).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
-  }
-
-  function relCard(r: any, isLatest: boolean) {
-    const bodyHtml = marked.parse((r.body || '').trim(), { gfm: true, breaks: false }) as string;
-    return `
-      <article class="p-4 sm:p-8 rounded-xl sm:rounded-2xl glass-card relative">
-        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-3 sm:mb-4">
-          <div class="flex items-center gap-2.5 sm:gap-3 min-w-0">
-            <span class="text-lg sm:text-xl font-bold font-mono text-emerald-400 break-all sm:break-normal">${esc(r.tag_name || '')}</span>
-            ${isLatest ? '<span class="text-[10px] sm:text-xs px-2 sm:px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 font-semibold border border-emerald-500/30">Latest</span>' : ''}
-          </div>
-          <time class="text-xs font-mono text-slate-400 break-words">${esc(fmtDate(r.created_at))}</time>
-        </div>
-        <div class="release-notes">${bodyHtml}</div>
-        <div class="mt-4 pt-3 border-t border-slate-800/80 flex flex-wrap gap-2">
-          <a href="${esc(page + '/tag/' + (r.tag_name || ''))}" target="_blank" rel="noopener noreferrer"
-             class="text-xs font-mono text-emerald-400 hover:text-emerald-300 underline decoration-dotted underline-offset-4">View release →</a>
-          ${r.assets?.length ? `<a href="${esc(page + '/tag/' + (r.tag_name || ''))}" target="_blank" rel="noopener noreferrer"
-             class="text-xs font-mono text-slate-400 hover:text-emerald-300">Assets: ${r.assets.length}</a>` : ''}
-        </div>
-      </article>`;
-  }
-
-  function emptyState() {
-    list!.innerHTML = `
-      <div class="p-5 sm:p-8 rounded-xl sm:rounded-2xl glass-card text-center">
-        <p class="text-sm text-slate-300 mb-1">Couldn't load releases just now (offline or rate-limited).</p>
-        <a class="text-emerald-400 hover:text-emerald-300 underline" href="${page}" target="_blank" rel="noopener noreferrer">View all releases on GitHub →</a>
-      </div>`;
-    list!.setAttribute('aria-busy', 'false');
-  }
-
-  function render(rels: any[], cachedAt?: number) {
-    if (!Array.isArray(rels) || !rels.length) { emptyState(); return; }
-    list!.innerHTML = rels.map((r, i) => relCard(r, i === 0)).join('');
-    list!.setAttribute('aria-busy', 'false');
-    if (cachedAt) stamp!.textContent = `Source: GitHub Releases API · fetched ${fmtDate(new Date(cachedAt))}`;
-  }
-
-  (async () => {
-    let cached: { at: number; data: any[] } | null = null;
-    try { cached = JSON.parse(localStorage.getItem(CACHE_KEY) || 'null'); } catch (_) {}
-
-    if (cached && Date.now() - cached.at < TTL) {
-      render(cached.data, cached.at);
-    } else if (cached) {
-      // stale-but-safe render while revalidating
-      render(cached.data, cached.at);
-    }
-
-    try {
-      const res = await fetch(api, { headers: { Accept: 'application/vnd.github+json' } });
-      if (!res.ok) throw new Error(String(res.status));
-      const data = await res.json();
-      const at = Date.now();
-      localStorage.setItem(CACHE_KEY, JSON.stringify({ at, data }));
-      render(data, at);
-    } catch (_) {
-      if (!cached) emptyState();
-    }
-  })();
-</script>

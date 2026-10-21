@@ -2,6 +2,9 @@ import React, { useState, useEffect } from 'react';
 import { Organization, User, Invitation } from '../types';
 import { apiFetch, getApiBaseUrl } from '../api';
 import { Modal } from '../components/Modal';
+import { EmptyState } from '../components/EmptyState';
+import { Alert } from '../components/Alert';
+import { StatCard } from '../components/StatCard';
 
 export const OrganizationPage: React.FC = () => {
   const [org, setOrg] = useState<Organization | null>(null);
@@ -204,22 +207,22 @@ export const OrganizationPage: React.FC = () => {
 
   if (loading && !org) {
     return (
-      <div className="empty-state" style={{ minHeight: 400 }}>
-        <div className="skeleton" style={{ width: 48, height: 48, borderRadius: '50%' }} />
-        <div className="empty-state-title" style={{ marginTop: 12 }} aria-busy="true">Loading organization details...</div>
-      </div>
+      <EmptyState
+        minHeight={400}
+        icon={<div className="skeleton" style={{ width: 48, height: 48, borderRadius: '50%', margin: '0 auto' }} />}
+        title="Loading organization details..."
+      />
     );
   }
 
   if (loadFailed && !org) {
     return (
-      <div className="empty-state" style={{ minHeight: 400 }}>
-        <div className="empty-state-title">Couldn't load your team</div>
-        <div className="empty-state-desc">Check your connection or sign in again, then retry.</div>
-        <div style={{ marginTop: 12 }}>
-          <button className="btn btn-primary" onClick={fetchTeamData}>Retry</button>
-        </div>
-      </div>
+      <EmptyState
+        minHeight={400}
+        title="Couldn't load your team"
+        description="Check your connection or sign in again, then retry."
+        action={<button className="btn btn-primary" onClick={fetchTeamData}>Retry</button>}
+      />
     );
   }
 
@@ -262,9 +265,11 @@ export const OrganizationPage: React.FC = () => {
       </div>
 
       {errorMessage && !showInviteModal && (
-        <div className="alert alert-error" style={{ marginBottom: 16 }}>
-          {errorMessage}
-        </div>
+        <Alert
+          type="error"
+          message={errorMessage}
+          style={{ marginBottom: 16 }}
+        />
       )}
 
       {/* Admin-only organization API usage */}
@@ -287,22 +292,25 @@ export const OrganizationPage: React.FC = () => {
 
           <div className="card-body">
             <div className="stats-grid" style={{ marginBottom: orgUsage.user_breakdown && orgUsage.user_breakdown.length > 0 ? 16 : 0 }}>
-              <div className="stat-card">
-                <span className="stat-label">Total Requests</span>
-                <div className="stat-value" style={{ fontSize: 22 }}>{orgUsage.total_requests || 0}</div>
-              </div>
-              <div className="stat-card">
-                <span className="stat-label">Prompt Tokens</span>
-                <div className="stat-value text-cyan" style={{ fontSize: 22 }}>{(orgUsage.prompt_tokens || 0).toLocaleString()}</div>
-              </div>
-              <div className="stat-card">
-                <span className="stat-label">Candidate Tokens</span>
-                <div className="stat-value text-amber" style={{ fontSize: 22 }}>{(orgUsage.candidate_tokens || 0).toLocaleString()}</div>
-              </div>
-              <div className="stat-card">
-                <span className="stat-label">Total Tokens</span>
-                <div className="stat-value text-green" style={{ fontSize: 22 }}>{(orgUsage.total_tokens || 0).toLocaleString()}</div>
-              </div>
+              <StatCard
+                label="Total Requests"
+                value={orgUsage.total_requests || 0}
+              />
+              <StatCard
+                label="Prompt Tokens"
+                value={(orgUsage.prompt_tokens || 0).toLocaleString()}
+                valueClass="text-cyan"
+              />
+              <StatCard
+                label="Candidate Tokens"
+                value={(orgUsage.candidate_tokens || 0).toLocaleString()}
+                valueClass="text-amber"
+              />
+              <StatCard
+                label="Total Tokens"
+                value={(orgUsage.total_tokens || 0).toLocaleString()}
+                valueClass="text-green"
+              />
             </div>
 
             {orgUsage.user_breakdown && orgUsage.user_breakdown.length > 0 && (

@@ -7,6 +7,9 @@ import { CategoryBadge } from '../components/CategoryBadge';
 import { ScreenshotThumb, ImageModal } from '../components/Screenshot';
 import { Icon } from '../components/Icon';
 import { AppIcon } from '../components/AppIcon';
+import { StatCard } from '../components/StatCard';
+import { EmptyState } from '../components/EmptyState';
+import { Alert } from '../components/Alert';
 import { canonicalAppName } from '../lib/appNames';
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, Cell } from 'recharts';
 import { localISODate, isPendingLog, buildLocalWorkSessions, FOCUS_GOOD, FOCUS_OK } from '../utils';
@@ -54,48 +57,6 @@ interface Props {
   onOpenSettings?: () => void;
   loadError?: string | null;
   onRetry?: () => void;
-}
-
-function StatCard({
-  label,
-  value,
-  valueTitle,
-  sub,
-  valueClass,
-  valueColor,
-  leading,
-}: {
-  label: string;
-  value: string | number;
-  valueTitle?: string;
-  sub?: string;
-  valueClass?: string;
-  valueColor?: string;
-  leading?: ReactNode;
-}) {
-  return (
-    <div className="stat-card">
-      <span className="stat-label">{label}</span>
-      <div
-        className={`stat-value${valueClass ? ` ${valueClass}` : ''}`}
-        title={valueTitle}
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 8,
-          fontSize: 24,
-          fontVariantNumeric: 'tabular-nums',
-          overflow: 'hidden',
-          whiteSpace: 'nowrap',
-          color: valueColor,
-        }}
-      >
-        {leading}
-        <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>{value}</span>
-      </div>
-      {sub && <div className="stat-sub">{sub}</div>}
-    </div>
-  );
 }
 
 export default function Dashboard({ logs, stats, config, loading, today, onRefresh, onOpenSettings, loadError, onRetry }: Props) {
@@ -245,6 +206,15 @@ export default function Dashboard({ logs, stats, config, loading, today, onRefre
     <div aria-busy={loading}>
       <ImageModal imagePath={selectedImage} onClose={() => setSelectedImage(null)} />
 
+      {loadError && (
+        <Alert
+          type="error"
+          message={loadError}
+          onRetry={onRetry}
+          style={{ marginBottom: 16 }}
+        />
+      )}
+
       {/* Header Bar */}
       <div className="page-header" style={{ marginBottom: 20 }}>
         <div style={{ minWidth: 0 }}>
@@ -262,6 +232,7 @@ export default function Dashboard({ logs, stats, config, loading, today, onRefre
           {onRefresh && (
             <button
               onClick={onRefresh}
+              disabled={loading}
               className="btn btn-secondary"
               title="Refresh dashboard data"
               style={{
@@ -274,8 +245,8 @@ export default function Dashboard({ logs, stats, config, loading, today, onRefre
                 whiteSpace: 'nowrap',
               }}
             >
-              <Icon name="refresh" size={14} />
-              <span>Refresh</span>
+              <Icon name="refresh" size={14} className={loading ? 'spin' : ''} />
+              <span>{loading ? 'Refreshing…' : 'Refresh'}</span>
             </button>
           )}
           {pendingCount > 0 && (
@@ -507,15 +478,11 @@ export default function Dashboard({ logs, stats, config, loading, today, onRefre
 
         <div className="card-body" style={{ padding: '12px 14px' }}>
           {recent.length === 0 ? (
-            <div className="empty-state">
-              <div className="empty-state-icon" style={{ display: 'flex', justifyContent: 'center', color: 'var(--text-muted)', marginBottom: 12 }}>
-                <Icon name="inbox" size={32} />
-              </div>
-              <div className="empty-state-title">No Activity Captured Yet</div>
-              <div className="empty-state-desc">
-                The tracking daemon will automatically log desktop screenshots and keystroke activity.
-              </div>
-            </div>
+            <EmptyState
+              icon={<Icon name="inbox" size={32} />}
+              title="No Activity Captured Yet"
+              description="The tracking daemon will automatically log desktop screenshots and keystroke activity."
+            />
           ) : (
             <div className="timeline-list">
               {recent.map((log) => {

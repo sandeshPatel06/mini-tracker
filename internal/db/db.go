@@ -17,6 +17,7 @@ import (
 	"github.com/reak/get-hike/internal/appname"
 	_ "github.com/lib/pq"
 	_ "github.com/mattn/go-sqlite3"
+	"golang.org/x/crypto/bcrypt"
 )
 
 // LogEntry represents one minute of tracked activity.
@@ -530,20 +531,67 @@ func (db *DB) migrate() error {
 	var orgCount int
 	_ = db.rawDB.QueryRow(selector, args...).Scan(&orgCount)
 	if orgCount == 0 {
-		adminHash := HashPassword("admin123")
-		memberHash := HashPassword("user123")
 		_, _ = db.CreateOrganization("Default Beta Org", "default-beta")
-		_, _ = db.CreateUser(1, "admin@company.com", adminHash, "Beta Admin", "owner")
-		_, _ = db.CreateUser(1, "user@company.com", memberHash, "Test Team Member", "member")
+
+		// Only seed default admin/member users if explicitly requested via SEED_DEFAULT_USERS=true
+		// or in test/development environments (DISABLE_SEED_DEFAULT_USERS != "true")
+		if os.Getenv("APP_ENV") != "production" && os.Getenv("DISABLE_SEED_DEFAULT_USERS") != "true" {
+			adminHash := HashPassword("admin123")
+			memberHash := HashPassword("user123")
+			_, _ = db.CreateUser(1, "admin@company.com", adminHash, "Beta Admin", "owner")
+			_, _ = db.CreateUser(1, "user@company.com", memberHash, "Test Team Member", "member")
+			log.Printf("[db] NOTICE: Seeded initial default demo users in non-production environment")
+		} else if os.Getenv("SEED_DEFAULT_USERS") == "true" {
+			adminHash := HashPassword("admin123")
+			memberHash := HashPassword("user123")
+			_, _ = db.CreateUser(1, "admin@company.com", adminHash, "Beta Admin", "owner")
+			_, _ = db.CreateUser(1, "user@company.com", memberHash, "Test Team Member", "member")
+			log.Printf("[db] NOTICE: Seeded initial default demo users via SEED_DEFAULT_USERS=true")
+		}
 	}
 
 	return nil
 }
 
-// HashPassword hashes a user password consistently using SHA-256 with a salt.
+// HashPassword hashes a user password using bcrypt.
 func HashPassword(password string) string {
+	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	if err != nil {
+		// Fallback should never happen under normal lengths, but guarantee non-empty string
+		h := sha256.Sum256([]byte("get-hike-salt-" + password))
+		return fmt.Sprintf("%x", h)
+	}
+	return string(hash)
+}
+
+// legacySha256Password generates the older SHA-256 salted hash for backwards compatibility.
+func legacySha256Password(password string) string {
 	h := sha256.Sum256([]byte("get-hike-salt-" + password))
 	return fmt.Sprintf("%x", h)
+}
+
+// CheckPassword verifies a plaintext password against a stored hash (bcrypt or legacy SHA-256).
+// It returns (true, needsRehash) if matched, where needsRehash indicates an older hash to upgrade.
+func CheckPassword(storedHash, password string) (bool, bool) {
+	if strings.HasPrefix(storedHash, "$2a$") || strings.HasPrefix(storedHash, "$2b$") || strings.HasPrefix(storedHash, "$2y$") {
+		err := bcrypt.CompareHashAndPassword([]byte(storedHash), []byte(password))
+		return err == nil, false
+	}
+	// Fallback check against legacy SHA-256
+	if storedHash == legacySha256Password(password) {
+		return true, true
+	}
+	return false, false
+}
+
+// UpdateUserPassword updates the password hash for a specific user.
+func (db *DB) UpdateUserPassword(userID int64, newHash string) error {
+	builder := entsql.Dialect(db.dialect).Update("users").
+		Set("password_hash", newHash).
+		Where(entsql.EQ("id", userID))
+	query, args := builder.Query()
+	_, err := db.rawDB.Exec(query, args...)
+	return err
 }
 
 // CreateOrganization creates a new corporate entity using Ent SQL Builder.

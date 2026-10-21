@@ -4,6 +4,8 @@ import { getTodayUsageCount, bumpUsageCount, resetUsageCount } from '../utils';
 import { CustomSelect } from '../components/CustomSelect';
 import type { SelectOption } from '../components/CustomSelect';
 import { Icon } from '../components/Icon';
+import { StatCard } from '../components/StatCard';
+import { Alert } from '../components/Alert';
 
 interface AIModel {
   name: string;
@@ -79,25 +81,43 @@ export function SettingsPage({ theme = 'auto', onThemeChange, syncIntervalSecond
   }, [fetchUsageSummary]);
 
   const fetchAvailableModels = useCallback(async (key: string) => {
-    if (!key.trim()) return;
     setFetchingModels(true);
     try {
-      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${key.trim()}`);
-      if (res.ok) {
-        const data = await res.json();
-        if (data.models && Array.isArray(data.models)) {
-          const generateModels = data.models
-            .filter((m: any) => m.supportedGenerationMethods?.includes('generateContent'))
-            .map((m: any) => ({
+      if ((window as any).go?.main?.App) {
+        // In desktop mode, if key is empty we don't fetch
+        if (!key.trim()) return;
+        const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${key.trim()}`);
+        if (res.ok) {
+          const data = await res.json();
+          if (data.models && Array.isArray(data.models)) {
+            const generateModels = data.models
+              .filter((m: any) => m.supportedGenerationMethods?.includes('generateContent'))
+              .map((m: any) => ({
+                name: m.name,
+                displayName: m.displayName || m.name.replace('models/', ''),
+                description: m.description || '',
+                inputTokenLimit: m.inputTokenLimit || 0,
+                outputTokenLimit: m.outputTokenLimit || 0,
+              }));
+            setAvailableModels(generateModels);
+            setStatusMessage('✓ Dynamically loaded models from Google Gemini API');
+            setTimeout(() => setStatusMessage(null), 3000);
+          }
+        }
+      } else {
+        // In web mode, proxy through backend to prevent API key exposure
+        const res = await apiFetch('/api/ai/models');
+        if (res.ok) {
+          const data = await res.json();
+          if (data.models && Array.isArray(data.models)) {
+            setAvailableModels(data.models.map((m: any) => ({
               name: m.name,
               displayName: m.displayName || m.name.replace('models/', ''),
-              description: m.description || '',
-              inputTokenLimit: m.inputTokenLimit || 0,
-              outputTokenLimit: m.outputTokenLimit || 0,
-            }));
-          setAvailableModels(generateModels);
-          setStatusMessage('✓ Dynamically loaded models from Google Gemini API');
-          setTimeout(() => setStatusMessage(null), 3000);
+              description: '',
+              inputTokenLimit: 0,
+              outputTokenLimit: 0,
+            })));
+          }
         }
       }
     } catch {
@@ -108,10 +128,8 @@ export function SettingsPage({ theme = 'auto', onThemeChange, syncIntervalSecond
   }, []);
 
   useEffect(() => {
-    if (!apiKey.trim()) return;
-    const t = setTimeout(() => fetchAvailableModels(apiKey), 500);
-    return () => clearTimeout(t);
-  }, [apiKey, fetchAvailableModels]);
+    fetchAvailableModels(apiKey);
+  }, [fetchAvailableModels]);
 
   const [screenshotInterval, setScreenshotInterval] = useState<number>(() => {
     return parseInt(localStorage.getItem('mini_screenshot_interval') || '60', 10);
@@ -164,30 +182,59 @@ export function SettingsPage({ theme = 'auto', onThemeChange, syncIntervalSecond
   };
 
   const handleTestAPI = async () => {
-    if (!apiKey.trim()) {
-      setStatusMessage('Please enter an API Key first.');
-      return;
-    }
     if (testing) return;
     setTesting(true);
-    setStatusMessage('Testing connection and fetching models…');
-    await fetchAvailableModels(apiKey);
+    setStatusMessage('Testing connection and verifying models…');
     try {
-      const cleanModel = model.replace('models/', '');
-      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${cleanModel}:generateContent?key=${apiKey.trim()}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: 'Hello, respond with OK if working.' }] }]
-        })
-      });
-      if (res.ok) {
-        const newUsage = bumpUsageCount(1);
-        setUsageCount(newUsage);
-        setStatusMessage(`✓ Connected successfully to ${cleanModel}!`);
+      if ((window as any).go?.main?.App) {
+        if (!apiKey.trim()) {
+          setStatusMessage('Please enter an API Key first.');
+          setTesting(false);
+          return;
+        }
+        await fetchAvailableModels(apiKey);
+        const cleanModel = model.replace('models/', '');
+        const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${cleanModel}:generateContent?key=${apiKey.trim()}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: 'Hello, respond with OK if working.' }] }]
+          })
+        });
+        if (res.ok) {
+          const newUsage = bumpUsageCount(1);
+          setUsageCount(newUsage);
+          setStatusMessage(`✓ Connected successfully to ${cleanModel}!`);
+        } else {
+          const err = await res.json();
+          setStatusMessage(`✕ API Error: ${err.error?.message || 'Invalid key or model.'}`);
+        }
       } else {
-        const err = await res.json();
-        setStatusMessage(`✕ API Error: ${err.error?.message || 'Invalid key or model.'}`);
+        // Proxy through backend test route
+        const res = await apiFetch('/api/ai/test', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            api_key: apiKey.trim(),
+            model: model,
+          }),
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (data.models && Array.isArray(data.models)) {
+            setAvailableModels(data.models.map((m: any) => ({
+              name: m.name,
+              displayName: m.displayName || m.name.replace('models/', ''),
+              description: '',
+              inputTokenLimit: 0,
+              outputTokenLimit: 0,
+            })));
+          }
+          setStatusMessage(`✓ Server verified Gemini connection successfully!`);
+        } else {
+          const err = await res.json().catch(() => ({}));
+          setStatusMessage(`✕ API Error: ${err.error || 'Server failed to verify Gemini key.'}`);
+        }
       }
     } catch {
       setStatusMessage('✕ Connection failed. Check network or API key.');
@@ -427,26 +474,30 @@ export function SettingsPage({ theme = 'auto', onThemeChange, syncIntervalSecond
         </div>
         <div className="card-body">
           <div className="stats-grid" style={{ marginBottom: 14 }}>
-            <div className="stat-card">
-              <span className="stat-label">AI Requests Today</span>
-              <div className="stat-value text-purple" style={{ fontSize: 24 }}>{usageSummary?.total_requests ?? usageCount}</div>
-              <div className="stat-sub">Tracked API requests (resets daily)</div>
-            </div>
-            <div className="stat-card">
-              <span className="stat-label">Prompt Tokens</span>
-              <div className="stat-value text-cyan" style={{ fontSize: 24 }}>{(usageSummary?.prompt_tokens ?? 0).toLocaleString()}</div>
-              <div className="stat-sub">Input prompt tokens</div>
-            </div>
-            <div className="stat-card">
-              <span className="stat-label">Output Tokens</span>
-              <div className="stat-value text-amber" style={{ fontSize: 24 }}>{(usageSummary?.candidate_tokens ?? 0).toLocaleString()}</div>
-              <div className="stat-sub">AI output tokens</div>
-            </div>
-            <div className="stat-card">
-              <span className="stat-label">Total Tokens</span>
-              <div className="stat-value text-green" style={{ fontSize: 24 }}>{(usageSummary?.total_tokens ?? 0).toLocaleString()}</div>
-              <div className="stat-sub">Combined API tokens</div>
-            </div>
+            <StatCard
+              label="AI Requests Today"
+              value={usageSummary?.total_requests ?? usageCount}
+              valueClass="text-purple"
+              sub="Tracked API requests (resets daily)"
+            />
+            <StatCard
+              label="Prompt Tokens"
+              value={(usageSummary?.prompt_tokens ?? 0).toLocaleString()}
+              valueClass="text-cyan"
+              sub="Input prompt tokens"
+            />
+            <StatCard
+              label="Output Tokens"
+              value={(usageSummary?.candidate_tokens ?? 0).toLocaleString()}
+              valueClass="text-amber"
+              sub="AI output tokens"
+            />
+            <StatCard
+              label="Total Tokens"
+              value={(usageSummary?.total_tokens ?? 0).toLocaleString()}
+              valueClass="text-green"
+              sub="Combined API tokens"
+            />
           </div>
 
           <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>

@@ -178,7 +178,9 @@ const downloadJsonLd = {
 
             <div class="pt-3 sm:pt-4 border-t border-slate-800/80 space-y-2">
               <div class="text-[10px] sm:text-[11px] font-mono text-slate-400 truncate" title={item.filename}>
-                📁 {item.filename}
+                <svg class="w-3.5 h-3.5 inline-block -mt-0.5 mr-1" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z" />
+                </svg>{item.filename}
               </div>
               <a
                 href={item.extUrl}
@@ -205,7 +207,12 @@ const downloadJsonLd = {
 
       <div class="grid grid-cols-1 md:grid-cols-3 gap-4 sm:gap-6 text-sm text-slate-300">
         <div class="space-y-2">
-          <div class="font-bold text-emerald-400 font-mono text-xs sm:text-sm">🐧 Linux Desktop</div>
+          <div class="font-bold text-emerald-400 font-mono text-xs sm:text-sm flex items-center gap-1.5">
+            <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24" aria-hidden="true">
+              <polyline points="4 17 10 11 4 5" />
+              <line x1="12" y1="19" x2="20" y2="19" />
+            </svg>Linux Desktop
+          </div>
           <p class="text-xs text-slate-400 leading-relaxed">
             Make executable and run. The app embeds the frontend and automatically sets up local storage:
           </p>
@@ -214,7 +221,13 @@ const downloadJsonLd = {
         </div>
 
         <div class="space-y-2">
-          <div class="font-bold text-emerald-400 font-mono text-xs sm:text-sm">🪟 Windows Desktop</div>
+          <div class="font-bold text-emerald-400 font-mono text-xs sm:text-sm flex items-center gap-1.5">
+            <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24" aria-hidden="true">
+              <rect x="3" y="3" width="18" height="18" rx="2" />
+              <path d="M3 12h18" />
+              <path d="M12 3v18" />
+            </svg>Windows Desktop
+          </div>
           <p class="text-xs text-slate-400 leading-relaxed">
             Portable executable with zero dependencies:
           </p>
@@ -223,7 +236,12 @@ const downloadJsonLd = {
         </div>
 
         <div class="space-y-2">
-          <div class="font-bold text-emerald-400 font-mono text-xs sm:text-sm">🍏 macOS Desktop</div>
+          <div class="font-bold text-emerald-400 font-mono text-xs sm:text-sm flex items-center gap-1.5">
+            <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M12 20.94c1.5 0 2.75 1.06 4 1.06 3 0 6-8 6-12.22A4.91 4.91 0 0 0 17 5c-2.22 0-4 1.44-5 2-1-.56-2.78-2-5-2a4.9 4.9 0 0 0-5 4.78C2 14 5 22 8 22c1.25 0 2.5-1.06 4-1.06Z" />
+              <path d="M10 2c1 .5 2 2 2 5" />
+            </svg>macOS Desktop
+          </div>
           <p class="text-xs text-slate-400 leading-relaxed">
             Unzip the app bundle. If Gatekeeper flags the ad-hoc signature:
           </p>
@@ -234,7 +252,11 @@ const downloadJsonLd = {
       <!-- SHA Verification Note -->
       <div class="mt-4 sm:mt-6 pt-4 sm:pt-6 border-t border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 text-xs text-slate-400">
         <div class="flex items-center gap-2">
-          <span class="text-emerald-400 font-bold shrink-0">🔒 Integrity:</span>
+          <svg class="w-3.5 h-3.5 shrink-0" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24" aria-hidden="true">
+            <rect width="18" height="11" x="3" y="11" rx="2" ry="2" />
+            <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+          </svg>
+          <span class="text-emerald-400 font-bold shrink-0">Integrity:</span>
           <span class="break-words">Check release checksums via <code class="text-emerald-300 font-mono">checksums.txt</code> on GitHub.</span>
         </div>
         <a

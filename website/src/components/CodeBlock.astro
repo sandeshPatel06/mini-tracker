@@ -37,7 +37,7 @@ const uniqueId = `code-block-${Math.random().toString(36).substring(2, 9)}`;
       <button
         type="button"
         id={`${uniqueId}-btn`}
-        class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-slate-800/80 hover:bg-emerald-500/20 text-slate-300 hover:text-emerald-300 border border-slate-700/60 hover:border-emerald-500/40 transition-all duration-200 text-xs font-sans focus-visible:outline-2 focus-visible:outline-emerald-500"
+        class="relative inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-slate-800/80 hover:bg-emerald-500/20 text-slate-300 hover:text-emerald-300 border border-slate-700/60 hover:border-emerald-500/40 transition-all duration-200 text-xs font-sans focus-visible:outline-2 focus-visible:outline-emerald-500 before:content-[''] before:absolute before:-inset-y-2.5 before:-inset-x-2 before:rounded-md"
         aria-label="Copy to clipboard"
         title="Copy to clipboard"
       >

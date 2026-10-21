@@ -17,7 +17,7 @@ const currentPath = Astro.url.pathname;
 <template class="theme-toggle-template">
   <button
     type="button"
-    class="theme-toggle p-2.5 rounded-lg text-slate-300 hover:text-white hover:bg-slate-800/80 transition-colors duration-150 focus-visible:outline-2 focus-visible:outline-emerald-500"
+    class="theme-toggle flex size-11 items-center justify-center rounded-lg text-slate-300 hover:text-white hover:bg-slate-800/80 transition-colors duration-150 focus-visible:outline-2 focus-visible:outline-emerald-500"
     aria-label="Switch dark / light theme"
     title="Toggle dark / light theme"
   >
@@ -87,7 +87,7 @@ const currentPath = Astro.url.pathname;
           href={githubUrl}
           target="_blank"
           rel="noopener noreferrer"
-          class="p-2.5 rounded-lg text-slate-300 hover:text-white hover:bg-slate-800/80 transition-colors duration-150 focus-visible:outline-2 focus-visible:outline-emerald-500"
+          class="flex size-11 items-center justify-center rounded-lg text-slate-300 hover:text-white hover:bg-slate-800/80 transition-colors duration-150 focus-visible:outline-2 focus-visible:outline-emerald-500"
           aria-label="GitHub Repository"
           title="View on GitHub"
         >
@@ -114,7 +114,7 @@ const currentPath = Astro.url.pathname;
           href={githubUrl}
           target="_blank"
           rel="noopener noreferrer"
-          class="p-2 rounded-lg text-slate-300 hover:text-white"
+          class="flex size-11 items-center justify-center rounded-lg text-slate-300 hover:text-white"
           aria-label="GitHub"
         >
           <svg class="w-5 h-5 fill-current" viewBox="0 0 24 24">
@@ -125,7 +125,7 @@ const currentPath = Astro.url.pathname;
         <button
           type="button"
           id="mobile-menu-btn"
-          class="p-2.5 rounded-lg text-slate-300 hover:text-white hover:bg-slate-800/80 transition-colors focus-visible:outline-2 focus-visible:outline-emerald-500"
+          class="flex size-11 items-center justify-center rounded-lg text-slate-300 hover:text-white hover:bg-slate-800/80 transition-colors focus-visible:outline-2 focus-visible:outline-emerald-500"
           aria-expanded="false"
           aria-controls="mobile-menu"
           aria-label="Toggle navigation menu"

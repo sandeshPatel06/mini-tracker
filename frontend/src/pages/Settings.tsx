@@ -4,6 +4,8 @@ import { getTodayUsageCount, bumpUsageCount, resetUsageCount } from '../utils';
 import { CustomSelect } from '../components/CustomSelect';
 import type { SelectOption } from '../components/CustomSelect';
 import { Icon } from '../components/Icon';
+import { StatCard } from '../components/StatCard';
+import { Alert } from '../components/Alert';
 
 interface AIModel {
   name: string;
@@ -472,26 +474,30 @@ export function SettingsPage({ theme = 'auto', onThemeChange, syncIntervalSecond
         </div>
         <div className="card-body">
           <div className="stats-grid" style={{ marginBottom: 14 }}>
-            <div className="stat-card">
-              <span className="stat-label">AI Requests Today</span>
-              <div className="stat-value text-purple" style={{ fontSize: 24 }}>{usageSummary?.total_requests ?? usageCount}</div>
-              <div className="stat-sub">Tracked API requests (resets daily)</div>
-            </div>
-            <div className="stat-card">
-              <span className="stat-label">Prompt Tokens</span>
-              <div className="stat-value text-cyan" style={{ fontSize: 24 }}>{(usageSummary?.prompt_tokens ?? 0).toLocaleString()}</div>
-              <div className="stat-sub">Input prompt tokens</div>
-            </div>
-            <div className="stat-card">
-              <span className="stat-label">Output Tokens</span>
-              <div className="stat-value text-amber" style={{ fontSize: 24 }}>{(usageSummary?.candidate_tokens ?? 0).toLocaleString()}</div>
-              <div className="stat-sub">AI output tokens</div>
-            </div>
-            <div className="stat-card">
-              <span className="stat-label">Total Tokens</span>
-              <div className="stat-value text-green" style={{ fontSize: 24 }}>{(usageSummary?.total_tokens ?? 0).toLocaleString()}</div>
-              <div className="stat-sub">Combined API tokens</div>
-            </div>
+            <StatCard
+              label="AI Requests Today"
+              value={usageSummary?.total_requests ?? usageCount}
+              valueClass="text-purple"
+              sub="Tracked API requests (resets daily)"
+            />
+            <StatCard
+              label="Prompt Tokens"
+              value={(usageSummary?.prompt_tokens ?? 0).toLocaleString()}
+              valueClass="text-cyan"
+              sub="Input prompt tokens"
+            />
+            <StatCard
+              label="Output Tokens"
+              value={(usageSummary?.candidate_tokens ?? 0).toLocaleString()}
+              valueClass="text-amber"
+              sub="AI output tokens"
+            />
+            <StatCard
+              label="Total Tokens"
+              value={(usageSummary?.total_tokens ?? 0).toLocaleString()}
+              valueClass="text-green"
+              sub="Combined API tokens"
+            />
           </div>
 
           <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>

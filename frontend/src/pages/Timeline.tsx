@@ -7,6 +7,8 @@ import { Icon } from '../components/Icon';
 import { AppIcon } from '../components/AppIcon';
 import { AppFilterSelect } from '../components/AppFilterSelect';
 import { CustomSelect } from '../components/CustomSelect';
+import { EmptyState } from '../components/EmptyState';
+import { Alert } from '../components/Alert';
 import { canonicalAppName } from '../lib/appNames';
 import { localISODate, isPendingLog, FOCUS_OK } from '../utils';
 
@@ -195,10 +197,12 @@ export default function Timeline({ logs, loading, today, onDateChange, loadError
 
         <div className="card-body" style={{ padding: '12px 16px' }}>
           {loadError && logs.length > 0 && (
-            <div className="alert alert-error" role="alert" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 12 }}>
-              <span>{loadError}</span>
-              {onRetry && <button className="btn btn-secondary btn-sm" onClick={onRetry}>Retry</button>}
-            </div>
+            <Alert
+              type="error"
+              message={loadError}
+              onRetry={onRetry}
+              style={{ marginBottom: 12, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}
+            />
           )}
           {loading && logs.length === 0 ? (
             <div className="timeline-list">
@@ -215,25 +219,23 @@ export default function Timeline({ logs, loading, today, onDateChange, loadError
               ))}
             </div>
           ) : loadError && logs.length === 0 ? (
-            <div className="alert alert-error" role="alert" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
-              <span>{loadError}</span>
-              {onRetry && <button className="btn btn-secondary btn-sm" onClick={onRetry}>Retry</button>}
-            </div>
+            <Alert
+              type="error"
+              message={loadError}
+              onRetry={onRetry}
+              style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}
+            />
           ) : paginatedLogs.length === 0 ? (
-            <div className="empty-state">
-              <div className="empty-state-icon" style={{ display: 'flex', justifyContent: 'center', color: 'var(--text-muted)', marginBottom: 12 }}>
-                <Icon name="inbox" size={32} />
-              </div>
-              <div className="empty-state-title">
-                {hasActiveFilters ? 'No matching captures found' : 'No captures on this date'}
-              </div>
-              <div className="empty-state-desc">
-                {hasActiveFilters
+            <EmptyState
+              icon={<Icon name="inbox" size={32} />}
+              title={hasActiveFilters ? 'No matching captures found' : 'No captures on this date'}
+              description={
+                hasActiveFilters
                   ? 'Try adjusting or clearing your filters.'
-                  : 'The tracker may not have been running, or the backend is unreachable.'}
-              </div>
-              <div style={{ marginTop: 12 }}>
-                {hasActiveFilters ? (
+                  : 'The tracker may not have been running, or the backend is unreachable.'
+              }
+              action={
+                hasActiveFilters ? (
                   <button
                     className="btn btn-secondary btn-sm"
                     onClick={() => { setSearchQuery(''); setSelectedApp('ALL'); setSelectedCategory('ALL'); setCurrentPage(1); }}
@@ -242,9 +244,9 @@ export default function Timeline({ logs, loading, today, onDateChange, loadError
                   </button>
                 ) : today !== localISODate() ? (
                   <button className="btn btn-secondary btn-sm" onClick={() => onDateChange(localISODate())}>Go to today</button>
-                ) : null}
-              </div>
-            </div>
+                ) : undefined
+              }
+            />
           ) : (
             <div className="timeline-list">
               {paginatedLogs.map((log) => {

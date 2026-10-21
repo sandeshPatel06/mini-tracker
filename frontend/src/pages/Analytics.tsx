@@ -5,6 +5,9 @@ import { format } from 'date-fns';
 import { AppIcon } from '../components/AppIcon';
 import { canonicalAppName } from '../lib/appNames';
 import { CustomSelect } from '../components/CustomSelect';
+import { EmptyState } from '../components/EmptyState';
+import { Alert } from '../components/Alert';
+import { StatCard } from '../components/StatCard';
 import { Icon } from '../components/Icon';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
@@ -309,10 +312,12 @@ export default function Analytics({
       </div>
 
       {loadError && logs.length > 0 && (
-        <div className="alert alert-error" role="alert" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 16 }}>
-          <span>{loadError}</span>
-          {onRetry && <button className="btn btn-sm" onClick={onRetry}>Retry</button>}
-        </div>
+        <Alert
+          type="error"
+          message={loadError}
+          onRetry={onRetry}
+          style={{ marginBottom: 16, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}
+        />
       )}
       {loading && logs.length === 0 ? (
         <div className="card" style={{ padding: 32 }}>
@@ -320,47 +325,52 @@ export default function Analytics({
         </div>
       ) : loadError && logs.length === 0 ? (
         <div className="card">
-          <div className="alert alert-error" role="alert" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, margin: 16 }}>
-            <span>{loadError}</span>
-            {onRetry && <button className="btn btn-sm" onClick={onRetry}>Retry</button>}
-          </div>
+          <Alert
+            type="error"
+            message={loadError}
+            onRetry={onRetry}
+            style={{ margin: 16, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}
+          />
         </div>
       ) : logs.length === 0 ? (
         <div className="card">
-          <div className="empty-state">
-            <div className="empty-state-icon" style={{ fontSize: 32, marginBottom: 12 }}>📊</div>
-            <div className="empty-state-title">No analytics data recorded yet</div>
-            <div className="empty-state-desc">Analytics will populate automatically as background captures are analyzed.</div>
-          </div>
+          <EmptyState
+            icon={<span style={{ fontSize: 32, marginBottom: 12, display: 'inline-block' }}>📊</span>}
+            title="No analytics data recorded yet"
+            description="Analytics will populate automatically as background captures are analyzed."
+          />
         </div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
 
           {/* Top Summary Banner */}
           <div className="stats-grid">
-            <div className="stat-card">
-              <span className="stat-label">AI Focus Rating</span>
-              <div className="stat-value" style={{ fontSize: 24, color: analyzedLogs.length === 0 ? 'var(--text-muted)' : avgFocusScore >= FOCUS_GOOD ? 'var(--accent-green)' : avgFocusScore >= FOCUS_OK ? 'var(--accent-amber)' : 'var(--accent-red)', fontVariantNumeric: 'tabular-nums' }}>
-                {analyzedLogs.length === 0 ? '—' : `${avgFocusScore}%`}
-              </div>
-              <div className="stat-sub">{analyzedLogs.length} of {logs.length} captures evaluated</div>
-            </div>
+            <StatCard
+              label="AI Focus Rating"
+              value={analyzedLogs.length === 0 ? '—' : `${avgFocusScore}%`}
+              valueColor={
+                analyzedLogs.length === 0
+                  ? 'var(--text-muted)'
+                  : avgFocusScore >= FOCUS_GOOD
+                  ? 'var(--accent-green)'
+                  : avgFocusScore >= FOCUS_OK
+                  ? 'var(--accent-amber)'
+                  : 'var(--accent-red)'
+              }
+              sub={`${analyzedLogs.length} of ${logs.length} captures evaluated`}
+            />
 
-            <div className="stat-card">
-              <span className="stat-label">Active Work Duration</span>
-              <div className="stat-value" style={{ fontSize: 24, fontVariantNumeric: 'tabular-nums' }}>
-                {activeMinutes >= 60 ? `${(activeMinutes / 60).toFixed(1)} hrs` : `${Math.round(activeMinutes)} mins`}
-              </div>
-              <div className="stat-sub">Based on {logs.length} background telemetry points</div>
-            </div>
+            <StatCard
+              label="Active Work Duration"
+              value={activeMinutes >= 60 ? `${(activeMinutes / 60).toFixed(1)} hrs` : `${Math.round(activeMinutes)} mins`}
+              sub={`Based on ${logs.length} background telemetry points`}
+            />
 
-            <div className="stat-card">
-              <span className="stat-label">Avg Input Telemetry</span>
-              <div className="stat-value" style={{ fontSize: 24, fontVariantNumeric: 'tabular-nums' }}>
-                {logs.length > 0 ? Math.round(logs.reduce((acc, l) => acc + l.total_keys, 0) / logs.length) : 0} <span style={{ fontSize: 14, fontWeight: 500, color: 'var(--text-muted)' }}>keys / cap</span>
-              </div>
-              <div className="stat-sub">Average keystrokes per {intervalSec}s capture interval</div>
-            </div>
+            <StatCard
+              label="Avg Input Telemetry"
+              value={logs.length > 0 ? `${Math.round(logs.reduce((acc, l) => acc + l.total_keys, 0) / logs.length)} keys / cap` : '0 keys / cap'}
+              sub={`Average keystrokes per ${intervalSec}s capture interval`}
+            />
           </div>
 
           {/* Hourly Focus Score Chart */}

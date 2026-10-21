@@ -7,6 +7,9 @@ import { CategoryBadge } from '../components/CategoryBadge';
 import { ScreenshotThumb, ImageModal } from '../components/Screenshot';
 import { Icon } from '../components/Icon';
 import { AppIcon } from '../components/AppIcon';
+import { StatCard } from '../components/StatCard';
+import { EmptyState } from '../components/EmptyState';
+import { Alert } from '../components/Alert';
 import { canonicalAppName } from '../lib/appNames';
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, Cell } from 'recharts';
 import { localISODate, isPendingLog, buildLocalWorkSessions, FOCUS_GOOD, FOCUS_OK } from '../utils';
@@ -54,39 +57,6 @@ interface Props {
   onOpenSettings?: () => void;
   loadError?: string | null;
   onRetry?: () => void;
-}
-
-function StatCard({
-  label,
-  value,
-  valueTitle,
-  sub,
-  valueClass,
-  valueColor,
-  leading,
-}: {
-  label: string;
-  value: string | number;
-  valueTitle?: string;
-  sub?: string;
-  valueClass?: string;
-  valueColor?: string;
-  leading?: ReactNode;
-}) {
-  return (
-    <div className="stat-card">
-      <span className="stat-label">{label}</span>
-      <div
-        className={`stat-value${valueClass ? ` ${valueClass}` : ''}`}
-        title={valueTitle}
-        style={valueColor ? { color: valueColor } : undefined}
-      >
-        {leading}
-        <span className="stat-value-text">{value}</span>
-      </div>
-      {sub && <div className="stat-sub">{sub}</div>}
-    </div>
-  );
 }
 
 export default function Dashboard({ logs, stats, config, loading, today, onRefresh, onOpenSettings, loadError, onRetry }: Props) {
@@ -498,15 +468,11 @@ export default function Dashboard({ logs, stats, config, loading, today, onRefre
 
         <div className="card-body" style={{ padding: '12px 14px' }}>
           {recent.length === 0 ? (
-            <div className="empty-state">
-              <div className="empty-state-icon" style={{ display: 'flex', justifyContent: 'center', color: 'var(--text-muted)', marginBottom: 12 }}>
-                <Icon name="inbox" size={32} />
-              </div>
-              <div className="empty-state-title">No Activity Captured Yet</div>
-              <div className="empty-state-desc">
-                The tracking daemon will automatically log desktop screenshots and keystroke activity.
-              </div>
-            </div>
+            <EmptyState
+              icon={<Icon name="inbox" size={32} />}
+              title="No Activity Captured Yet"
+              description="The tracking daemon will automatically log desktop screenshots and keystroke activity."
+            />
           ) : (
             <div className="timeline-list">
               {recent.map((log) => {

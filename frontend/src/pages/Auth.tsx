@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { User, Organization } from '../types';
 import { apiFetch, buildApiUrl } from '../api';
+import { Alert } from '../components/Alert';
 import logoAsset from '../assets/logo.png';
 
 interface AuthProps {
@@ -288,7 +289,7 @@ export function AuthPage({ onAuthSuccess, onSkip, backendUnavailable = false, on
           </div>
 
           {/* Error Alert */}
-          {error && <div className="alert alert-error" role="alert">{error}</div>}
+          {error && <Alert type="error" message={error} style={{ marginBottom: 14 }} />}
 
           {/* Social SSO OAuth Buttons */}
           <div className="oauth-button-group">

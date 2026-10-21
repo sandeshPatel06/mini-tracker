@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { apiFetch } from '../api';
 import { User, Organization } from '../types';
+import { EmptyState } from '../components/EmptyState';
+import { Alert } from '../components/Alert';
 
 const parseJsonSafe = async (res: Response): Promise<any> => {
   const text = await res.text();
@@ -95,10 +97,10 @@ export const AcceptInvitePage: React.FC<AcceptInviteProps> = ({ token, onSuccess
 
   if (loading) {
     return (
-      <div className="empty-state">
-        <div className="skeleton" style={{ width: 40, height: 40, borderRadius: '50%' }} />
-        <div className="empty-state-title" style={{ marginTop: 12 }}>Loading invitation...</div>
-      </div>
+      <EmptyState
+        icon={<div className="skeleton" style={{ width: 40, height: 40, borderRadius: '50%', margin: '0 auto' }} />}
+        title="Loading invitation..."
+      />
     );
   }
 
@@ -110,7 +112,7 @@ export const AcceptInvitePage: React.FC<AcceptInviteProps> = ({ token, onSuccess
             <span className="card-title">⚠️ Invalid Invitation</span>
           </div>
           <div className="card-body">
-            <div className="alert alert-error">{error}</div>
+            <Alert type="error" message={error} style={{ marginBottom: 16 }} />
             <button
               onClick={() => window.location.hash = ''}
               className="btn btn-secondary w-full"
@@ -146,9 +148,7 @@ export const AcceptInvitePage: React.FC<AcceptInviteProps> = ({ token, onSuccess
           </div>
 
           {error && (
-            <div className="alert alert-error">
-              {error}
-            </div>
+            <Alert type="error" message={error} style={{ marginBottom: 14 }} />
           )}
 
           <form onSubmit={handleSubmit}>

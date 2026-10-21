@@ -11,7 +11,10 @@ import type { AcceptInviteResult } from './pages/AcceptInvite';
 import { AuthPage } from './pages/Auth';
 import { SettingsPage } from './pages/Settings';
 import { Icon, IconName } from './components/Icon';
-import { Modal } from './components/Modal';
+import { Sidebar } from './components/Sidebar';
+import { TaskGoalModal } from './components/TaskGoalModal';
+import { EmptyState } from './components/EmptyState';
+import { Alert } from './components/Alert';
 import { DevMenu } from './components/DevMenu';
 import { useDevMode } from './hooks/useDevMode';
 import { localISODate, isPendingLog, bumpUsageCount } from './utils';
@@ -1146,234 +1149,46 @@ export default function App() {
       <a href="#main-content" className="skip-link" style={{ position: 'absolute' }}>
         Skip to content
       </a>
-      {/* Mobile Header Bar */}
-      <header className="mobile-header">
-        <div className="mobile-header-brand" onClick={() => dev.registerTap()} style={{ cursor: 'default' }}>
-          <img src={logoAsset} alt="get-Hike Logo" className="app-brand-logo-img" style={{ width: 34, height: 34 }} />
-          <span className="sidebar-logo-text" style={{ fontSize: 14 }}>get-Hike</span>
-        </div>
-        <div className="mobile-header-actions">
-          <div style={{ fontFamily: 'monospace', fontSize: 13, fontWeight: 700, color: 'var(--teal-text)', fontVariantNumeric: 'tabular-nums' }}>
-            {formatTimer(elapsedSeconds)}
-          </div>
-          <button
-            className="mobile-menu-toggle"
-            onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
-            aria-label="Toggle Navigation Menu"
-            aria-expanded={isMobileMenuOpen}
-            aria-controls="sidebar"
-          >
-            {isMobileMenuOpen ? '✕' : '☰'}
-          </button>
-        </div>
-      </header>
 
-      {/* Sidebar Backdrop Overlay for Mobile */}
-      {isMobileMenuOpen && (
-        <div className="sidebar-backdrop" onClick={() => setIsMobileMenuOpen(false)} />
-      )}
-
-      {/* Sidebar */}
-      <aside className={`sidebar ${isMobileMenuOpen ? 'open' : ''}`} id="sidebar">
-        <div className="sidebar-logo" onClick={() => dev.registerTap()} style={{ cursor: 'default' }}>
-          <img src={logoAsset} alt="get-Hike Logo" className="app-brand-logo-img" style={{ width: 32, height: 32 }} />
-          <div>
-            <div className="sidebar-logo-text">get-Hike</div>
-            <div className="sidebar-logo-sub">Productivity</div>
-          </div>
-        </div>
-
-        {/* Work Clock & Tracking Control Widget */}
-        <div className="sidebar-widget">
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-            <span className="sidebar-widget-label">Work Session</span>
-            <span
-              style={{
-                fontSize: 11,
-                padding: '2px 6px',
-                borderRadius: 4,
-                fontWeight: 600,
-                background: isGuestMode ? 'color-mix(in srgb, var(--accent-purple) 15%, transparent)' : 'color-mix(in srgb, var(--accent-green) 15%, transparent)',
-                color: isGuestMode ? 'var(--accent-purple)' : 'var(--accent-primary-text)',
-                border: isGuestMode ? '1px solid color-mix(in srgb, var(--accent-purple) 30%, transparent)' : '1px solid color-mix(in srgb, var(--accent-green) 30%, transparent)',
-                whiteSpace: 'nowrap',
-              }}
-            >
-              {isGuestMode ? 'Offline Guest' : 'Synced'}
-            </span>
-          </div>
-          <div className="sidebar-widget-timer" style={{ fontVariantNumeric: 'tabular-nums' }}>
-            {formatTimer(elapsedSeconds)}
-          </div>
-          <button
-            onClick={handleToggleTracking}
-            className={`btn-tracker-toggle ${isTrackingActive ? 'active' : 'paused'}`}
-            style={{ marginBottom: 8 }}
-          >
-            <Icon name={isTrackingActive ? 'pause' : 'play'} size={14} />
-            <span>{isTrackingActive ? 'Pause Tracker' : 'Start Tracker'}</span>
-          </button>
-          {trackerError && (
-            <div
-              role="alert"
-              style={{
-                fontSize: 11,
-                padding: '6px 8px',
-                borderRadius: 'var(--radius-sm)',
-                background: 'color-mix(in srgb, var(--accent-red) 15%, transparent)',
-                border: '1px solid color-mix(in srgb, var(--accent-red) 35%, transparent)',
-                color: 'var(--danger-text)',
-                marginBottom: 8,
-                display: 'flex',
-                alignItems: 'center',
-                gap: 6,
-              }}
-            >
-              <Icon name="x" size={12} />
-              <span style={{ flex: 1 }}>{trackerError}</span>
-            </div>
-          )}
-          <button
-            onClick={() => {
-              setTaskInput(userTask);
-              setShowTaskModal(true);
-            }}
-            className={`btn-task-goal ${userTask ? 'active' : ''}`}
-            title={userTask || 'Set target task goal (max 20 words)'}
-          >
-            <Icon name="target" size={12} />
-            <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {userTask ? `Task: ${userTask}` : 'Set Target Task Goal'}
-            </span>
-          </button>
-          {!isGuestMode && (
-            <button
-              onClick={handleSyncNow}
-              disabled={isSyncing}
-              className={`btn-sync-now ${isSyncing ? 'syncing' : ''}`}
-            >
-              <Icon name="refresh" size={12} className={isSyncing ? 'spin' : ''} />
-              <span>{isSyncing ? 'Syncing...' : (syncMessage || 'Sync Now')}</span>
-            </button>
-          )}
-        </div>
-
-        <div className="sidebar-section-label">Navigation</div>
-        {navItems.map((item) => {
-          const active = page === item.id;
-          return (
-            <button
-              key={item.id}
-              id={`nav-${item.id}`}
-              type="button"
-              className={`nav-item ${active ? 'active' : ''}`}
-              onClick={() => navigateTo(item.id)}
-              aria-current={active ? 'page' : undefined}
-              style={{
-                background: active ? 'color-mix(in srgb, var(--accent-primary) 9%, transparent)' : 'none',
-                border: 'none',
-                borderLeft: active ? '3px solid var(--accent-primary)' : '3px solid transparent',
-                textAlign: 'left',
-                fontFamily: 'inherit',
-                cursor: 'pointer',
-              }}
-            >
-              <Icon name={item.iconName} size={16} className="nav-icon" />
-              <span className="nav-text">{item.label}</span>
-            </button>
-          );
-        })}
-
-        <div className="sidebar-footer">
-          {currentUser ? (
-            <div style={{ marginBottom: 12, paddingBottom: 10, borderBottom: '1px solid var(--border-subtle)' }}>
-              <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: 6 }}>
-                <Icon name="user" size={14} color="var(--text-secondary)" />
-                <span
-                  style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
-                  title={currentUser.full_name || currentUser.email}
-                >
-                  {currentUser.full_name || currentUser.email}
-                </span>
-              </div>
-              <div style={{ fontSize: 11, color: 'var(--text-muted)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 6 }}>
-                <span style={{ textTransform: 'capitalize' }}>Role: {currentUser.role}</span>
-                <button
-                  onClick={handleLogout}
-                  style={{
-                    background: 'transparent',
-                    border: 'none',
-                    color: 'var(--danger-text)',
-                    fontSize: 11,
-                    fontWeight: 600,
-                    cursor: 'pointer',
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: 4,
-                  }}
-                >
-                  <span>Logout</span>
-                  <Icon name="logout" size={12} />
-                </button>
-              </div>
-            </div>
-          ) : (
-            <div style={{ marginBottom: 10 }}>
-              <button
-                onClick={() => setIsGuestMode(false)}
-                className="btn btn-secondary btn-sm w-full"
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  gap: 6,
-                  fontSize: 12,
-                  marginBottom: 8,
-                }}
-              >
-                <Icon name="lock" size={13} />
-                <span>Sign In / Sign Up</span>
-              </button>
-            </div>
-          )}
-
-          {dev.enabled && (
-            <button
-              type="button"
-              className="dev-badge dev-badge-btn"
-              onClick={() => dev.setOpen(true)}
-              title="Open Developer Menu (Ctrl+Shift+D)"
-            >
-              DEV
-            </button>
-          )}
-
-          <div className="status-badge">
-            {(() => {
-              const isAIReady = aiKeyPresent || Boolean(config?.ai_configured) || Boolean(currentUser?.role === 'member');
-              return (
-                <>
-                  <div className={`status-dot ${isAIReady ? '' : 'inactive'}`} style={{ background: isAIReady ? 'var(--accent-teal)' : undefined, boxShadow: isAIReady ? '0 0 8px var(--accent-teal)' : undefined }} />
-                  <span style={{ color: 'var(--text-muted)', fontSize: 11 }}>
-                    {isAIReady ? 'AI Engine Ready' : 'AI Standby'}
-                  </span>
-                </>
-              );
-            })()}
-          </div>
-        </div>
-      </aside>
+      {/* Modular Sidebar Component */}
+      <Sidebar
+        page={page}
+        isMobileMenuOpen={isMobileMenuOpen}
+        setIsMobileMenuOpen={setIsMobileMenuOpen}
+        currentUser={currentUser}
+        isGuestMode={isGuestMode}
+        setIsGuestMode={setIsGuestMode}
+        elapsedSeconds={elapsedSeconds}
+        formatTimer={formatTimer}
+        isTrackingActive={isTrackingActive}
+        handleToggleTracking={handleToggleTracking}
+        trackerError={trackerError}
+        userTask={userTask}
+        onOpenTaskModal={() => {
+          setTaskInput(userTask);
+          setShowTaskModal(true);
+        }}
+        isSyncing={isSyncing}
+        syncMessage={syncMessage}
+        handleSyncNow={handleSyncNow}
+        navItems={navItems}
+        navigateTo={navigateTo}
+        handleLogout={handleLogout}
+        dev={dev}
+        aiKeyPresent={aiKeyPresent}
+        aiConfigured={config?.ai_configured}
+      />
 
       {/* Main content area */}
       <main className="main-content" id="main-content" tabIndex={-1} ref={mainRef}>
         <div className="page-container">
           {loadError && (
-            <div className="alert alert-error" role="alert">
-              <span>{loadError}</span>
-              <button type="button" className="btn btn-secondary btn-sm" onClick={retryLoad}>
-                Retry
-              </button>
-            </div>
+            <Alert
+              type="error"
+              message={loadError}
+              onRetry={retryLoad}
+              style={{ marginBottom: 16 }}
+            />
           )}
           {page === 'dashboard' && (
             <Dashboard
@@ -1431,17 +1246,19 @@ export default function App() {
           {page === 'organization' && (currentUser?.role === 'admin' || currentUser?.role === 'owner') ? (
             <OrganizationPage />
           ) : page === 'organization' ? (
-            <div className="empty-state">
-              <div className="empty-state-title">Organization settings unavailable</div>
-              <div className="empty-state-desc">
-                {isGuestMode
+            <EmptyState
+              title="Organization settings unavailable"
+              description={
+                isGuestMode
                   ? 'Organization and team management are available when logged in with an organization account.'
-                  : "Your account doesn't have permission to view this page. Contact your organization admin if you believe this is a mistake."}
-              </div>
-              <button type="button" className="btn btn-primary btn-sm" style={{ marginTop: 12 }} onClick={() => navigateTo('dashboard')}>
-                Back to Dashboard
-              </button>
-            </div>
+                  : "Your account doesn't have permission to view this page. Contact your organization admin if you believe this is a mistake."
+              }
+              action={
+                <button type="button" className="btn btn-primary btn-sm" onClick={() => navigateTo('dashboard')}>
+                  Back to Dashboard
+                </button>
+              }
+            />
           ) : null}
           {page === 'settings' && (currentUser?.role === 'admin' || currentUser?.role === 'owner' || isGuestMode) ? (
             <SettingsPage
@@ -1450,15 +1267,15 @@ export default function App() {
               syncIntervalSeconds={config?.screenshot_interval_seconds}
             />
           ) : page === 'settings' ? (
-            <div className="empty-state">
-              <div className="empty-state-title">You don't have access</div>
-              <div className="empty-state-desc">
-                Your account doesn't have permission to view this page. Contact your organization admin if you believe this is a mistake.
-              </div>
-              <button type="button" className="btn btn-primary btn-sm" style={{ marginTop: 12 }} onClick={() => navigateTo('dashboard')}>
-                Back to Dashboard
-              </button>
-            </div>
+            <EmptyState
+              title="You don't have access"
+              description="Your account doesn't have permission to view this page. Contact your organization admin if you believe this is a mistake."
+              action={
+                <button type="button" className="btn btn-primary btn-sm" onClick={() => navigateTo('dashboard')}>
+                  Back to Dashboard
+                </button>
+              }
+            />
           ) : null}
           {page === 'accept-invite' && (
             <AcceptInvitePage
@@ -1469,63 +1286,13 @@ export default function App() {
         </div>
       </main>
 
-      {/* Target Task Goal Modal Dialog */}
-      <Modal
+      {/* Target Task Goal Modal Dialog Component */}
+      <TaskGoalModal
         isOpen={showTaskModal}
         onClose={() => setShowTaskModal(false)}
-        title="Set Target Work Task"
-        maxWidth={460}
-        footer={
-          <>
-            <button
-              onClick={() => setShowTaskModal(false)}
-              className="btn btn-secondary btn-sm"
-            >
-              Cancel
-            </button>
-            <button
-              onClick={() => saveTask(taskInput)}
-              className="btn btn-primary btn-sm"
-            >
-              Save & Align AI Analytics
-            </button>
-          </>
-        }
-      >
-        <p style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 14, lineHeight: 1.5 }}>
-          Describe what you are currently working on. AI analytics will evaluate your screenshots, keypresses, and mouse activity specifically against this goal.
-        </p>
-
-        <textarea
-          autoFocus
-          rows={3}
-          className="form-input"
-          value={taskInput}
-          onChange={e => setTaskInput(e.target.value)}
-          placeholder="e.g. Fixing database migration bug and optimizing mouse event loop performance..."
-          style={{
-            resize: 'none',
-            marginBottom: 8,
-          }}
-        />
-
-        <div className="flex items-center justify-between mt-4" style={{ marginBottom: 4 }}>
-          <span style={{
-            fontSize: 11,
-            color: taskInput.trim().split(/\s+/).filter(Boolean).length > 20 ? 'var(--danger-text)' : 'var(--text-muted)'
-          }}>
-            Word count: {taskInput.trim().split(/\s+/).filter(Boolean).length} / 20 words max
-          </span>
-          {userTask && (
-            <button
-              onClick={() => saveTask('')}
-              style={{ background: 'none', border: 'none', color: 'var(--danger-text)', fontSize: 11, fontWeight: 600, cursor: 'pointer' }}
-            >
-              Clear Task
-            </button>
-          )}
-        </div>
-      </Modal>
+        currentTask={userTask}
+        onSave={(task) => saveTask(task)}
+      />
 
       {/* Dev mode tap-progress toast */}
       {devToastVisible && dev.tapProgress >= 4 && dev.tapProgress < 7 && (

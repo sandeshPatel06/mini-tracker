@@ -1,15 +1,12 @@
 name: Build and Release Binaries
 
+# Manual releases only: run from the Actions tab ("Run workflow" on main).
+# Nothing runs automatically on push or PR.
 on:
-  push:
-    branches:
-      - main
-  pull_request:
-    branches:
-      - main
+  workflow_dispatch:
 
 # Least privilege by default: build jobs never receive secrets or write
-# access. Only the release job (trusted main pushes) may publish.
+# access. Only the release job (manual dispatch) may publish.
 permissions:
   contents: read
 
@@ -214,7 +211,7 @@ jobs:
   release:
     name: Publish Release
     needs: build-gate
-    if: github.event_name == 'push'
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -232,7 +229,7 @@ jobs:
 
       - name: Attach logo and generate checksums
         run: |
-          cp -f build/appicon.png dist/get-hike-logo.png
+          cp -f frontend/src/assets/logo.png dist/get-hike-logo.png
           (cd dist && sha256sum * > checksums.txt)
           ls -lh dist
 
@@ -253,7 +250,7 @@ jobs:
 
           cat << EOF > release_notes.md
           <p align="center">
-            <img src="https://raw.githubusercontent.com/${{ github.repository }}/main/build/appicon.png" alt="get-Hike" width="150" />
+            <img src="https://raw.githubusercontent.com/${{ github.repository }}/main/frontend/src/assets/logo.png" alt="get-Hike" width="150" />
           </p>
 
           # get-Hike Release \`${TAG_NAME}\`

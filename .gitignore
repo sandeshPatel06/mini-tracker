@@ -15,10 +15,11 @@ secrets/
 
 # Binaries & build artifacts
 bin/
-build/bin/
+build/
 frontend/dist/
 dist/
 server
+mini-tracker
 mini-tracker-tmp
 *.deb
 
@@ -37,8 +38,6 @@ scratch/
 *.jpg
 *.jpeg
 !frontend/src/assets/logo.png
-!frontend/src/assets/images/*.png
-!build/appicon.png
 
 # Logs & temporary files
 *.log

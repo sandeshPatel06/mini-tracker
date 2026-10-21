@@ -451,11 +451,7 @@ rm -f "${PIXMAP_DIR}/mini-tracker.png" "${PIXMAP_DIR}/mini-tracker-server.png" \
 ICON_SOURCE=""
 for candidate in \
     "${SCRIPT_DIR}/frontend/src/assets/logo.png" \
-    "frontend/src/assets/logo.png" \
-    "${SCRIPT_DIR}/frontend/src/assets/images/logo-universal.png" \
-    "frontend/src/assets/images/logo-universal.png" \
-    "${SCRIPT_DIR}/build/appicon.png" \
-    "build/appicon.png"; do
+    "frontend/src/assets/logo.png"; do
     if [ -f "${candidate}" ]; then
         ICON_SOURCE="${candidate}"
         break

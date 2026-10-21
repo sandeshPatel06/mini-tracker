@@ -2,11 +2,11 @@
 import Button from './Button.astro';
 
 const navLinks = [
-  { label: 'Download', href: '/download' },
-  { label: 'Features', href: '/features' },
-  { label: 'Get started', href: '/get-started' },
-  { label: 'Privacy', href: '/privacy' },
-  { label: 'Changelog', href: '/changelog' },
+  { label: 'Download', href: '/mini-tracker/download' },
+  { label: 'Features', href: '/mini-tracker/features' },
+  { label: 'Get started', href: '/mini-tracker/get-started' },
+  { label: 'Privacy', href: '/mini-tracker/privacy' },
+  { label: 'Changelog', href: '/mini-tracker/changelog' },
 ];
 
 const githubUrl = 'https://github.com/sandeshPatel06/mini-tracker';
@@ -22,13 +22,13 @@ const currentPath = Astro.url.pathname;
       
       <!-- Logo -->
       <a
-        href="/"
+        href="/mini-tracker/"
         class="flex items-center gap-3 group focus-visible:outline-2 focus-visible:outline-emerald-500 rounded-lg p-1 -ml-1"
         aria-label="get-Hike Home"
       >
         <div class="w-9 h-9 rounded-xl bg-slate-900 border border-emerald-500/30 flex items-center justify-center p-1 shadow-md group-hover:border-emerald-400 group-hover:shadow-emerald-500/20 transition-all duration-200">
           <img
-            src="/app-logo.png"
+            src="/mini-tracker/app-logo.png"
             alt="get-Hike App Logo"
             class="w-7 h-7 object-contain group-hover:scale-105 transition-transform duration-200"
             width="28"
@@ -80,7 +80,7 @@ const currentPath = Astro.url.pathname;
         </a>
 
         <!-- Download CTA -->
-        <Button href="/download" variant="primary" size="sm">
+        <Button href="/mini-tracker/download" variant="primary" size="sm">
           Download
         </Button>
       </div>
@@ -160,7 +160,7 @@ const currentPath = Astro.url.pathname;
     </nav>
 
     <div class="pt-3 border-t border-slate-800/80 flex flex-col gap-2.5">
-      <Button href="/download" variant="primary" size="md" class="w-full text-center">
+      <Button href="/mini-tracker/download" variant="primary" size="md" class="w-full text-center">
         Download
       </Button>
       <Button

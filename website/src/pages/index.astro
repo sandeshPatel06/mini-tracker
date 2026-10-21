@@ -8,18 +8,20 @@ import FAQ from '../components/FAQ.astro';
 import CTASection from '../components/CTASection.astro';
 import CodeBlock from '../components/CodeBlock.astro';
 
+const getHikeUrl = 'https://sandeshpatel06.github.io/mini-tracker';
+
 const jsonLd = {
   '@context': 'https://schema.org',
   '@graph': [
     {
       '@type': 'SoftwareApplication',
-      '@id': 'https://get-hike.reakinfotech.com/#software',
+      '@id': 'https://sandeshpatel06.github.io/mini-tracker/#software',
       name: 'get-Hike',
       description: 'Privacy-first productivity tracking for Linux, Windows & macOS — open source, AI-assisted, optional teams.',
       operatingSystem: ['Linux', 'Windows', 'macOS'],
       applicationCategory: 'ProductivityApplication',
       license: 'https://opensource.org/licenses/MIT',
-      url: 'https://get-hike.reakinfotech.com',
+      url: 'https://sandeshpatel06.github.io/mini-tracker',
       downloadUrl: 'https://github.com/sandeshPatel06/mini-tracker/releases',
       softwareVersion: '1.0.0',
       offers: {
@@ -41,7 +43,7 @@ const jsonLd = {
     },
     {
       '@type': 'FAQPage',
-      '@id': 'https://get-hike.reakinfotech.com/#faq',
+      '@id': 'https://sandeshpatel06.github.io/mini-tracker/#faq',
       mainEntity: [
         {
           '@type': 'Question',
@@ -138,7 +140,7 @@ const githubUrl = 'https://github.com/sandeshPatel06/mini-tracker';
 
         <!-- CTAs -->
         <div class="flex flex-col sm:flex-row items-stretch sm:items-center justify-center gap-2.5 sm:gap-4 mb-8 sm:mb-10 w-full sm:w-auto">
-          <Button href="/download" variant="primary" size="lg" class="w-full sm:w-auto min-h-[48px]">
+          <Button href="/mini-tracker/download" variant="primary" size="lg" class="w-full sm:w-auto min-h-[48px]">
             <svg class="w-5 h-5 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
             </svg>
@@ -180,7 +182,7 @@ const githubUrl = 'https://github.com/sandeshPatel06/mini-tracker';
               <span class="w-2.5 h-2.5 rounded-full bg-red-500/70"></span>
               <span class="w-2.5 h-2.5 rounded-full bg-amber-500/70"></span>
               <span class="w-2.5 h-2.5 rounded-full bg-emerald-500/70"></span>
-              <img src="/app-logo.png" alt="get-Hike Desktop Icon" class="w-4 h-4 object-contain ml-1" width="16" height="16" />
+              <img src="/mini-tracker/app-logo.png" alt="get-Hike Desktop Icon" class="w-4 h-4 object-contain ml-1" width="16" height="16" />
               <span class="font-mono text-slate-300 font-semibold text-[11px] sm:text-xs">get-Hike Desktop</span>
             </div>
             <!-- Real App Tabs -->
@@ -368,7 +370,7 @@ const githubUrl = 'https://github.com/sandeshPatel06/mini-tracker';
 
       <div class="text-center mt-8 sm:mt-10">
         <a
-          href="/features"
+          href="/mini-tracker/features"
           class="inline-flex items-center gap-1.5 text-xs sm:text-sm font-semibold text-emerald-400 hover:text-emerald-300 transition-colors"
         >
           Explore deep architecture &amp; technical specs
@@ -453,10 +455,10 @@ const githubUrl = 'https://github.com/sandeshPatel06/mini-tracker';
           </div>
 
           <div class="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
-            <Button href="/privacy" variant="primary" size="md" class="w-full sm:w-auto min-h-[46px]">
+            <Button href="/mini-tracker/privacy" variant="primary" size="md" class="w-full sm:w-auto min-h-[46px]">
               Read full privacy policy
             </Button>
-            <Button href="/download" variant="outline" size="md" class="w-full sm:w-auto min-h-[46px]">
+            <Button href="/mini-tracker/download" variant="outline" size="md" class="w-full sm:w-auto min-h-[46px]">
               Download binaries
             </Button>
           </div>

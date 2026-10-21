@@ -55,11 +55,15 @@ export function AuthPage({ onAuthSuccess, onSkip, backendUnavailable = false, on
     }
   };
 
+  const [pollCount, setPollCount] = useState(0);
+
   const startAuthPolling = () => {
     if (pollTimerRef.current) clearInterval(pollTimerRef.current);
     pollCountRef.current = 0;
+    setPollCount(0);
     pollTimerRef.current = setInterval(async () => {
       pollCountRef.current += 1;
+      setPollCount(pollCountRef.current);
       if (pollCountRef.current > 40) {
         stopAuthPolling();
         setOauthLoading(null);
@@ -85,11 +89,34 @@ export function AuthPage({ onAuthSuccess, onSkip, backendUnavailable = false, on
   const cancelOAuth = () => {
     stopAuthPolling();
     setOauthLoading(null);
+    setPollCount(0);
   };
+
+  const getPasswordStrength = (pwd: string) => {
+    if (!pwd) return { score: 0, text: '', color: 'transparent' };
+    let score = 0;
+    if (pwd.length >= 8) score++;
+    if (pwd.length >= 12) score++;
+    if (/[A-Z]/.test(pwd) && /[a-z]/.test(pwd)) score++;
+    if (/[0-9]/.test(pwd)) score++;
+    if (/[^A-Za-z0-9]/.test(pwd)) score++;
+
+    if (score <= 2) return { score: 1, text: 'Weak (min 8 chars, mix numbers & letters recommended)', color: 'var(--accent-red)' };
+    if (score <= 3) return { score: 2, text: 'Medium', color: 'var(--accent-amber)' };
+    return { score: 3, text: 'Strong', color: 'var(--accent-green)' };
+  };
+
+  const passwordStrength = getPasswordStrength(password);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
+
+    if (!isLogin && password.length < 8) {
+      setError('Password must be at least 8 characters long.');
+      return;
+    }
+
     setLoading(true);
 
     const endpoint = isLogin ? '/api/auth/login' : '/api/org/register';
@@ -313,10 +340,20 @@ export function AuthPage({ onAuthSuccess, onSkip, backendUnavailable = false, on
           </div>
 
           {oauthLoading && (
-            <div style={{ textAlign: 'center', marginTop: 8 }}>
-              <button type="button" className="btn-link-guest" onClick={cancelOAuth} style={{ fontSize: 12 }}>
-                Cancel sign-in
-              </button>
+            <div style={{ textAlign: 'center', marginTop: 12, padding: '10px 14px', borderRadius: 'var(--radius-sm)', background: 'var(--bg-elevated)', border: '1px solid var(--border-subtle)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, fontSize: 13, color: 'var(--text-primary)', marginBottom: 6 }}>
+                <span className="spinner-sm" />
+                <span>Waiting for {oauthLoading === 'google' ? 'Google' : 'Azure'} sign-in...</span>
+              </div>
+              <div style={{ width: '100%', height: 4, background: 'var(--border-subtle)', borderRadius: 2, overflow: 'hidden', marginBottom: 6 }}>
+                <div style={{ width: `${Math.min(100, Math.round((pollCount / 40) * 100))}%`, height: '100%', background: 'var(--accent-primary)', transition: 'width 0.3s ease' }} />
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 11, color: 'var(--text-muted)' }}>
+                <span>Checking credentials ({pollCount}/40)</span>
+                <button type="button" className="btn-link-guest" onClick={cancelOAuth} style={{ fontSize: 11 }}>
+                  Cancel sign-in
+                </button>
+              </div>
             </div>
           )}
 
@@ -394,6 +431,16 @@ export function AuthPage({ onAuthSuccess, onSkip, backendUnavailable = false, on
                   {showPassword ? 'Hide' : 'Show'}
                 </button>
               </div>
+              {!isLogin && password && (
+                <div style={{ marginTop: 6, fontSize: 11, display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <div style={{ flex: '0 0 48px', height: 4, background: 'var(--border-subtle)', borderRadius: 2, overflow: 'hidden' }}>
+                    <div style={{ width: `${(passwordStrength.score / 3) * 100}%`, height: '100%', background: passwordStrength.color, transition: 'all 0.2s ease' }} />
+                  </div>
+                  <span style={{ color: passwordStrength.color, fontWeight: 500 }}>
+                    {passwordStrength.text}
+                  </span>
+                </div>
+              )}
             </div>
 
             <button

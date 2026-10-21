@@ -79,19 +79,10 @@ function StatCard({
       <div
         className={`stat-value${valueClass ? ` ${valueClass}` : ''}`}
         title={valueTitle}
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 8,
-          fontSize: 24,
-          fontVariantNumeric: 'tabular-nums',
-          overflow: 'hidden',
-          whiteSpace: 'nowrap',
-          color: valueColor,
-        }}
+        style={valueColor ? { color: valueColor } : undefined}
       >
         {leading}
-        <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>{value}</span>
+        <span className="stat-value-text">{value}</span>
       </div>
       {sub && <div className="stat-sub">{sub}</div>}
     </div>

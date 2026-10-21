@@ -377,8 +377,8 @@ export function ImageModal({ imagePath, onClose }: ImageModalProps) {
         onClick={handleZoomOut}
         disabled={zoomScale <= 0.5}
         className="btn btn-secondary btn-sm"
-        title="Zoom Out (-)"
-        aria-label="Zoom out"
+        title="Zoom Out (- or _)"
+        aria-label="Zoom out (-)"
         style={{ height: 28, padding: '0 8px', display: 'inline-flex', alignItems: 'center', opacity: zoomScale <= 0.5 ? 0.6 : undefined, cursor: zoomScale <= 0.5 ? 'not-allowed' : undefined }}
       >
         <Icon name="minus" size={14} />
@@ -386,8 +386,8 @@ export function ImageModal({ imagePath, onClose }: ImageModalProps) {
       <button
         onClick={handleResetZoom}
         className="btn btn-secondary btn-sm"
-        title="Reset Zoom (100%)"
-        aria-label="Reset zoom to 100%"
+        title="Reset Zoom (0 key)"
+        aria-label="Reset zoom to 100% (0 key)"
         style={{ height: 28, padding: '0 8px', fontSize: 11, fontFamily: 'monospace' }}
       >
         {Math.round(zoomScale * 100)}%
@@ -396,8 +396,8 @@ export function ImageModal({ imagePath, onClose }: ImageModalProps) {
         onClick={handleZoomIn}
         disabled={zoomScale >= 3}
         className="btn btn-secondary btn-sm"
-        title="Zoom In (+)"
-        aria-label="Zoom in"
+        title="Zoom In (+ or =)"
+        aria-label="Zoom in (+)"
         style={{ height: 28, padding: '0 8px', display: 'inline-flex', alignItems: 'center', opacity: zoomScale >= 3 ? 0.6 : undefined, cursor: zoomScale >= 3 ? 'not-allowed' : undefined }}
       >
         <Icon name="plus" size={14} />
@@ -419,7 +419,7 @@ export function ImageModal({ imagePath, onClose }: ImageModalProps) {
       footer={
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, width: '100%' }}>
           <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-            Press Esc to close · zoom via header buttons or +/-
+            Keyboard: <kbd className="kbd-shortcut">+</kbd>/<kbd className="kbd-shortcut">-</kbd> to zoom, <kbd className="kbd-shortcut">0</kbd> to reset, <kbd className="kbd-shortcut">Esc</kbd> to close
           </span>
           <button
             type="button"

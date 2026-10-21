@@ -67,9 +67,12 @@ export default function Timeline({ logs, loading, today, onDateChange, loadError
 
   const totalPages = Math.ceil(filteredLogs.length / pageSize) || 1;
 
-  // Reset to page 1 when the selected day changes
+  // Reset to page 1 and clear filters when the selected day changes
   useEffect(() => {
     setCurrentPage(1);
+    setSearchQuery('');
+    setSelectedApp('ALL');
+    setSelectedCategory('ALL');
   }, [today]);
 
   // Never leave the paginator on a page that no longer exists

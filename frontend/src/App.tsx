@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { LogEntry, ProductivityStats, AppConfig, Page, User } from './types';
 import { apiFetch, setRuntimeBackendUrl } from './api';
+import { useToast } from './context/ToastContext';
 import Dashboard from './pages/Dashboard';
 import Timeline from './pages/Timeline';
 import Analytics from './pages/Analytics';
@@ -47,8 +48,12 @@ declare const window: Window & {
 
 function callGo<T>(fn: () => Promise<T>): Promise<T | null> {
   try {
-    return fn().catch(() => null);
-  } catch {
+    return fn().catch((err) => {
+      console.warn('[Wails] Desktop binding call failed:', err);
+      return null;
+    });
+  } catch (err) {
+    console.warn('[Wails] Synchronous desktop binding exception:', err);
     return Promise.resolve(null);
   }
 }
@@ -303,6 +308,7 @@ Base every field strictly on the provided screenshot and metadata. Do NOT invent
 
 
 export default function App() {
+  const toast = useToast();
   const [page, setPage] = useState<Page>('dashboard');
   const [inviteToken, setInviteToken] = useState<string>('');
   const [today, setToday] = useState(() => localISODate());
@@ -596,6 +602,7 @@ export default function App() {
           setIsTrackingActive(!!res.active);
           setElapsedSeconds(res.elapsed_seconds || 0);
           setTrackerError(null);
+          toast.success(res.active ? 'Work tracker started' : 'Work tracker paused');
           return;
         }
       }
@@ -605,12 +612,17 @@ export default function App() {
         setIsTrackingActive(!!data.active);
         setElapsedSeconds(data.elapsed_seconds || 0);
         setTrackerError(null);
+        toast.success(data.active ? 'Work tracker started' : 'Work tracker paused');
       } else {
-        setTrackerError('Failed to update tracker status.');
+        const msg = 'Failed to update tracker status.';
+        setTrackerError(msg);
+        toast.error(msg);
         await refreshStatus();
       }
     } catch {
-      setTrackerError('Failed to update tracker status.');
+      const msg = 'Failed to update tracker status. Server might be offline.';
+      setTrackerError(msg);
+      toast.error(msg);
       await refreshStatus();
     }
   };
@@ -623,8 +635,17 @@ export default function App() {
     return `${pad(hrs)}:${pad(mins)}:${pad(secs)}`;
   };
 
-  // Hash-based routing handler for invitations & page routes
+  // Hash-based and query-param routing handler for invitations & page routes
   const checkHashRoute = useCallback(() => {
+    // Check standard query string first (e.g. ?invite=TOKEN or ?token=TOKEN or ?page=accept-invite)
+    const urlParams = new URLSearchParams(window.location.search);
+    const queryToken = urlParams.get('token') || urlParams.get('invite');
+    if (queryToken) {
+      setInviteToken(queryToken);
+      setPage('accept-invite');
+      return;
+    }
+
     const hash = window.location.hash;
     if (hash.includes('accept-invite')) {
       const match = hash.match(/token=([^&]+)/);
@@ -634,7 +655,8 @@ export default function App() {
       }
       return;
     }
-    const route = hash.replace(/^#\/?/, '');
+    const cleanHash = hash.split('?')[0]; // Strip any trailing query params attached to hash
+    const route = cleanHash.replace(/^#\/?/, '');
     if (route === 'dashboard' || route === 'timeline' || route === 'analytics' || route === 'settings' || route === 'organization') {
       setPage(route);
     } else if (route === '') {
@@ -755,15 +777,25 @@ export default function App() {
     } else {
       try {
         const [resLogs, resStats, resConfig] = await Promise.all([
-          apiFetch(`/api/logs?${dateParam}${userParam}`).then(r => r.ok ? r.json() : null).catch(() => null),
-          apiFetch(`/api/stats?${dateParam}${userParam}`).then(r => r.ok ? r.json() : null).catch(() => null),
-          apiFetch(`/api/config`).then(r => r.ok ? r.json() : null).catch(() => null),
+          apiFetch(`/api/logs?${dateParam}${userParam}`).then(r => {
+            if (!r.ok) throw new Error(`Logs failed with status ${r.status}`);
+            return r.json();
+          }),
+          apiFetch(`/api/stats?${dateParam}${userParam}`).then(r => {
+            if (!r.ok) throw new Error(`Stats failed with status ${r.status}`);
+            return r.json();
+          }),
+          apiFetch(`/api/config`).then(r => {
+            if (!r.ok) throw new Error(`Config failed with status ${r.status}`);
+            return r.json();
+          }),
         ]);
         logsData = resLogs;
         statsData = resStats;
         configData = resConfig;
-      } catch (err) {
-        console.warn('Backend server unavailable. Operating in Standalone Guest Mode:', err);
+      } catch (err: any) {
+        console.warn('Backend server request failed:', err);
+        setLoadError(err?.message || "Couldn't reach the tracker backend.");
       }
     }
 
@@ -780,32 +812,88 @@ export default function App() {
       setRuntimeBackendUrl(configData.backend_endpoint);
     }
 
-    const localApiKey = localStorage.getItem('mini_gemini_api_key');
-    setAiKeyPresent(!!localApiKey);
+    // Determine whether AI processing is available. In desktop mode it checks local key;
+    // in web mode it uses server-configured AI or personal key without exposing secrets to localStorage.
+    const isDesktop = !!window.go?.main?.App;
+    const localApiKey = isDesktop ? localStorage.getItem('mini_gemini_api_key') : null;
+    const serverAiConfigured = Boolean(configData?.ai_configured);
+    setAiKeyPresent(Boolean(localApiKey || serverAiConfigured));
     const rawModel = localStorage.getItem('mini_ai_model') || 'models/gemini-3.5-flash-lite';
     const localModel = rawModel.startsWith('models/') ? rawModel : `models/${rawModel}`;
     const intervalSec = configData?.screenshot_interval_seconds || 30;
 
-    if (localApiKey && logsData && logsData.length > 0) {
+    // In web mode, dispatch batch AI requests to server proxy /api/ai/analyze-batch
+    // In desktop mode, if local API key is provided, runClientVisionAnalysis
+    if (logsData && logsData.length > 0 && (localApiKey || (!isDesktop && serverAiConfigured))) {
       const candidateLogs = logsData
         .filter(isPendingLog)
         .filter((log) => !aiSubmittedLogIdsRef.current.has(log.id));
 
-      // Wait until at least 3 pending logs are accumulated before sending a batch request
       if (candidateLogs.length >= 3 && !aiAnalysisInFlightRef.current) {
         aiAnalysisInFlightRef.current = true;
-        void runClientVisionAnalysis({
-          candidateLogs,
-          apiKey: localApiKey,
-          model: localModel,
-          intervalSec,
-          userTask: stateRef.current.userTask as string,
-          submittedIds: aiSubmittedLogIdsRef.current,
-          resultCache: aiResultCacheRef.current,
-          setLogs,
-        }).finally(() => {
-          aiAnalysisInFlightRef.current = false;
-        });
+        if (!isDesktop) {
+          // Web mode: send log IDs to server proxy
+          const candidateBatch = candidateLogs.slice(0, 6);
+          const candidateIds = candidateBatch.map(c => c.id);
+          candidateIds.forEach(id => aiSubmittedLogIdsRef.current.add(id));
+
+          apiFetch('/api/ai/analyze-batch', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              log_ids: candidateIds,
+              user_task: stateRef.current.userTask as string,
+            }),
+          })
+            .then(async (res) => {
+              if (res.ok) {
+                const data = await res.json();
+                if (data.results && Array.isArray(data.results)) {
+                  // Only update state if the user hasn't switched views/dates since the batch started
+                  if (requestId === requestIdRef.current) {
+                    setLogs((prev) => prev.map((log) => {
+                      const match = data.results.find((r: any) => r.LogID === log.id);
+                      if (match) {
+                        return {
+                          ...log,
+                          ai_category: match.category,
+                          app_name: match.app_name || log.app_name,
+                          app_category: match.app_category || log.app_category,
+                          window_title: match.window_title || log.window_title,
+                          is_productive: match.productive,
+                          productive_score: match.productivity_score,
+                          ai_confidence: match.confidence,
+                          ai_reason: match.reason,
+                        };
+                      }
+                      return log;
+                    }));
+                  }
+                }
+              } else {
+                candidateIds.forEach(id => aiSubmittedLogIdsRef.current.delete(id));
+              }
+            })
+            .catch(() => {
+              candidateIds.forEach(id => aiSubmittedLogIdsRef.current.delete(id));
+            })
+            .finally(() => {
+              aiAnalysisInFlightRef.current = false;
+            });
+        } else if (localApiKey) {
+          void runClientVisionAnalysis({
+            candidateLogs,
+            apiKey: localApiKey,
+            model: localModel,
+            intervalSec,
+            userTask: stateRef.current.userTask as string,
+            submittedIds: aiSubmittedLogIdsRef.current,
+            resultCache: aiResultCacheRef.current,
+            setLogs,
+          }).finally(() => {
+            aiAnalysisInFlightRef.current = false;
+          });
+        }
       }
     }
 
@@ -950,9 +1038,11 @@ export default function App() {
     { id: 'dashboard', iconName: 'target', label: 'Dashboard' },
     { id: 'timeline',  iconName: 'clock', label: 'Timeline'  },
     { id: 'analytics', iconName: 'activity', label: 'Analytics' },
-    ...(currentUser?.role === 'admin' || currentUser?.role === 'owner' || isGuestMode ? [
+    ...(currentUser?.role === 'admin' || currentUser?.role === 'owner' ? [
       { id: 'organization' as Page, iconName: 'building' as IconName, label: 'Team / Org' },
       { id: 'settings' as Page, iconName: 'settings' as IconName, label: 'AI Settings' },
+    ] : isGuestMode ? [
+      { id: 'settings' as Page, iconName: 'settings' as IconName, label: 'Preferences' },
     ] : []),
   ];
 
@@ -1124,8 +1214,23 @@ export default function App() {
             <span>{isTrackingActive ? 'Pause Tracker' : 'Start Tracker'}</span>
           </button>
           {trackerError && (
-            <div role="alert" style={{ fontSize: 11, color: 'var(--danger-text)', marginBottom: 8 }}>
-              {trackerError}
+            <div
+              role="alert"
+              style={{
+                fontSize: 11,
+                padding: '6px 8px',
+                borderRadius: 'var(--radius-sm)',
+                background: 'color-mix(in srgb, var(--accent-red) 15%, transparent)',
+                border: '1px solid color-mix(in srgb, var(--accent-red) 35%, transparent)',
+                color: 'var(--danger-text)',
+                marginBottom: 8,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 6,
+              }}
+            >
+              <Icon name="x" size={12} />
+              <span style={{ flex: 1 }}>{trackerError}</span>
             </div>
           )}
           <button
@@ -1323,13 +1428,15 @@ export default function App() {
               onRetry={retryLoad}
             />
           )}
-          {page === 'organization' && (currentUser?.role === 'admin' || currentUser?.role === 'owner' || isGuestMode) ? (
+          {page === 'organization' && (currentUser?.role === 'admin' || currentUser?.role === 'owner') ? (
             <OrganizationPage />
           ) : page === 'organization' ? (
             <div className="empty-state">
-              <div className="empty-state-title">You don't have access</div>
+              <div className="empty-state-title">Organization settings unavailable</div>
               <div className="empty-state-desc">
-                Your account doesn't have permission to view this page. Contact your organization admin if you believe this is a mistake.
+                {isGuestMode
+                  ? 'Organization and team management are available when logged in with an organization account.'
+                  : "Your account doesn't have permission to view this page. Contact your organization admin if you believe this is a mistake."}
               </div>
               <button type="button" className="btn btn-primary btn-sm" style={{ marginTop: 12 }} onClick={() => navigateTo('dashboard')}>
                 Back to Dashboard

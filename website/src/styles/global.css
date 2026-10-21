@@ -168,4 +168,54 @@ html:not([data-theme]) .theme-moon-default { display: none; }
   scrollbar-color: rgba(5, 150, 105, 0.35) transparent;
 }
 
+/* Rendered GitHub release markdown (changelog page) — theme-aware */
+.release-notes {
+  @apply text-xs sm:text-sm text-slate-300 leading-relaxed space-y-3;
+}
+.release-notes > :first-child {
+  margin-top: 0;
+}
+.release-notes h2,
+.release-notes h3 {
+  @apply text-sm sm:text-base font-bold text-white mt-4 mb-2 tracking-tight;
+}
+.release-notes ul,
+.release-notes ol {
+  @apply space-y-1.5 pl-5 my-2;
+}
+.release-notes ul {
+  @apply list-disc;
+}
+.release-notes ol {
+  @apply list-decimal;
+}
+.release-notes li {
+  @apply pl-1;
+}
+.release-notes li::marker {
+  @apply text-emerald-400;
+}
+.release-notes code {
+  @apply font-mono text-[11px] sm:text-xs text-emerald-300 bg-slate-900/80 border border-slate-800 rounded px-1.5 py-0.5 break-all;
+}
+.release-notes pre {
+  @apply bg-slate-950 p-3 rounded-lg border border-slate-800 overflow-x-auto scrollbar-thin my-2;
+}
+.release-notes pre code {
+  @apply bg-transparent border-0 p-0 text-emerald-200 break-normal;
+}
+.release-notes a {
+  @apply text-emerald-400 hover:text-emerald-300 underline decoration-dotted underline-offset-2 break-all;
+}
+.release-notes strong {
+  @apply text-white font-semibold;
+}
+.release-notes blockquote {
+  @apply border-l-2 border-emerald-500/40 pl-3 text-slate-400 italic;
+}
+.release-notes hr {
+  @apply border-slate-800 my-4;
+}
+
+
 

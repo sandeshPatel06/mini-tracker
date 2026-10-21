@@ -206,6 +206,15 @@ export default function Dashboard({ logs, stats, config, loading, today, onRefre
     <div aria-busy={loading}>
       <ImageModal imagePath={selectedImage} onClose={() => setSelectedImage(null)} />
 
+      {loadError && (
+        <Alert
+          type="error"
+          message={loadError}
+          onRetry={onRetry}
+          style={{ marginBottom: 16 }}
+        />
+      )}
+
       {/* Header Bar */}
       <div className="page-header" style={{ marginBottom: 20 }}>
         <div style={{ minWidth: 0 }}>

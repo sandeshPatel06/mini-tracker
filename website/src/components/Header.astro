@@ -14,6 +14,23 @@ const releasesUrl = 'https://github.com/sandeshPatel06/mini-tracker/releases';
 const currentPath = Astro.url.pathname;
 ---
 
+<template class="theme-toggle-template">
+  <button
+    type="button"
+    class="theme-toggle p-2.5 rounded-lg text-slate-300 hover:text-white hover:bg-slate-800/80 transition-colors duration-150 focus-visible:outline-2 focus-visible:outline-emerald-500"
+    aria-label="Switch dark / light theme"
+    title="Toggle dark / light theme"
+  >
+    <svg class="icon-moon w-5 h-5" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24" aria-hidden="true">
+      <path stroke-linecap="round" stroke-linejoin="round" d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z" />
+    </svg>
+    <svg class="icon-sun w-5 h-5" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24" aria-hidden="true">
+      <circle cx="12" cy="12" r="4" />
+      <path stroke-linecap="round" d="M12 2v2m0 16v2M4.93 4.93l1.41 1.41m11.32 11.32l1.41 1.41M2 12h2m16 0h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41" />
+    </svg>
+  </button>
+</template>
+
 <header
   class="sticky top-0 z-50 w-full backdrop-blur-md bg-slate-950/80 border-b border-emerald-500/15 transition-colors duration-200"
 >
@@ -79,14 +96,20 @@ const currentPath = Astro.url.pathname;
           </svg>
         </a>
 
+        <!-- Theme Toggle -->
+        <span class="theme-slot hidden md:inline"></span>
+
         <!-- Download CTA -->
         <Button href="/mini-tracker/download" variant="primary" size="sm">
           Download
         </Button>
       </div>
 
-      <!-- Mobile Hamburger Button -->
+      <!-- Mobile cluster -->
       <div class="flex items-center gap-2 md:hidden">
+        <!-- Theme Toggle -->
+        <span class="theme-slot"></span>
+
         <a
           href={githubUrl}
           target="_blank"
@@ -218,5 +241,31 @@ const currentPath = Astro.url.pathname;
         toggleMenu(true);
       });
     });
+  }
+</script>
+
+<script>
+  const tpl = document.querySelector('template.theme-toggle-template');
+  const slots = document.querySelectorAll('.theme-slot');
+  if (tpl && slots.length) {
+    const applyAria = () => {
+      const t = document.documentElement.getAttribute('data-theme');
+      slots.forEach((s) => {
+        const btn = s.querySelector('.theme-toggle');
+        if (btn) btn.setAttribute('aria-pressed', String(t === 'light'));
+      });
+    };
+    slots.forEach((s) => {
+      s.appendChild(tpl.content.cloneNode(true));
+      s.querySelector('.theme-toggle').addEventListener('click', () => {
+        const next = document.documentElement.getAttribute('data-theme') === 'light' ? 'dark' : 'light';
+        document.documentElement.setAttribute('data-theme', next);
+        try { localStorage.setItem('gh-theme', next); } catch (_) {}
+        const meta = document.querySelector('meta[name="theme-color"]');
+        if (meta) meta.setAttribute('content', next === 'light' ? '#f4f8fa' : '#10b981');
+        applyAria();
+      });
+    });
+    applyAria();
   }
 </script>

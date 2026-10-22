@@ -1,4 +1,4 @@
-# 📍 get-Hike — Open-Source Productivity Tracker with AI Analysis
+# 📍 get-Hike: Open-Source Productivity Tracker with AI Analysis
 
 > A privacy-first, **open-source** productivity tracker for Linux with automated Gemini AI activity analysis, work-session tracking, and an **optional** multi-tenant team organization engine. Self-host it for personal tracking or roll it out across a team.
 
@@ -6,10 +6,10 @@
 
 ## 🆓 Open Source & Free for Personal Use
 
-get-Hike is free and open-source software released under the [MIT License](#-license). Anyone can use, modify, self-host and redistribute it — **personal use is explicitly welcome**.
+get-Hike is free and open-source software released under the [MIT License](#-license). Anyone can use, modify, self-host and redistribute it: **personal use is explicitly welcome**.
 
-- **Free for everyone**: no license fee, subscription or trial — use it for personal tracking at no cost.
-- **Solo mode built in**: run it as a private, local tracker in Guest Mode — no account, no organization, no cloud required.
+- **Free for everyone**: no license fee, subscription or trial: use it for personal tracking at no cost.
+- **Solo mode built in**: run it as a private, local tracker in Guest Mode: no account, no organization, no cloud required.
 - **Team features are optional**: OAuth 2.0, organizations, member invitations and team analytics are there only if you want them.
 - **Your data stays yours**: all data is stored locally in `~/.local/share/get-hike/` on your own machine.
 - **Hack on it**: MIT means you can fork it, change it, and share your version with others.
@@ -23,7 +23,7 @@ get-Hike is free and open-source software released under the [MIT License](#-lic
 - 🔐 **OAuth 2.0 & Multi-Tenant Organization Engine**: Corporate team management supporting Google OAuth 2.0, Azure AD / Microsoft OAuth 2.0, Email/Password login, Role-Based Access Control (Owner, Admin, Member), and time-sensitive secure invitation token links.
 - 📊 **Multi-User Analytics & Date Range Filtering**: Inspect productivity timelines, category distributions, and AI ratings across team members with multi-user dropdown filters and date range selection (`start_date`, `end_date`, `user_id`).
 - 🪟 **Floating OS Desk Widget (`/wizard`)**: Launch a lightweight, floating desktop widget window for session control and quick activity metrics without needing a full browser tab open.
-- 🔒 **Privacy-First Architecture**: Zero keylogging of typed characters—tracks raw key entropy score only. All screenshots and telemetry remain strictly local and are automatically pruned after processing.
+- 🔒 **Privacy-First Architecture**: Zero keylogging of typed characters: tracks raw key entropy score only. All screenshots and telemetry remain strictly local and are automatically pruned after processing.
 - ⚡ **Zero GTK/Desktop Dependencies**: Standalone Go binary serving an embedded React SPA, accessible from any browser without requiring root/sudo privileges.
 - ⚙️ **Automated Systemd Integration & One-Line Installer**: Clean `install.sh` / `uninstall.sh` script providing desktop launcher shortcuts (`get-hike`), systemd user service autostart, and smooth updates.
 
@@ -53,7 +53,7 @@ Mini Tracker / get-Hike Web Application (Port 8080)
 
 ## 🚀 Quickstart & Setup
 
-> **Personal / solo use:** no account and no organization needed — run the app locally in Guest Mode and everything stays on your machine. The team/org features below are completely optional.
+> **Personal / solo use:** no account and no organization needed: run the app locally in Guest Mode and everything stays on your machine. The team/org features below are completely optional.
 
 ### 1. One-Line Automatic Installation (Recommended)
 
@@ -151,34 +151,34 @@ Configuration file `~/.config/get-hike/config.json` example:
 ## 📡 API Reference
 
 ### 🔐 Authentication & OAuth
-- `POST /api/org/register` — Register new corporate organization & owner account
-- `POST /api/auth/login` — Email/password login session creation
-- `POST /api/auth/logout` — End active user session
-- `GET /api/auth/me` — Fetch currently authenticated user session info
-- `GET /api/auth/oauth/google` — Initiate Google OAuth 2.0 authentication
-- `GET /api/auth/oauth/azure` — Initiate Azure AD / Microsoft OAuth 2.0 authentication
+- `POST /api/org/register`: Register new corporate organization & owner account
+- `POST /api/auth/login`: Email/password login session creation
+- `POST /api/auth/logout`: End active user session
+- `GET /api/auth/me`: Fetch currently authenticated user session info
+- `GET /api/auth/oauth/google`: Initiate Google OAuth 2.0 authentication
+- `GET /api/auth/oauth/azure`: Initiate Azure AD / Microsoft OAuth 2.0 authentication
 
 ### ⏱️ Tracker & Desktop Wizard
-- `GET /api/tracker/status` — Get active session state and cumulative elapsed timer
-- `POST /api/tracker/toggle` — Start / pause work session tracking
-- `POST /api/tracker/input` — Submit application-level keystroke metrics
-- `GET /wizard` — Standalone floating desktop widget page
+- `GET /api/tracker/status`: Get active session state and cumulative elapsed timer
+- `POST /api/tracker/toggle`: Start / pause work session tracking
+- `POST /api/tracker/input`: Submit application-level keystroke metrics
+- `GET /wizard`: Standalone floating desktop widget page
 
 ### 📊 Logs & Analytics
-- `GET /api/logs?date=YYYY-MM-DD&start_date=...&end_date=...&user_id=...` — Retrieve activity logs with date range & user filters
-- `GET /api/stats?date=YYYY-MM-DD` — Retrieve aggregated productivity statistics
-- `GET /api/screenshots?path=...` — Retrieve cached screenshot asset
-- `POST /api/process-pending` — Manually trigger batch AI analysis of unanalyzed logs
+- `GET /api/logs?date=YYYY-MM-DD&start_date=...&end_date=...&user_id=...`: Retrieve activity logs with date range & user filters
+- `GET /api/stats?date=YYYY-MM-DD`: Retrieve aggregated productivity statistics
+- `GET /api/screenshots?path=...`: Retrieve cached screenshot asset
+- `POST /api/process-pending`: Manually trigger batch AI analysis of unanalyzed logs
 
 ### 🏢 Corporate Organization Management
-- `GET /api/org/members` — List organization members and roles
-- `POST /api/org/invite` — Generate secure, time-sensitive invite token link
-- `GET /api/org/invite-info?token=...` — Verify invitation token details
-- `POST /api/org/accept-invite` — Complete member account registration via invitation link
+- `GET /api/org/members`: List organization members and roles
+- `POST /api/org/invite`: Generate secure, time-sensitive invite token link
+- `GET /api/org/invite-info?token=...`: Verify invitation token details
+- `POST /api/org/accept-invite`: Complete member account registration via invitation link
 
 ### ⚙️ System & Settings
-- `GET /api/config` — Get system configuration & AI initialization status
-- `GET /health` — Health check endpoint
+- `GET /api/config`: Get system configuration & AI initialization status
+- `GET /health`: Health check endpoint
 
 ---
 

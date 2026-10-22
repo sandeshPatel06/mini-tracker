@@ -10,7 +10,7 @@ Unlike macOS (`.dmg`) or Windows (`.exe` / `.msi`), Linux distributions traditio
 
 ### Key Goals of a Linux Installer Script
 - **Zero-Friction Deployment**: Automate binary installation, dependency checks, directory creation, permissions, and desktop integration in a single command.
-- **Desktop Environment Integration**: Ensure the application appears seamlessly in system menus, docks, application launchers, and autostart routines across desktop environments (GNOME, KDE Plasma, XFCE, Cinnamon, MATE).
+- **Desktop Environment Integration**: Ensure the application integrates directly with system menus, docks, application launchers, and autostart routines across desktop environments (GNOME, KDE Plasma, XFCE, Cinnamon, MATE).
 - **Environment & Lifecycle Management**: Provision background daemons (`systemd`), default configuration files, data persistence directories, and clean uninstallation paths (`uninstall.sh`).
 - **Flexible Security Boundary**: Support both non-root user-space installations (`~/.local`) and system-wide administrative installations (`/usr/local`).
 

@@ -1,4 +1,4 @@
-# Gemini Batch API Migration — Draft Plan
+# Gemini Batch API Migration: Draft Plan
 
 **Status:** draft (not implemented) · **Date:** 2026-10-18 · **Constraint (hard):** free models only, paid never.
 
@@ -6,7 +6,7 @@
 
 - Runtime: `cmd/server` + Wails app dono.
 - Grouping: 10 logs per batch request (token amortization).
-- Images: include — 512px WebP q40 thumbnails, low media resolution.
+- Images: include (512px WebP q40 thumbnails, low media resolution).
 - Activation: auto-probe + auto-enable when free batch becomes available.
 - Free-only invariant: batch path only reaches free-model allowlist (`gemma-*`, free flash-lite); paid model names must be unreachable from any batch code path.
 
@@ -43,10 +43,10 @@ Local SQLite = durable source of truth. Remote batch job keeps running server-si
 
 ### Edited files
 
-- `internal/db/db.go` — migrate: `ai_batch_jobs`, `ai_batch_items` (SQLite + Postgres).
-- `internal/config/config.go` + `.env.example` + `config.yaml.example` — new options.
-- `cmd/server/main.go` — worker startup; interactive cron exclusion-aware.
-- `app.go` — same wiring (GUI and background daemon both run startup).
+- `internal/db/db.go`: migrate: `ai_batch_jobs`, `ai_batch_items` (SQLite + Postgres).
+- `internal/config/config.go` + `.env.example` + `config.yaml.example`: new options.
+- `cmd/server/main.go`: worker startup; interactive cron exclusion-aware.
+- `app.go`: same wiring (GUI and background daemon both run startup).
 
 ## DB Schema
 

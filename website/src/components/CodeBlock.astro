@@ -16,13 +16,13 @@ const {
 const uniqueId = `code-block-${Math.random().toString(36).substring(2, 9)}`;
 ---
 
-<div
-  class={`relative group rounded-xl bg-slate-950/95 border border-emerald-500/20 shadow-xl overflow-hidden font-mono text-xs sm:text-sm ${className}`}
+<figure
+  class={`relative group rounded-xl bg-slate-950 border border-emerald-500/20 shadow-xl overflow-hidden font-mono text-xs sm:text-sm ${className}`}
   role="region"
   aria-label={label}
 >
   <!-- Window Header with Copy Button -->
-  <div class="flex items-center justify-between px-3.5 py-2 bg-slate-900/90 border-b border-emerald-500/10 text-xs text-slate-400 select-none">
+  <header class="flex items-center justify-between px-3.5 py-2 bg-slate-900 border-b border-emerald-500/10 text-xs text-slate-400 select-none">
     <div class="flex items-center gap-2">
       <div class="flex items-center gap-1.5">
         <span class="w-2.5 h-2.5 rounded-full bg-red-500/70 inline-block"></span>
@@ -74,13 +74,13 @@ const uniqueId = `code-block-${Math.random().toString(36).substring(2, 9)}`;
         <span id={`${uniqueId}-btn-text`} class="text-[11px] font-medium">Copy</span>
       </button>
     </div>
-  </div>
+  </header>
 
   <!-- Content: wraps on mobile, horizontal scroll from sm up -->
   <div class="p-3.5 sm:p-4 overflow-x-auto scrollbar-thin">
     <pre class="m-0 text-slate-200 text-xs sm:text-sm leading-relaxed whitespace-pre-wrap break-all sm:whitespace-pre sm:break-normal font-mono"><span class="text-emerald-400 select-none">$ </span><code id={`${uniqueId}-code`}>{code}</code></pre>
   </div>
-</div>
+</figure>
 
 <script define:vars={{ uniqueId, code }}>
   const btn = document.getElementById(`${uniqueId}-btn`);

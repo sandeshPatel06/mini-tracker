@@ -36,13 +36,13 @@ const faqs: FAQItem[] = [
 ];
 ---
 
-<div class="max-w-3xl mx-auto divide-y divide-emerald-500/15" id="faq-accordion">
+<section class="max-w-3xl mx-auto divide-y divide-emerald-500/15" id="faq-accordion" aria-label="Accordion items">
   {faqs.map((faq, index) => {
     const questionId = `faq-q-${index}`;
     const answerId = `faq-a-${index}`;
 
     return (
-      <div class="py-5 group">
+      <article class="py-5 group">
         <button
           type="button"
           id={questionId}
@@ -70,10 +70,10 @@ const faqs: FAQItem[] = [
         >
           <p>{faq.answer}</p>
         </div>
-      </div>
+      </article>
     );
   })}
-</div>
+</section>
 
 <script>
   const accordion = document.getElementById('faq-accordion');

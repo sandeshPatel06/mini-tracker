@@ -4,7 +4,7 @@ import Button from './Button.astro';
 const navLinks = [
   { label: 'Download', href: '/mini-tracker/download' },
   { label: 'Features', href: '/mini-tracker/features' },
-  { label: 'Get started', href: '/mini-tracker/get-started' },
+  { label: 'Quick Start', href: '/mini-tracker/get-started' },
   { label: 'Privacy', href: '/mini-tracker/privacy' },
   { label: 'Changelog', href: '/mini-tracker/changelog' },
 ];
@@ -32,7 +32,7 @@ const currentPath = Astro.url.pathname;
 </template>
 
 <header
-  class="sticky top-0 z-50 w-full backdrop-blur-md bg-slate-950/80 border-b border-emerald-500/15 transition-colors duration-200"
+  class="sticky top-0 z-50 w-full bg-slate-950/95 border-b border-emerald-500/15 transition-colors duration-200"
 >
   <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
     <div class="flex items-center justify-between h-16 sm:h-20">
@@ -43,7 +43,7 @@ const currentPath = Astro.url.pathname;
         class="flex items-center gap-3 group focus-visible:outline-2 focus-visible:outline-emerald-500 rounded-lg p-1 -ml-1"
         aria-label="get-Hike Home"
       >
-        <div class="w-9 h-9 rounded-xl bg-slate-900 border border-emerald-500/30 flex items-center justify-center p-1 shadow-md group-hover:border-emerald-400 group-hover:shadow-emerald-500/20 transition-all duration-200">
+        <span class="w-9 h-9 rounded-xl bg-slate-900 border border-emerald-500/30 flex items-center justify-center p-1 shadow-md group-hover:border-emerald-400 group-hover:shadow-emerald-500/20 transition-all duration-200">
           <img
             src="/mini-tracker/app-logo.png"
             alt="get-Hike App Logo"
@@ -51,7 +51,7 @@ const currentPath = Astro.url.pathname;
             width="28"
             height="28"
           />
-        </div>
+        </span>
         <span class="text-xl font-bold tracking-tight text-white group-hover:text-emerald-400 transition-colors">
           get-Hike
         </span>
@@ -157,9 +157,9 @@ const currentPath = Astro.url.pathname;
   </div>
 
   <!-- Mobile Drawer / Menu -->
-  <div
+  <aside
     id="mobile-menu"
-    class="hidden md:hidden border-b border-emerald-500/20 bg-slate-950/95 backdrop-blur-xl px-4 pt-3 pb-6 space-y-3"
+    class="hidden md:hidden border-b border-emerald-500/20 bg-slate-950 px-4 pt-3 pb-6 space-y-3"
     role="dialog"
     aria-modal="true"
     aria-label="Mobile Navigation Menu"
@@ -182,7 +182,7 @@ const currentPath = Astro.url.pathname;
       })}
     </nav>
 
-    <div class="pt-3 border-t border-slate-800/80 flex flex-col gap-2.5">
+    <nav class="pt-3 border-t border-slate-800/80 flex flex-col gap-2.5">
       <Button href="/mini-tracker/download" variant="primary" size="md" class="w-full text-center">
         Download
       </Button>
@@ -196,7 +196,7 @@ const currentPath = Astro.url.pathname;
       >
         GitHub Releases &amp; Builds
       </Button>
-    </div>
+    </nav>
   </div>
 </header>
 

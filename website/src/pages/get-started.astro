@@ -7,16 +7,16 @@ const githubUrl = 'https://github.com/sandeshPatel06/mini-tracker';
 ---
 
 <BaseLayout
-  title="Get Started with get-Hike — Installation & Setup Guide"
+  title="Quick Start with get-Hike: Installation & Setup Guide"
   description="Step-by-step install guide for get-Hike on Linux. Prerequisites, one-line installer, manual build, systemd service, and troubleshooting."
 >
   <div class="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-8 sm:py-16">
     
     <!-- Header -->
-    <div class="mb-8 sm:mb-10 border-b border-emerald-500/15 pb-6 sm:pb-8">
-      <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-xs font-mono font-semibold mb-3 sm:mb-4">
+    <header class="mb-8 sm:mb-10 border-b border-emerald-500/15 pb-6 sm:pb-8">
+      <span class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-xs font-mono font-semibold mb-3 sm:mb-4">
         INSTALLATION &amp; SETUP GUIDE
-      </div>
+      </span>
       <h1 class="text-3xl sm:text-4xl lg:text-5xl font-extrabold text-white tracking-tight mb-3 sm:mb-4">
         Install get-Hike on Linux
       </h1>
@@ -25,7 +25,7 @@ const githubUrl = 'https://github.com/sandeshPatel06/mini-tracker';
       </p>
 
       <!-- Pre-built Binary Banner -->
-      <div class="p-3.5 sm:p-5 rounded-xl bg-emerald-950/30 border border-emerald-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4">
+      <aside class="p-3.5 sm:p-5 rounded-xl bg-emerald-950/30 border border-emerald-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4">
         <div class="space-y-1">
           <div class="text-sm font-bold text-white flex items-center gap-2">
             <span class="w-2 h-2 rounded-full bg-emerald-400"></span>
@@ -38,11 +38,11 @@ const githubUrl = 'https://github.com/sandeshPatel06/mini-tracker';
         <Button href="/mini-tracker/download" variant="primary" size="sm" class="shrink-0 w-full sm:w-auto">
           Go to Downloads
         </Button>
-      </div>
-    </div>
+      </aside>
+    </header>
 
     <!-- Quick Navigation Index -->
-    <div class="mb-8 sm:mb-12 p-3.5 sm:p-5 rounded-xl sm:rounded-2xl glass-card">
+    <nav class="mb-8 sm:mb-12 p-3.5 sm:p-5 rounded-xl sm:rounded-2xl glass-card" aria-label="Table of contents">
       <h2 class="text-xs sm:text-sm font-semibold uppercase tracking-wider text-emerald-400 font-mono mb-2.5 sm:mb-3">Table of Contents</h2>
       <ul class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2 text-xs sm:text-sm text-slate-300">
         <li><a href="#prerequisites" class="hover:text-emerald-300 transition-colors block py-1">1. Prerequisites</a></li>
@@ -52,7 +52,7 @@ const githubUrl = 'https://github.com/sandeshPatel06/mini-tracker';
         <li><a href="#systemd" class="hover:text-emerald-300 transition-colors block py-1">5. systemd User Service</a></li>
         <li><a href="#troubleshooting" class="hover:text-emerald-300 transition-colors block py-1">6. Troubleshooting</a></li>
       </ul>
-    </div>
+    </nav>
 
     <div class="space-y-8 sm:space-y-14">
       
@@ -67,18 +67,18 @@ const githubUrl = 'https://github.com/sandeshPatel06/mini-tracker';
         </p>
 
         <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
-          <div class="p-4 rounded-xl bg-slate-900/80 border border-slate-800">
-            <div class="font-mono text-emerald-400 font-semibold text-sm mb-1">Linux OS</div>
-            <div class="text-xs text-slate-400">Ubuntu 22.04+, Debian 12+, Fedora 38+, Arch Linux</div>
-          </div>
-          <div class="p-4 rounded-xl bg-slate-900/80 border border-slate-800">
-            <div class="font-mono text-emerald-400 font-semibold text-sm mb-1">Go Toolchain</div>
-            <div class="text-xs text-slate-400">Go 1.22+ required for backend daemon compilation</div>
-          </div>
-          <div class="p-4 rounded-xl bg-slate-900/80 border border-slate-800">
-            <div class="font-mono text-emerald-400 font-semibold text-sm mb-1">Node &amp; npm</div>
-            <div class="text-xs text-slate-400">Node 18+ for compiling the frontend UI bundle</div>
-          </div>
+          <article class="p-4 rounded-xl bg-slate-900 border border-slate-800">
+            <header class="font-mono text-emerald-400 font-semibold text-sm mb-1">Linux OS</header>
+            <p class="text-xs text-slate-400">Ubuntu 22.04+, Debian 12+, Fedora 38+, Arch Linux</p>
+          </article>
+          <article class="p-4 rounded-xl bg-slate-900 border border-slate-800">
+            <header class="font-mono text-emerald-400 font-semibold text-sm mb-1">Go Toolchain</header>
+            <p class="text-xs text-slate-400">Go 1.22+ required for backend daemon compilation</p>
+          </article>
+          <article class="p-4 rounded-xl bg-slate-900 border border-slate-800">
+            <header class="font-mono text-emerald-400 font-semibold text-sm mb-1">Node &amp; npm</header>
+            <p class="text-xs text-slate-400">Node 18+ for compiling the frontend UI bundle</p>
+          </article>
         </div>
 
         <p class="text-xs text-slate-400 break-words leading-relaxed">
@@ -110,7 +110,7 @@ const githubUrl = 'https://github.com/sandeshPatel06/mini-tracker';
           />
         </div>
 
-        <div class="mt-4 p-4 rounded-xl bg-emerald-950/20 border border-emerald-500/20 text-sm text-slate-300 space-y-1">
+        <aside class="mt-4 p-4 rounded-xl bg-emerald-950/20 border border-emerald-500/20 text-sm text-slate-300 space-y-1">
           <div class="font-semibold text-emerald-400">What the installer does:</div>
           <ul class="list-disc list-inside text-xs text-slate-400 space-y-1 pt-1">
             <li>Downloads the verified GitHub release binary for your architecture (or builds locally)</li>
@@ -118,7 +118,7 @@ const githubUrl = 'https://github.com/sandeshPatel06/mini-tracker';
             <li>Registers a desktop launcher icon in your Linux application menu</li>
             <li>Sets up a systemd user service autostart unit</li>
           </ul>
-        </div>
+        </aside>
       </section>
 
       <!-- Section 3: Manual Build -->
@@ -160,31 +160,31 @@ const githubUrl = 'https://github.com/sandeshPatel06/mini-tracker';
         </p>
 
         <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-          <div class="p-6 rounded-2xl bg-slate-900/80 border border-emerald-500/30">
-            <div class="text-emerald-400 font-bold text-base mb-2 flex items-center gap-2">
+          <article class="p-6 rounded-2xl bg-slate-900 border border-emerald-500/30">
+            <header class="text-emerald-400 font-bold text-base mb-2 flex items-center gap-2">
               <span class="w-2 h-2 rounded-full bg-emerald-400"></span>
               Guest Mode (Default &amp; Recommended)
-            </div>
+            </header>
             <p class="text-xs sm:text-sm text-slate-300 leading-relaxed mb-3">
               No account, login, or database server required. Launch the application, click "Continue as Guest", and start tracking immediately.
             </p>
             <div class="text-xs font-mono text-slate-400 bg-slate-950 p-2.5 rounded-lg border border-slate-800 break-all">
               Data saved: ~/.local/share/get-hike/
             </div>
-          </div>
+          </article>
 
-          <div class="p-6 rounded-2xl bg-slate-900/80 border border-slate-800">
-            <div class="text-slate-200 font-bold text-base mb-2 flex items-center gap-2">
+          <article class="p-6 rounded-2xl bg-slate-900 border border-slate-800">
+            <header class="text-slate-200 font-bold text-base mb-2 flex items-center gap-2">
               <span class="w-2 h-2 rounded-full bg-blue-400"></span>
               Team Mode (Optional)
-            </div>
+            </header>
             <p class="text-xs sm:text-sm text-slate-300 leading-relaxed mb-3">
               For teams requiring shared organization metrics. Configure <code class="text-slate-200 font-mono">config.yaml</code> with PostgreSQL, JWT secrets, and Google/Azure OAuth credentials.
             </p>
             <div class="text-xs font-mono text-slate-400 bg-slate-950 p-2.5 rounded-lg border border-slate-800 break-all">
               Server binary: ./server (port 8080)
             </div>
-          </div>
+          </article>
         </div>
       </section>
 
@@ -218,34 +218,34 @@ const githubUrl = 'https://github.com/sandeshPatel06/mini-tracker';
         </h2>
 
         <div class="space-y-4 text-sm text-slate-300">
-          <div class="p-4 rounded-xl bg-slate-900/60 border border-slate-800">
+          <article class="p-4 rounded-xl bg-slate-900 border border-slate-800">
             <h3 class="font-semibold text-white mb-1">Wayland capture permissions</h3>
             <p class="text-xs text-slate-400 leading-relaxed">
               Under Wayland (GNOME/KDE), your compositor may prompt you on the first capture to authorize screen streaming via PipeWire. Ensure <code class="font-mono text-emerald-300">xdg-desktop-portal</code> is installed and running.
             </p>
-          </div>
+          </article>
 
-          <div class="p-4 rounded-xl bg-slate-900/60 border border-slate-800">
+          <article class="p-4 rounded-xl bg-slate-900 border border-slate-800">
             <h3 class="font-semibold text-white mb-1">Port 8080 collision (Server Mode)</h3>
             <p class="text-xs text-slate-400 leading-relaxed">
               If running in server mode and port 8080 is already bound, edit <code class="font-mono text-emerald-300">config.yaml</code> or set <code class="font-mono text-emerald-300">PORT=8090</code> in your environment.
             </p>
-          </div>
+          </article>
 
-          <div class="p-4 rounded-xl bg-slate-900/60 border border-slate-800">
+          <article class="p-4 rounded-xl bg-slate-900 border border-slate-800">
             <h3 class="font-semibold text-white mb-1">Clean uninstallation</h3>
             <p class="text-xs text-slate-400 leading-relaxed mb-2">
               To remove get-Hike cleanly at any time:
             </p>
             <CodeBlock code="./uninstall.sh" label="Uninstall get-Hike" />
-          </div>
+          </article>
         </div>
       </section>
 
     </div>
 
     <!-- Bottom help banner -->
-    <div class="mt-12 sm:mt-16 p-5 sm:p-8 rounded-2xl glass-panel text-center">
+    <footer class="mt-12 sm:mt-16 p-5 sm:p-8 rounded-2xl glass-panel text-center">
       <h2 class="text-xl font-bold text-white mb-2">Need more assistance?</h2>
       <p class="text-sm text-slate-400 max-w-xl mx-auto mb-6">
         Check out the full repository README for comprehensive build tags, database migration scripts, and architecture docs.
@@ -258,7 +258,7 @@ const githubUrl = 'https://github.com/sandeshPatel06/mini-tracker';
           Review Privacy Policy
         </Button>
       </div>
-    </div>
+    </footer>
 
   </div>
 </BaseLayout>

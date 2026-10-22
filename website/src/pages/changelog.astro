@@ -44,23 +44,23 @@ const githubReleasesUrl = 'https://github.com/sandeshPatel06/mini-tracker/releas
 ---
 
 <BaseLayout
-  title="Changelog — get-Hike Product Updates"
+  title="Changelog: get-Hike Product Updates"
   description="All notable releases and updates to get-Hike: background tracking daemon, Gemini AI batch scoring, and Linux desktop integration."
 >
   <div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-8 sm:py-16">
     
     <!-- Header -->
-    <div class="border-b border-emerald-500/15 pb-6 sm:pb-8 mb-8 sm:mb-12">
-      <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-xs font-mono font-semibold mb-3 sm:mb-4">
+    <header class="border-b border-emerald-500/15 pb-6 sm:pb-8 mb-8 sm:mb-12">
+      <span class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-xs font-mono font-semibold mb-3 sm:mb-4">
         RELEASE NOTES
-      </div>
+      </span>
       <h1 class="text-3xl sm:text-4xl lg:text-5xl font-extrabold text-white tracking-tight mb-3 sm:mb-4">
         Product Changelog
       </h1>
       <p class="text-sm sm:text-lg text-slate-300 leading-relaxed max-w-2xl">
         Track progress, updates, and architectural enhancements shipped in get-Hike.
       </p>
-    </div>
+    </header>
 
     <!-- Release List -->
     <div class="space-y-6 sm:space-y-12">
@@ -95,7 +95,7 @@ const githubReleasesUrl = 'https://github.com/sandeshPatel06/mini-tracker/releas
     </div>
 
     <!-- GitHub Releases CTA -->
-    <div class="mt-8 sm:mt-14 text-center p-5 sm:p-8 rounded-xl sm:rounded-2xl border border-slate-800 bg-slate-900/60">
+    <footer class="mt-8 sm:mt-14 text-center p-5 sm:p-8 rounded-xl sm:rounded-2xl border border-slate-800 bg-slate-900/60">
       <h2 class="text-base sm:text-lg font-bold text-white mb-2">Want complete commit history?</h2>
       <p class="text-xs sm:text-sm text-slate-400 mb-5 sm:mb-6 max-w-md mx-auto">
         Every line of code and release tag is available publicly on our GitHub repository.
@@ -103,7 +103,7 @@ const githubReleasesUrl = 'https://github.com/sandeshPatel06/mini-tracker/releas
       <Button href={githubReleasesUrl} variant="primary" size="md" target="_blank" rel="noopener noreferrer" class="w-full sm:w-auto">
         View Releases on GitHub
       </Button>
-    </div>
+    </footer>
 
   </div>
 </BaseLayout>

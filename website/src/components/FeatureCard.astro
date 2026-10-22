@@ -9,14 +9,14 @@ interface Props {
 const { title, description, tag, iconName } = Astro.props;
 ---
 
-<div class="glass-card rounded-xl sm:rounded-2xl p-4 sm:p-7 relative group flex flex-col justify-between h-full overflow-hidden">
+<article class="glass-card rounded-xl sm:rounded-2xl p-4 sm:p-7 relative group flex flex-col justify-between h-full overflow-hidden">
   <!-- Glow accent top-right -->
-  <div class="absolute -top-12 -right-12 w-28 h-28 bg-emerald-500/10 rounded-full blur-2xl group-hover:bg-emerald-500/20 transition-all duration-300"></div>
+  <span class="absolute -top-12 -right-12 w-28 h-28 bg-emerald-500/10 rounded-full blur-2xl group-hover:bg-emerald-500/20 transition-all duration-300 pointer-events-none"></span>
 
   <div>
     <!-- Icon & Tag -->
-    <div class="flex items-center justify-between mb-3.5 sm:mb-5">
-      <div class="w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-slate-900 border border-emerald-500/30 flex items-center justify-center text-emerald-400 group-hover:border-emerald-400 group-hover:scale-105 transition-all duration-200">
+    <header class="flex items-center justify-between mb-3.5 sm:mb-5">
+      <span class="w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-slate-900 border border-emerald-500/30 flex items-center justify-center text-emerald-400 group-hover:border-emerald-400 group-hover:scale-105 transition-all duration-200">
         {iconName === 'timer' && (
           <svg class="w-5 h-5 sm:w-6 sm:h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <circle cx="12" cy="12" r="10" stroke-width="2" />
@@ -50,14 +50,14 @@ const { title, description, tag, iconName } = Astro.props;
             <line x1="12" y1="19" x2="20" y2="19" stroke-width="2" stroke-linecap="round" />
           </svg>
         )}
-      </div>
+      </span>
 
       {tag && (
         <span class="text-[11px] sm:text-xs font-medium px-2 py-0.5 sm:px-2.5 sm:py-1 rounded-full bg-slate-800 text-slate-300 border border-slate-700">
           {tag}
         </span>
       )}
-    </div>
+    </header>
 
     <!-- Title & Description -->
     <h3 class="text-base sm:text-lg font-bold text-white mb-1.5 sm:mb-2 group-hover:text-emerald-300 transition-colors">
@@ -67,4 +67,4 @@ const { title, description, tag, iconName } = Astro.props;
       {description}
     </p>
   </div>
-</div>
+</article>

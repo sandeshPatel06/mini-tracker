@@ -14,7 +14,7 @@ const features = [
     points: [
       'Pin or float anywhere on multi-monitor workspaces',
       'Instant session switching and status visualization',
-      'Zero heavy Electron memory bloat — lightweight native webview',
+      'Zero heavy Electron memory bloat: lightweight native webview',
       'Configurable hotkeys and notification triggers',
     ],
   },
@@ -25,7 +25,7 @@ const features = [
     lead: 'Smart productivity scoring without sending raw data to a third-party tracking SaaS.',
     description: 'get-Hike periodically evaluates 5-minute capture batches using your personal Google Gemini API key. Defaults to gemini-3.5-flash-lite with automated failover (gemini-flash-lite-latest, gemini-2.0-flash), explicit context caching, and intelligent idle-detection that skips unnecessary API calls.',
     points: [
-      'Bring Your Own Key (BYOK) — direct calls to Gemini API, zero proxy middleman',
+      'Bring Your Own Key (BYOK): direct calls to Gemini API, zero proxy middleman',
       'Batch evaluation every 5 minutes evaluates screenshots, active window & input',
       'Tasks categorized automatically (Coding, Review, Docs, System, Research)',
       '100% optional: runs fully offline as a private local tracker without a key',
@@ -52,7 +52,7 @@ const features = [
     description: 'Conventional employee surveillance software records every key typed, exposing credentials, confidential chats, and private code. get-Hike calculates Shannon entropy and input frequency from keyboard timings, coupled with mouse distance and click volume. You get realistic focus metrics without compromising a single password.',
     points: [
       'Calculates input cadence and irregularity score',
-      'Zero keystroke recording — typed characters never touch disk or memory buffers',
+      'Zero keystroke recording: typed characters never touch disk or memory buffers',
       'Mouse displacement and click metrics for activity confirmation',
       'Fully open source: inspect the Go input listener anytime',
     ],
@@ -87,7 +87,7 @@ const features = [
 ---
 
 <BaseLayout
-  title="Features — get-Hike Linux Productivity Tracker"
+  title="Features: get-Hike Linux Productivity Tracker"
   description="Explore get-Hike features: floating session widget, optional Gemini AI analysis, capture timeline, entropy telemetry, and systemd integration."
 >
   <!-- Page Header -->
@@ -101,7 +101,7 @@ const features = [
         </div>
         <h1 class="text-3xl sm:text-5xl font-extrabold text-white tracking-tight mb-4 sm:mb-6 leading-tight">
           Powerful productivity tools.<br />
-          <span class="text-transparent bg-clip-text bg-gradient-to-r from-emerald-400 to-teal-200">
+          <span class="text-emerald-400">
             Zero privacy compromises.
           </span>
         </h1>
@@ -125,19 +125,19 @@ const features = [
   <section class="py-10 sm:py-20 lg:py-24">
     <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-8 sm:space-y-16 lg:space-y-20">
       {features.map((feature, idx) => (
-        <div
+        <article
           id={feature.id}
-          class="scroll-mt-24 rounded-2xl sm:rounded-3xl border border-emerald-500/20 bg-slate-950/70 p-4 sm:p-10 lg:p-12 relative overflow-hidden"
+          class="scroll-mt-24 rounded-2xl sm:rounded-3xl border border-emerald-500/20 bg-slate-950 p-4 sm:p-10 lg:p-12 relative overflow-hidden"
         >
           <div class="grid grid-cols-1 lg:grid-cols-12 gap-6 lg:gap-8 items-start min-w-0">
             
             <div class="lg:col-span-7 space-y-4">
-              <div class="flex flex-wrap items-center gap-3 gap-y-1.5">
+              <header class="flex flex-wrap items-center gap-3 gap-y-1.5">
                 <span class="text-xs font-mono font-semibold px-2.5 py-1 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
                   {feature.badge}
                 </span>
                 <span class="text-xs font-mono text-slate-400">0{idx + 1} / 06</span>
-              </div>
+              </header>
 
               <h2 class="text-2xl sm:text-3xl font-extrabold text-white tracking-tight">
                 {feature.title}
@@ -151,7 +151,7 @@ const features = [
                 {feature.description}
               </p>
 
-              <div class="pt-4 border-t border-slate-800/80">
+              <section class="pt-4 border-t border-slate-800/80">
                 <h3 class="text-xs font-mono font-semibold uppercase tracking-wider text-slate-300 mb-3">
                   Technical Highlights
                 </h3>
@@ -163,15 +163,15 @@ const features = [
                     </li>
                   ))}
                 </ul>
-              </div>
+              </section>
             </div>
 
             <!-- Visual / Code side -->
-            <div class="lg:col-span-5 w-full bg-slate-900/80 border border-slate-800 rounded-2xl p-4 sm:p-5 font-mono text-xs text-slate-300 space-y-3 overflow-x-auto">
-              <div class="flex items-center justify-between pb-3 border-b border-slate-800 text-slate-400">
+            <figure class="lg:col-span-5 w-full bg-slate-900 border border-slate-800 rounded-2xl p-4 sm:p-5 font-mono text-xs text-slate-300 space-y-3 overflow-x-auto">
+              <figcaption class="flex items-center justify-between pb-3 border-b border-slate-800 text-slate-400">
                 <span>module: {feature.id}</span>
                 <span class="text-emerald-400">active</span>
-              </div>
+              </figcaption>
 
               {feature.id === 'entropy-telemetry' ? (
                 <div class="space-y-2 py-2 break-all sm:break-normal">
@@ -202,10 +202,10 @@ const features = [
                   <div class="text-emerald-400">cloud_sync  = false (offline by default)</div>
                 </div>
               )}
-            </div>
+            </figure>
 
           </div>
-        </div>
+        </article>
       ))}
     </div>
   </section>

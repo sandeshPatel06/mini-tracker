@@ -673,7 +673,7 @@ export default function App() {
       'accept-invite': 'Accept Invitation',
       auth: 'Sign In',
     };
-    document.title = `${titles[page]} — get-Hike`;
+    document.title = `${titles[page]} | get-Hike`;
     const main = mainRef.current;
     if (main) {
       main.scrollTop = 0;
